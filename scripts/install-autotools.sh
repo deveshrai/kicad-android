@@ -27,6 +27,7 @@ build autoconf 2.72 tar.xz
 build automake 1.18.1 tar.xz
 build libtool 2.5.4 tar.xz
 build autoconf-archive 2024.10.16 tar.xz
+build bison 3.8.2 tar.xz
 build pkgconf 2.3.0 tar.xz https://distfiles.ariadne.space/pkgconf
 ln -sf pkgconf "$PREFIX/bin/pkg-config"
 

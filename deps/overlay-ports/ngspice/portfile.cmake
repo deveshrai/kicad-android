@@ -13,6 +13,12 @@ vcpkg_from_git(
     REF ebdaf58ec76a06ffaac7e0f138360dd1cf5ee4b6
 )
 
+# Android has pthreads in libc and no libpthread, so AC_CHECK_LIB fails and ngspice falls
+# back to Win32 locking.  Search libc first and define HAVE_LIBPTHREAD when found.
+vcpkg_replace_string("${SOURCE_PATH}/configure.ac"
+    "AC_CHECK_LIB([pthread], [pthread_create])"
+    "AC_SEARCH_LIBS([pthread_create], [pthread], [AC_DEFINE([HAVE_LIBPTHREAD], [1], [Define if pthreads are available])])")
+
 vcpkg_find_acquire_program(BISON)
 get_filename_component(BISON_DIR "${BISON}" DIRECTORY)
 vcpkg_add_to_path(PREPEND "${BISON_DIR}")
