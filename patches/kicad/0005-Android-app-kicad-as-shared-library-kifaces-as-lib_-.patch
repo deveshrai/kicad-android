@@ -1,0 +1,305 @@
+From a1eb130c46107ec387d1eefffb87e289a38af504 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 20:23:50 +0530
+Subject: [PATCH 5/5] Android app: kicad as shared library, kifaces as lib_*.so
+ found via dladdr, stock data extracted from APK assets
+
+Assisted-by: Claude Code
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ CMakeLists.txt                             |  11 +-
+ common/kiway.cpp                           |  18 ++-
+ kicad/CMakeLists.txt                       |  28 +++-
+ libs/kiplatform/os/android/environment.cpp | 150 +++++++++++++++++++--
+ 4 files changed, 184 insertions(+), 23 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ef8be63b..a1fb5acb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -651,7 +651,10 @@ endif()
+ # KIFACE_SUFFIX is the file extension used for top level program modules which
+ # implement the KIFACE interface.  A valid suffix starts with a period '.'.
+ 
+-if( WIN32 )
++if( ANDROID )
++    # APKs only package and extract native libraries named lib*.so
++    set( KIFACE_SUFFIX  ".so" )
++elseif( WIN32 )
+     # We use .kiface extension so we don't collide with python DSO. (Linux/mac issue?)
+     # Windows works fine with the native dll extension
+     # which also resolves metadata issues because windows wants to see the dll extension
+@@ -663,7 +666,11 @@ endif()
+ 
+ # KIFACE_PREFIX is a basename prefix used for top level program modules which
+ # implement the KIFACE.
+-set( KIFACE_PREFIX  "_" )
++if( ANDROID )
++    set( KIFACE_PREFIX  "lib_" )
++else()
++    set( KIFACE_PREFIX  "_" )
++endif()
+ #message( STATUS "KIFACE_SUFFIX:${KIFACE_SUFFIX}  KIFACE_PREFIX:${KIFACE_PREFIX}" )
+ 
+ 
+diff --git a/common/kiway.cpp b/common/kiway.cpp
+index 1e9f222a..7a0d588b 100644
+--- a/common/kiway.cpp
++++ b/common/kiway.cpp
+@@ -38,6 +38,15 @@
+ #include <local_history.h>
+ 
+ #include <wx/dynlib.h>
++
++#ifdef __ANDROID__
++#include <dlfcn.h>
++
++/// Any function in this library: its address tells dladdr() which file we were loaded from
++static void kiwayLibraryAnchor()
++{
++}
++#endif
+ #include <wx/stdpaths.h>
+ #include <wx/debug.h>
+ #include <wx/utils.h>
+@@ -126,7 +135,14 @@ const wxString KIWAY::dso_search_path( FACE_T aFaceId )
+         return wxEmptyString;
+     }
+ 
+-#ifndef __WXMAC__
++#if defined( __ANDROID__ )
++    // The process executable is the Android runtime (app_process), so locate the kifaces
++    // relative to this library instead.  They are packaged beside it in the APK's native
++    // library directory, which may be a path inside the APK ("base.apk!/lib/<abi>").
++    Dl_info dlInfo = {};
++    dladdr( reinterpret_cast<void*>( &kiwayLibraryAnchor ), &dlInfo );
++    wxFileName fn( dlInfo.dli_fname ? wxString::FromUTF8( dlInfo.dli_fname ) : wxString() );
++#elif !defined( __WXMAC__ )
+     wxString path;
+ 
+     if( m_ctl & (KFCTL_STANDALONE | KFCTL_CPP_PROJECT_SUITE) )
+diff --git a/kicad/CMakeLists.txt b/kicad/CMakeLists.txt
+index 00f53d6a..d01ace1d 100644
+--- a/kicad/CMakeLists.txt
++++ b/kicad/CMakeLists.txt
+@@ -138,12 +138,28 @@ if( APPLE )
+     set( MACOSX_BUNDLE_NAME kicad )
+ endif()
+ 
+-add_executable( kicad WIN32 MACOSX_BUNDLE
+-    kicad.cpp
+-    ${KICAD_SRCS}
+-    ${KICAD_EXTRA_SRCS}
+-    ${KICAD_RESOURCES}
+-    )
++if( ANDROID )
++    # Qt's Android activity dlopen()s the application and calls its main(); bionic cannot
++    # dlopen an executable, so build a shared library named as Qt expects.
++    add_library( kicad SHARED
++        kicad.cpp
++        ${KICAD_SRCS}
++        ${KICAD_EXTRA_SRCS}
++        )
++
++    set_target_properties( kicad PROPERTIES OUTPUT_NAME "kicad_${ANDROID_ABI}" )
++
++    # Qt looks up main() with dlsym(); wxIMPLEMENT_APP defines it in kicad.cpp, so give that
++    # file default visibility instead of the project-wide -fvisibility=hidden
++    set_source_files_properties( kicad.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=default" )
++else()
++    add_executable( kicad WIN32 MACOSX_BUNDLE
++        kicad.cpp
++        ${KICAD_SRCS}
++        ${KICAD_EXTRA_SRCS}
++        ${KICAD_RESOURCES}
++        )
++endif()
+ 
+ add_executable( kicad-cli WIN32
+     kicad_cli.cpp
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index 8c7b051e..783cc7a7 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -28,32 +28,33 @@
+ #include <wx/filename.h>
+ #include <wx/utils.h>
+ 
++#include <QCoreApplication>
+ #include <QDir>
++#include <QJniEnvironment>
++#include <QJniObject>
+ #include <QStandardPaths>
+ 
+-#include <dlfcn.h>
++#include <android/asset_manager.h>
++#include <android/asset_manager_jni.h>
++
++#include <cstdio>
++#include <sstream>
++#include <string>
++
+ #include <jni.h>
+ 
+ 
+ namespace
+ {
+ /**
+- * QStandardPaths on Android asks the Java Context for its directories, which crashes in a
+- * process without a Java VM, e.g. kicad-cli started from a shell.  Detect the VM through
+- * JNI_GetCreatedJavaVMs, which is only resolvable once the runtime is loaded.
++ * QStandardPaths and the Android Context need a Java VM, which a process started from a shell
++ * (kicad-cli) does not have.  Qt records the VM when its Java side starts the app, so ask it.
++ * (JNI_GetCreatedJavaVMs is not reliable here: it is not visible from the app's linker
++ * namespace.)
+  */
+ bool hasJavaVM()
+ {
+-    using GET_VMS = jint ( * )( JavaVM**, jsize, jsize* );
+-    static const bool s_hasVM = []()
+-    {
+-        auto getVMs = reinterpret_cast<GET_VMS>( dlsym( RTLD_DEFAULT, "JNI_GetCreatedJavaVMs" ) );
+-        JavaVM* vm = nullptr;
+-        jsize   count = 0;
+-        return getVMs && getVMs( &vm, 1, &count ) == JNI_OK && count > 0;
+-    }();
+-
+-    return s_hasVM;
++    return QJniEnvironment::javaVM() != nullptr;
+ }
+ 
+ 
+@@ -87,8 +88,129 @@ wxString standardPath( QStandardPaths::StandardLocation aLocation, const wxStrin
+ } // namespace
+ 
+ 
++namespace
++{
++/// Copies one APK asset to a file, creating parent directories.
++bool copyAsset( AAssetManager* aMgr, const std::string& aAsset, const std::string& aDest )
++{
++    AAsset* asset = AAssetManager_open( aMgr, aAsset.c_str(), AASSET_MODE_STREAMING );
++
++    if( !asset )
++        return false;
++
++    wxFileName::Mkdir( wxFileName( wxString::FromUTF8( aDest ) ).GetPath(), wxS_DIR_DEFAULT,
++                       wxPATH_MKDIR_FULL );
++
++    bool  ok = false;
++    FILE* out = fopen( aDest.c_str(), "wb" );
++
++    if( out )
++    {
++        char buf[65536];
++        int  n = 0;
++        ok = true;
++
++        while( ( n = AAsset_read( asset, buf, sizeof( buf ) ) ) > 0 )
++            ok &= fwrite( buf, 1, n, out ) == static_cast<size_t>( n );
++
++        ok &= fclose( out ) == 0 && n == 0;
++    }
++
++    AAsset_close( asset );
++    return ok;
++}
++
++
++/// Reads a small text asset, or returns an empty string.
++std::string readAsset( AAssetManager* aMgr, const char* aAsset )
++{
++    std::string text;
++
++    if( AAsset* asset = AAssetManager_open( aMgr, aAsset, AASSET_MODE_BUFFER ) )
++    {
++        text.assign( static_cast<const char*>( AAsset_getBuffer( asset ) ), AAsset_getLength( asset ) );
++        AAsset_close( asset );
++    }
++
++    return text;
++}
++
++
++/**
++ * KiCad reads its stock data (schemas, templates, drawing sheets, ...) from a directory.  The
++ * APK carries it as assets under kicad-data/, with FILES.txt listing every file (the NDK cannot
++ * list asset subdirectories) and VERSION identifying the build.  Extract it to app storage
++ * when the stamp differs from the last extraction.
++ */
++wxString extractStockData()
++{
++    QJniObject ctx = QNativeInterface::QAndroidApplication::context();
++
++    if( !ctx.isValid() )
++        return wxEmptyString;
++
++    QJniObject  filesDir = ctx.callObjectMethod( "getFilesDir", "()Ljava/io/File;" );
++    QString     filesPath = filesDir.callObjectMethod( "getAbsolutePath", "()Ljava/lang/String;" )
++                                    .toString();
++    QJniObject  assets = ctx.callObjectMethod( "getAssets", "()Landroid/content/res/AssetManager;" );
++    QJniEnvironment env;
++    AAssetManager*  mgr = AAssetManager_fromJava( env.jniEnv(), assets.object() );
++
++    if( !mgr || filesPath.isEmpty() )
++        return wxEmptyString;
++
++    const std::string root = filesPath.toStdString() + "/kicad-data";
++    const std::string version = readAsset( mgr, "kicad-data/VERSION" );
++    const std::string stampFile = root + "/.extracted";
++
++    std::string installed;
++
++    if( FILE* f = fopen( stampFile.c_str(), "rb" ) )
++    {
++        char buf[256] = {};
++        installed.assign( buf, fread( buf, 1, sizeof( buf ) - 1, f ) );
++        fclose( f );
++    }
++
++    if( version.empty() || installed != version )
++    {
++        std::istringstream list( readAsset( mgr, "kicad-data/FILES.txt" ) );
++        std::string        rel;
++        bool               ok = true;
++
++        while( std::getline( list, rel ) )
++        {
++            if( !rel.empty() )
++                // Assets carry a ".kad" suffix so aapt leaves them untouched (it would
++                // decompress *.gz); see scripts/build-kicad-apk.sh
++                ok &= copyAsset( mgr, "kicad-data/" + rel + ".kad", root + "/" + rel );
++        }
++
++        if( ok && !version.empty() )
++        {
++            if( FILE* f = fopen( stampFile.c_str(), "wb" ) )
++            {
++                fwrite( version.data(), 1, version.size(), f );
++                fclose( f );
++            }
++        }
++    }
++
++    return wxString::FromUTF8( root ) + wxT( "/kicad" );
++}
++} // namespace
++
++
+ void KIPLATFORM::ENV::Init()
+ {
++    // Without a Java VM (kicad-cli from a shell) the caller provides KICAD_STOCK_DATA_HOME
++    if( !hasJavaVM() || wxGetEnv( wxT( "KICAD_STOCK_DATA_HOME" ), nullptr ) )
++        return;
++
++    wxString stockData = extractStockData();
++
++    if( !stockData.IsEmpty() )
++        wxSetEnv( wxT( "KICAD_STOCK_DATA_HOME" ), stockData );
+ }
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+

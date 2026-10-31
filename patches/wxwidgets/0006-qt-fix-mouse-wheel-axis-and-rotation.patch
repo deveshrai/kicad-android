@@ -1,7 +1,7 @@
 From b5fc9793b2d0311e579d8692f0e38b653f0fb417 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 19:16:20 +0530
-Subject: [PATCH 6/6] qt: fix mouse wheel axis and rotation
+Subject: [PATCH 6/7] qt: fix mouse wheel axis and rotation
 
 Scrolling down was reported as a horizontal wheel event with zero rotation,
 because the axis test only accepted positive vertical deltas. The rotation

@@ -1,7 +1,7 @@
 From d70176d5fe330ebc3f110b766a92dc9829590f9c Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 19:54:30 +0530
-Subject: [PATCH 4/4] Android: FreeType include layout, JVM-aware kiplatform
+Subject: [PATCH 4/5] Android: FreeType include layout, JVM-aware kiplatform
  paths
 
 Assisted-by: Claude Code

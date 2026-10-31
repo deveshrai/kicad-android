@@ -1,0 +1,32 @@
+From 041ce2291d467691000dbbc18717ecfd4ce28701 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 20:23:49 +0530
+Subject: [PATCH 7/7] qt: don't crash drawing an invalid bitmap
+
+wxQtDCImpl::DoDrawBitmap() dereferenced the bitmap's QPixmap without checking
+the bitmap first; invalid bitmaps (e.g. from toolbar items without an image)
+crashed in QPixmap's copy constructor. Refuse them as other ports do.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/dc.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qt/dc.cpp b/src/qt/dc.cpp
+index f170215..a012b07 100644
+--- a/src/qt/dc.cpp
++++ b/src/qt/dc.cpp
+@@ -760,6 +760,9 @@ void wxQtDCImpl::DoDrawIcon(const wxIcon& icon, wxCoord x, wxCoord y)
+ void wxQtDCImpl::DoDrawBitmap(const wxBitmap &bmp, wxCoord x, wxCoord y,
+                           bool useMask )
+ {
++    // An invalid bitmap has no QPixmap; other ports also refuse to draw one
++    wxCHECK_RET( bmp.IsOk(), "invalid bitmap in wxQtDCImpl::DrawBitmap" );
++
+     QPixmap pix = *bmp.GetHandle();
+ 
+     if ( GetLayoutDirection() == wxLayout_RightToLeft )
+-- 
+2.54.0 (Apple Git-157)
+
