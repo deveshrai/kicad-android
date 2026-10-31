@@ -1,0 +1,35 @@
+From 632d2ec8cc74ed628f923148a46edda99ef92c84 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 21:11:56 +0530
+Subject: [PATCH 7/7] Android: use the Cairo GAL directly instead of failing
+ through Modern and OpenGL
+
+Assisted-by: Claude Code
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/draw_panel_gal.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/common/draw_panel_gal.cpp b/common/draw_panel_gal.cpp
+index ad7e73d4..af861b0c 100644
+--- a/common/draw_panel_gal.cpp
++++ b/common/draw_panel_gal.cpp
+@@ -1388,6 +1388,14 @@ EDA_DRAW_PANEL_GAL::GAL_TYPE EDA_DRAW_PANEL_GAL::ResolveStoredCanvasType( int aS
+ 
+ bool EDA_DRAW_PANEL_GAL::SwitchBackend( GAL_TYPE aGalType )
+ {
++#ifdef __ANDROID__
++    // Android has no desktop OpenGL, and the Modern (Vulkan) GAL has no Android surface yet
++    // (KIPLATFORM::UI::GetNativeWindowHandles).  Use Cairo directly instead of failing through
++    // both and showing a fallback message in every editor.
++    if( aGalType == GAL_TYPE_OPENGL || aGalType == GAL_TYPE_MODERN )
++        aGalType = GAL_TYPE_CAIRO;
++#endif
++
+     // Do not do anything if the currently used GAL is correct
+     if( aGalType == m_backend && m_gal != nullptr )
+         return true;
+-- 
+2.54.0 (Apple Git-157)
+

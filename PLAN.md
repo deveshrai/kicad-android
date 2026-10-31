@@ -123,9 +123,15 @@ Build lessons (all handled in scripts/patches):
       message), `docs/pcbnew-android-first-board.png`. KBM verified on the canvas: click-select a
       footprint (properties panel fills), Escape deselect, wheel zoom at cursor, PgDn active layer,
       Home zoom-fit; Ctrl+O + typed path + Enter opens a project.
-- [ ] Faster emulator: `KA_AVD_API=35 scripts/emulator.sh` (host GPU)
+- [x] Faster emulator: API 35 AVD with host GPU is the default (`scripts/emulator.sh`); app shows in
+      ~1.4 s, pcbnew opens a board in <10 s
+- [x] Editing verified (API 35, KBM): select U1, `M`, click to place (179.07,109.22 -> 223,124.5 mm),
+      Ctrl+Z restores, Redo enabled
+- Testing notes: push projects into app storage with `run-as` (files pushed into Android/data
+  before the app's first run belong to shell and are unreadable); disable the on-screen keyboard
+  with `settings put secure show_ime_with_hard_keyboard 0`
 - [ ] Modern GAL (Vulkan) on Android: VK_KHR_android_surface from the canvas QWindow
-- [ ] Startup: skip the "Could not use OpenGL" message on Android (default to Cairo/Modern)
+- [x] Android goes straight to Cairo (no failed Modern/OpenGL attempt, no message)
 - [ ] Polish: dialogs open small/unframed; tree icon overlap in the project panel; frames should
       default to full screen; Ctrl/Alt char codes; right/middle buttons need a real mouse test
 - [ ] eeschema, footprint/symbol editors, 3D viewer (raytracer)
