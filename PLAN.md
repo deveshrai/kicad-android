@@ -134,7 +134,9 @@ Build lessons (all handled in scripts/patches):
 - [x] Android goes straight to Cairo (no failed Modern/OpenGL attempt, no message)
 - [ ] Polish: dialogs open small/unframed; tree icon overlap in the project panel; frames should
       default to full screen; Ctrl/Alt char codes; right/middle buttons need a real mouse test
-- [ ] eeschema, footprint/symbol editors, 3D viewer (raytracer)
+- [x] eeschema opens via Tools > Switch to Schematic Editor and renders the schematic (`docs/eeschema-android.png`); menus work
+- [ ] Initial view in eeschema not zoom-fitted (Home fixes it)
+- [ ] Footprint/symbol editors, 3D viewer (raytracer)
 - Gradle/androiddeployqt APK; single process hosting kicad + kifaces (pcbnew/eeschema as `.so` loaded by `KIWAY`, which already works this way).
 - Canvas: Cairo GAL first, then Modern GAL via `VK_KHR_android_surface` (`QWindow` to `ANativeWindow`).
 - Rust platform crate: paths, SAF file dialogs, fonts, secrets, intents.
