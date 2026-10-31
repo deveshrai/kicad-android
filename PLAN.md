@@ -130,8 +130,23 @@ Build lessons (all handled in scripts/patches):
 - Testing notes: push projects into app storage with `run-as` (files pushed into Android/data
   before the app's first run belong to shell and are unreadable); disable the on-screen keyboard
   with `settings put secure show_ime_with_hard_keyboard 0`
-- [ ] Modern GAL (Vulkan) on Android: VK_KHR_android_surface from the canvas QWindow
-- [x] Android goes straight to Cairo (no failed Modern/OpenGL attempt, no message)
+- [x] Modern GAL (Vulkan) on Android is the default canvas (`docs/pcbnew-android-vulkan.png`);
+      Cairo is used only after a Modern failure.  How it works:
+      - a `VulkanSurface` QWindow is embedded (createWindowContainer) in the canvas' scroll-area
+        viewport; `QVulkanInstance` adopts the RHI's VkInstance and makes the surface
+        (`KIPLATFORM::UI::CreateVulkanSurface`); RHI never destroys that surface
+      - the window must match the viewport exactly: the swapchain is sized from GetClientSize and
+        the device waits until the surface extent equals it (a 2px frame mismatch = black canvas)
+      - SurfaceViews sit behind the activity window, so all Qt windows are TextureViews:
+        `QT_ANDROID_SURFACE_CONTAINER_TYPE=TextureView` plus a QtWindow bytecode patch for child
+        windows (`android/qt-patches/bytecode/patch_qtwindow.py`)
+      - pointer/paint events arriving at the Vulkan window are forwarded to the viewport, keys to
+        the canvas; popups (selection clarifier) composite over the GPU canvas correctly
+      - verified on API 35 emulator (gfxstream -> MoltenVK, Apple M3): render, wheel zoom, Home,
+        click-select with highlight
+- Debug: `echo KICAD_RHI > files/wxtrace` (via run-as) sends wx traces to logcat (tag KiCad-wx/wxWidgets)
+- Testing note: `adb shell input mouse tap` events never reach Qt; use `input touchscreen tap`
+  (Qt synthesizes mouse) and `input mouse scroll` for the wheel
 - [ ] Polish: dialogs open small/unframed; tree icon overlap in the project panel; frames should
       default to full screen; Ctrl/Alt char codes; right/middle buttons need a real mouse test
 - [x] eeschema opens via Tools > Switch to Schematic Editor and renders the schematic (`docs/eeschema-android.png`); menus work

@@ -1,0 +1,293 @@
+From aee6615a15ac402003ef45361dda5bd79a00ab47 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 22:55:43 +0530
+Subject: [PATCH 9/9] Android: size the Vulkan window to the canvas viewport;
+ logcat trace hook
+
+wxQt canvases are QScrollAreas whose client area (GetClientSize, which sizes the
+swapchain) is the viewport inside a 1px frame.  The Vulkan window covered the
+whole widget, so its surface was 2px larger than the requested swapchain and
+the device waited forever for the extents to match: no frame was ever
+presented.  Embed the window in the viewport instead, and route pointer and
+paint events to the viewport (where wxQt handles them) and keys to the canvas.
+
+Also add a development trace hook: masks from debug.kicad.wxtrace or a
+"wxtrace" file in the app home turn on wx logging to logcat.
+
+Assisted-by: Claude Opus 5.5
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/draw_panel_gal.cpp                  |  9 +--
+ libs/kiplatform/os/android/environment.cpp | 51 +++++++++++++++
+ libs/kiplatform/port/wxqt/ui.cpp           | 75 +++++++++++++++++-----
+ 3 files changed, 114 insertions(+), 21 deletions(-)
+
+diff --git a/common/draw_panel_gal.cpp b/common/draw_panel_gal.cpp
+index e088e8ae..f0828ea7 100644
+--- a/common/draw_panel_gal.cpp
++++ b/common/draw_panel_gal.cpp
+@@ -33,9 +33,6 @@
+ 
+ #include <class_draw_panel_gal.h>
+ 
+-#ifdef __ANDROID__
+-#include <android/log.h>
+-#endif
+ #include <view/view.h>
+ #include <view/wx_view_controls.h>
+ #include <gal/painter.h>
+@@ -1404,9 +1401,9 @@ bool EDA_DRAW_PANEL_GAL::SwitchBackend( GAL_TYPE aGalType )
+                                                                    : GAL_TYPE_MODERN;
+     }
+ 
+-    __android_log_print( ANDROID_LOG_INFO, "KiCad", "GAL backend: %s",
+-                         aGalType == GAL_TYPE_MODERN ? "Modern (Vulkan)"
+-                         : aGalType == GAL_TYPE_CAIRO ? "Cairo (software)" : "other" );
++    wxLogTrace( traceRhi, wxS( "DrawPanel: Android GAL backend %s" ),
++                aGalType == GAL_TYPE_MODERN ? wxS( "Modern (Vulkan)" )
++                : aGalType == GAL_TYPE_CAIRO ? wxS( "Cairo (software)" ) : wxS( "other" ) );
+ #endif
+ 
+     // Do not do anything if the currently used GAL is correct
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index ca012afb..e9da6e66 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -26,6 +26,9 @@
+ #include <kiplatform/environment.h>
+ 
+ #include <wx/filename.h>
++#include <wx/ffile.h>
++#include <wx/log.h>
++#include <wx/tokenzr.h>
+ #include <wx/utils.h>
+ 
+ #include <QCoreApplication>
+@@ -35,6 +38,7 @@
+ #include <QStandardPaths>
+ 
+ #include <android/asset_manager.h>
++#include <android/log.h>
+ #include <android/asset_manager_jni.h>
+ 
+ #include <cstdio>
+@@ -42,6 +46,7 @@
+ #include <string>
+ 
+ #include <jni.h>
++#include <sys/system_properties.h>
+ 
+ 
+ namespace
+@@ -58,6 +63,21 @@ bool hasJavaVM()
+ }
+ 
+ 
++/// wxLog target writing to logcat (tag "KiCad-wx"), used when tracing is requested
++class LOGCAT_LOG : public wxLog
++{
++protected:
++    void DoLogTextAtLevel( wxLogLevel aLevel, const wxString& aMsg ) override
++    {
++        int prio = aLevel <= wxLOG_Error ? ANDROID_LOG_ERROR
++                 : aLevel == wxLOG_Warning ? ANDROID_LOG_WARN
++                 : aLevel >= wxLOG_Debug ? ANDROID_LOG_DEBUG : ANDROID_LOG_INFO;
++
++        __android_log_write( prio, "KiCad-wx", aMsg.utf8_str() );
++    }
++};
++
++
+ /// XDG-style fallback under $HOME for processes without a Java VM
+ wxString homePath( const wxString& aSubdir )
+ {
+@@ -203,6 +223,37 @@ wxString extractStockData()
+ 
+ void KIPLATFORM::ENV::Init()
+ {
++    // Development aid: apps cannot be given environment variables, so take wxWidgets trace
++    // masks from a system property:  adb shell setprop debug.kicad.wxtrace KICAD_RHI
++    // (or, since apps may not read debug.* properties, a "wxtrace" file in the app's home)
++    char     traceProp[PROP_VALUE_MAX] = {};
++    wxString traceMasks;
++    wxString home;
++
++    if( __system_property_get( "debug.kicad.wxtrace", traceProp ) > 0 )
++        traceMasks = wxString::FromUTF8( traceProp );
++    else if( wxGetEnv( wxT( "HOME" ), &home ) )
++        wxFFile( home + wxT( "/wxtrace" ) ).ReadAll( &traceMasks );
++
++    traceMasks.Trim().Trim( false );
++
++    if( !traceMasks.IsEmpty() )
++    {
++        // wx sends trace output to stderr, which Android discards; send everything to logcat
++        wxLog::SetActiveTarget( new LOGCAT_LOG );
++
++        // Release builds turn logging off unless asked (kicad.cpp, single_top.cpp)
++        wxSetEnv( wxT( "KICAD_ENABLE_WXTRACE" ), wxT( "1" ) );
++        wxLog::SetLogLevel( wxLOG_Max );
++        __android_log_print( ANDROID_LOG_INFO, "KiCad-wx", "tracing: %s",
++                             static_cast<const char*>( traceMasks.utf8_str() ) );
++
++        wxStringTokenizer masks( traceMasks, wxT( ",;:\n" ) );
++
++        while( masks.HasMoreTokens() )
++            wxLog::AddTraceMask( masks.GetNextToken() );
++    }
++
+     // GPU canvases (Vulkan QWindows, see port/wxqt/ui.cpp) must composite with the rest of the
+     // UI.  A SurfaceView sits behind the activity window, where KiCad's other frames, dialogs and
+     // popups (views in the same activity surface) cover it; a TextureView is part of the view
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index 93fa2d5c..b6e95974 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -33,9 +33,13 @@
+ #include <wx/window.h>
+ 
+ #ifdef __ANDROID__
++#include <QAbstractScrollArea>
+ #include <QCoreApplication>
+ #include <QHash>
++#include <QPaintEvent>
+ #include <QPointer>
++#include <QResizeEvent>
++#include <QExposeEvent>
+ #include <QVulkanInstance>
+ #include <mutex>
+ #endif
+@@ -65,22 +69,41 @@ wxColour toWx( const QColor& aColor )
+ 
+ #ifdef __ANDROID__
+ /**
+- * A Vulkan window embedded over a GAL canvas (Android).  The GPU renders into it while the
+- * canvas widget underneath keeps receiving input: the window is transparent for input, and any
+- * input event that still reaches it is handed to the canvas.
++ * A Vulkan window embedded over a GAL canvas (Android).  The GPU renders into it while the canvas
++ * widget underneath stays the target of input and paint handling:
++ *  - Android delivers pointer, wheel and key events to this window's view (the topmost one), so
++ *    they are forwarded to the canvas.
++ *  - The canvas is fully covered and gets no paint events of its own, yet KiCad renders a frame
++ *    in response to paint; exposure and resizes of this window are turned into canvas repaints.
+  */
+ class VULKAN_CANVAS_WINDOW : public QWindow
+ {
+ public:
+-    explicit VULKAN_CANVAS_WINDOW( QWidget* aCanvas ) : m_canvas( aCanvas )
++    /// aCanvas is the canvas' own widget (keyboard focus), aViewport the client area that
++    /// receives its pointer and paint events (the scroll area viewport on wxQt)
++    VULKAN_CANVAS_WINDOW( QWidget* aCanvas, QWidget* aViewport ) :
++            m_canvas( aCanvas ), m_viewport( aViewport )
+     {
+         // Composited as a TextureView (QT_ANDROID_SURFACE_CONTAINER_TYPE, set in
+         // KIPLATFORM::ENV::Init), so it stacks correctly with frames, dialogs and popups
+         setSurfaceType( QSurface::VulkanSurface );
+-        setFlag( Qt::WindowTransparentForInput );
+     }
+ 
+ protected:
++    void exposeEvent( QExposeEvent* aEvent ) override
++    {
++        QWindow::exposeEvent( aEvent );
++
++        if( isExposed() )
++            repaintCanvas();
++    }
++
++    void resizeEvent( QResizeEvent* aEvent ) override
++    {
++        QWindow::resizeEvent( aEvent );
++        repaintCanvas();
++    }
++
+     bool event( QEvent* aEvent ) override
+     {
+         switch( aEvent->type() )
+@@ -90,15 +113,20 @@ protected:
+         case QEvent::MouseButtonDblClick:
+         case QEvent::MouseMove:
+         case QEvent::Wheel:
+-        case QEvent::KeyPress:
+-        case QEvent::KeyRelease:
+         case QEvent::TouchBegin:
+         case QEvent::TouchUpdate:
+         case QEvent::TouchEnd:
+         case QEvent::TabletPress:
+         case QEvent::TabletMove:
+         case QEvent::TabletRelease:
+-            // The window covers the canvas at (0,0), so positions are already canvas-local
++            // The window covers the viewport at (0,0), so positions are already viewport-local
++            if( m_viewport )
++                return QCoreApplication::sendEvent( m_viewport, aEvent );
++
++            break;
++
++        case QEvent::KeyPress:
++        case QEvent::KeyRelease:
+             if( m_canvas )
+                 return QCoreApplication::sendEvent( m_canvas, aEvent );
+ 
+@@ -112,11 +140,22 @@ protected:
+     }
+ 
+ private:
++    /// Ask the canvas for a frame, as a paint event would on desktop
++    void repaintCanvas()
++    {
++        if( m_viewport )
++        {
++            QPaintEvent paint( m_viewport->rect() );
++            QCoreApplication::sendEvent( m_viewport, &paint );
++        }
++    }
++
+     QPointer<QWidget> m_canvas;
++    QPointer<QWidget> m_viewport;
+ };
+ 
+ 
+-/// Keeps the Vulkan window's container covering its canvas
++/// Keeps the Vulkan window's container covering the canvas' client area
+ class CANVAS_FOLLOWER : public QObject
+ {
+ public:
+@@ -142,21 +181,27 @@ private:
+ /// The Vulkan window for a canvas, created on first use (GUI thread)
+ QWindow* vulkanWindowFor( QWidget* aCanvas )
+ {
++
+     if( QObject* existing = aCanvas->property( "kicadVulkanWindow" ).value<QObject*>() )
+         return static_cast<QWindow*>( existing );
+ 
+-    VULKAN_CANVAS_WINDOW* window = new VULKAN_CANVAS_WINDOW( aCanvas );
+-    QWidget*              container = QWidget::createWindowContainer( window, aCanvas );
++    // The swapchain is sized from the wx client size, which on wxQt is the scroll area's
++    // viewport (inside the frame).  The surface must match it exactly or presentation waits
++    // for a size that never comes.
++    QWidget* viewport = aCanvas;
++
++    if( QAbstractScrollArea* area = qobject_cast<QAbstractScrollArea*>( aCanvas ) )
++        viewport = area->viewport();
+ 
+-    // createWindowContainer() reparents the window, which resets its flags
+-    window->setFlags( window->flags() | Qt::WindowTransparentForInput );
++    VULKAN_CANVAS_WINDOW* window = new VULKAN_CANVAS_WINDOW( aCanvas, viewport );
++    QWidget*              container = QWidget::createWindowContainer( window, viewport );
+ 
+     container->setAttribute( Qt::WA_TransparentForMouseEvents );
+     container->setFocusPolicy( Qt::NoFocus );
+-    container->setGeometry( aCanvas->rect() );
++    container->setGeometry( viewport->rect() );
+     container->show();
+ 
+-    aCanvas->installEventFilter( new CANVAS_FOLLOWER( container, aCanvas ) );
++    viewport->installEventFilter( new CANVAS_FOLLOWER( container, viewport ) );
+     aCanvas->setProperty( "kicadVulkanWindow", QVariant::fromValue<QObject*>( window ) );
+     return window;
+ }
+-- 
+2.54.0 (Apple Git-157)
+

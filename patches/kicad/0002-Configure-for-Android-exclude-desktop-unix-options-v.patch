@@ -1,7 +1,7 @@
 From aca48e45165f3113d0a80518d11c51dee229dd0b Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 19:23:57 +0530
-Subject: [PATCH 2/8] Configure for Android: exclude desktop-unix options,
+Subject: [PATCH 2/9] Configure for Android: exclude desktop-unix options,
  vendor GLU, GLES/EGL in place of desktop GL
 
 Assisted-by: Claude Code
