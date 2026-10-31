@@ -1,0 +1,236 @@
+From 3239e7e90ee8557b9717833692375ec23d2007bf Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 19:28:29 +0530
+Subject: [PATCH 3/3] Android build fixes: host lemon, static OCC linking, GL
+ loader, FreeType include, thread affinity
+
+Assisted-by: Claude Code
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ cmake/FindOCC.cmake                       |  8 +++
+ common/font/version_info.cpp              |  6 +-
+ common/kicad_gl/gl_utils.cpp              |  2 +-
+ plugins/3d/CMakeLists.txt                 |  8 +++
+ thirdparty/glu/CMakeLists.txt             |  1 +
+ thirdparty/glu/src/include/gluos.h        | 86 +++++++++++++++++++++++
+ thirdparty/thread-pool/bs_thread_pool.hpp |  8 +--
+ 7 files changed, 111 insertions(+), 8 deletions(-)
+ create mode 100644 thirdparty/glu/src/include/gluos.h
+
+diff --git a/cmake/FindOCC.cmake b/cmake/FindOCC.cmake
+index aaa6bc39..3e977d95 100644
+--- a/cmake/FindOCC.cmake
++++ b/cmake/FindOCC.cmake
+@@ -218,6 +218,14 @@ if(OCC_FOUND)
+         occ_lib_search( OCC_LIBS_POST_78 )
+     endif()
+ 
++    # Static archives (e.g. Android) don't record their dependencies on other toolkits the way
++    # shared libraries do, so link every toolkit and let the linker keep what's used.
++    list( GET OCC_LIBRARIES 0 _occ_first_lib )
++
++    if( _occ_first_lib MATCHES "\\.a$" )
++        file( GLOB OCC_LIBRARIES "${OCC_LIBRARY_DIR}/libTK*.a" )
++    endif()
++
+     #Convert path names to absolute for cleaner display
+     get_filename_component(OCC_INCLUDE_DIR "${OCC_INCLUDE_DIR}" ABSOLUTE)
+     get_filename_component(OCC_LIBRARY_DIR "${OCC_LIBRARY_DIR}" ABSOLUTE)
+diff --git a/common/font/version_info.cpp b/common/font/version_info.cpp
+index e3ad43fa..4525f7c7 100644
+--- a/common/font/version_info.cpp
++++ b/common/font/version_info.cpp
+@@ -21,10 +21,10 @@
+ #include <font/version_info.h>
+ #include <font/fontconfig.h>
+ #include <harfbuzz/hb.h>
+-#ifdef _MSC_VER
+-#include <ft2build.h>
+-#else
++#if __has_include( <freetype2/ft2build.h> )
+ #include <freetype2/ft2build.h>
++#else
++#include <ft2build.h>
+ #endif
+ #include FT_FREETYPE_H
+ 
+diff --git a/common/kicad_gl/gl_utils.cpp b/common/kicad_gl/gl_utils.cpp
+index 1c06e86e..6fbbc10c 100644
+--- a/common/kicad_gl/gl_utils.cpp
++++ b/common/kicad_gl/gl_utils.cpp
+@@ -20,7 +20,7 @@
+ #include <wx/platform.h>
+ #include <wx/version.h>
+ 
+-#if ( defined( __unix__ ) and not defined( __APPLE__ ) )
++#if ( defined( __unix__ ) and not defined( __APPLE__ ) and not defined( __ANDROID__ ) )
+     #if wxHAS_EGL or wxHAS_GLX
+         #if wxHAS_EGL
+             #include <glad/egl.h>
+diff --git a/plugins/3d/CMakeLists.txt b/plugins/3d/CMakeLists.txt
+index 0eba4671..b0ecb589 100644
+--- a/plugins/3d/CMakeLists.txt
++++ b/plugins/3d/CMakeLists.txt
+@@ -74,6 +74,14 @@ foreach( OCC_LIBRARY IN LISTS OCC_LIBRARIES )
+     endif()
+ endforeach()
+ 
++# Static OpenCASCADE archives (e.g. Android) don't carry their dependencies the way shared
++# libraries do, so the subset above leaves symbols unresolved: link all of them.
++list( GET OCC_LIBRARIES 0 _first_occ_lib )
++
++if( _first_occ_lib MATCHES "\\.a$" )
++    set( KICAD_3D_IMPORT_OCC_LIBRARIES ${OCC_LIBRARIES} )
++endif()
++
+ target_compile_definitions( kicad_3d_import PRIVATE COMPILE_3D_IMPORT )
+ target_link_libraries( kicad_3d_import PRIVATE kicad_3dsg
+     ${KICAD_3D_IMPORT_OCC_LIBRARIES} ${KICAD_3D_IMPORT_WX_LIBRARIES} ZLIB::ZLIB )
+diff --git a/thirdparty/glu/CMakeLists.txt b/thirdparty/glu/CMakeLists.txt
+index cc50314a..6ed31a01 100644
+--- a/thirdparty/glu/CMakeLists.txt
++++ b/thirdparty/glu/CMakeLists.txt
+@@ -29,6 +29,7 @@ target_include_directories( glu
+         ${CMAKE_CURRENT_SOURCE_DIR}/include
+         ${CMAKE_CURRENT_SOURCE_DIR}/gl_shim
+     PRIVATE
++        ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/libutil
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/libtess
+     )
+diff --git a/thirdparty/glu/src/include/gluos.h b/thirdparty/glu/src/include/gluos.h
+new file mode 100644
+index 00000000..290a06f0
+--- /dev/null
++++ b/thirdparty/glu/src/include/gluos.h
+@@ -0,0 +1,86 @@
++/*
++** gluos.h - operating system dependencies for GLU
++**
++*/
++#ifdef __VMS
++#ifdef __cplusplus
++#pragma message disable nocordel
++#pragma message disable codeunreachable
++#pragma message disable codcauunr
++#endif
++#endif
++
++#ifdef __WATCOMC__
++/* Disable *lots* of warnings to get a clean build. I can't be bothered fixing the
++ * code at the moment, as it is pretty ugly.
++ */
++#pragma warning 7   10
++#pragma warning 13  10
++#pragma warning 14  10
++#pragma warning 367 10
++#pragma warning 379 10
++#pragma warning 726 10
++#pragma warning 836 10
++#endif
++
++#ifdef BUILD_FOR_SNAP
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <malloc.h>
++
++#elif defined(_WIN32)
++
++#include <stdlib.h>	    /* For _MAX_PATH definition */
++#include <stdio.h>
++#include <malloc.h>
++
++#define WIN32_LEAN_AND_MEAN
++#define NOGDI
++#define NOIME
++#define NOMINMAX
++
++#ifdef __MINGW64_VERSION_MAJOR
++  #undef _WIN32_WINNT
++#endif
++
++#ifndef _WIN32_WINNT
++  /* XXX: Workaround a bug in mingw-w64's headers when NOGDI is set and
++   * _WIN32_WINNT >= 0x0600 */
++  #define _WIN32_WINNT 0x0400
++#endif
++#ifndef STRICT
++  #define STRICT 1
++#endif
++
++#include <windows.h>
++
++/* Disable warnings */
++#if defined(_MSC_VER)
++#pragma warning(disable : 4101)
++#pragma warning(disable : 4244)
++#pragma warning(disable : 4761)
++#endif
++
++#if defined(_MSC_VER) && _MSC_VER >= 1200 && _MSC_VER < 1300
++#pragma comment(linker, "/OPT:NOWIN98")
++#endif
++
++#ifndef WINGDIAPI
++#define WINGDIAPI
++#endif
++
++#elif defined(__OS2__)
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <malloc.h>
++#define WINGDIAPI
++
++#else
++
++/* Disable Microsoft-specific keywords */
++#define GLAPIENTRY
++#define WINGDIAPI
++
++#endif
+diff --git a/thirdparty/thread-pool/bs_thread_pool.hpp b/thirdparty/thread-pool/bs_thread_pool.hpp
+index e9bb7ce2..41f77048 100644
+--- a/thirdparty/thread-pool/bs_thread_pool.hpp
++++ b/thirdparty/thread-pool/bs_thread_pool.hpp
+@@ -794,7 +794,7 @@ public:
+         for (std::size_t i = 0; i < num_cpus; ++i)
+             affinity[i] = ((previous_mask & (1ULL << i)) != 0ULL);
+         return affinity;
+-    #elif defined(__linux__)
++    #elif defined(__linux__) && !defined(__ANDROID__) // bionic lacks pthread_*affinity_np
+         cpu_set_t cpu_set;
+         CPU_ZERO(&cpu_set);
+         if (pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_set) != 0)
+@@ -806,7 +806,7 @@ public:
+         for (std::size_t i = 0; i < affinity.size(); ++i)
+             affinity[i] = CPU_ISSET(i, &cpu_set);
+         return affinity;
+-    #elif defined(__APPLE__)
++    #elif defined(__APPLE__) || defined(__ANDROID__)
+         return std::nullopt;
+     #endif
+     }
+@@ -824,7 +824,7 @@ public:
+         for (std::size_t i = 0; i < std::min<std::size_t>(affinity.size(), sizeof(DWORD_PTR) * 8); ++i)
+             thread_mask |= (affinity[i] ? (1ULL << i) : 0ULL);
+         return SetThreadAffinityMask(GetCurrentThread(), thread_mask) != 0;
+-    #elif defined(__linux__)
++    #elif defined(__linux__) && !defined(__ANDROID__) // bionic lacks pthread_*affinity_np
+         cpu_set_t cpu_set;
+         CPU_ZERO(&cpu_set);
+         for (std::size_t i = 0; i < std::min<std::size_t>(affinity.size(), CPU_SETSIZE); ++i)
+@@ -833,7 +833,7 @@ public:
+                 CPU_SET(i, &cpu_set);
+         }
+         return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_set) == 0;
+-    #elif defined(__APPLE__)
++    #elif defined(__APPLE__) || defined(__ANDROID__)
+         return affinity[0] && false; // NOLINT(readability-simplify-boolean-expr) // Using `affinity` to suppress unused parameter warning.
+     #endif
+     }
+-- 
+2.54.0 (Apple Git-157)
+

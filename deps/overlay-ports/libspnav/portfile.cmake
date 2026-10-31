@@ -22,6 +22,14 @@ vcpkg_make_configure(
 
 vcpkg_make_install()
 
+# make install copies the source tree's default spnav_config.h, which defines USE_X11
+# regardless of --disable-x11; install the configuration this build actually used.
+foreach(dir "${CURRENT_PACKAGES_DIR}/include" "${CURRENT_PACKAGES_DIR}/debug/include")
+    if(EXISTS "${dir}/spnav_config.h")
+        file(WRITE "${dir}/spnav_config.h" "#ifndef SPNAV_CONFIG_H_\n#define SPNAV_CONFIG_H_\n\n/* built without X11 */\n\n#endif\n")
+    endif()
+endforeach()
+
 macro(CLEANUP WHERE)
     set(WORKDIR ${CURRENT_PACKAGES_DIR}/${WHERE})
     if ("${WHERE}" STREQUAL "debug")

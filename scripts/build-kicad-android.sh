@@ -11,6 +11,13 @@ DEPS="$KA_ROOT/deps/vcpkg_installed/arm64-android"
 HOSTDEPS="$KA_ROOT/deps/vcpkg_installed/arm64-osx"
 WX="$KA_ROOT/build/install/android"
 
+# lemon generates parsers during the build, so it must run on the host
+HOST_LEMON="$KA_ROOT/build/host-tools/lemon"
+if [ ! -x "$HOST_LEMON" ] || [ "$SRC/thirdparty/lemon/lemon.c" -nt "$HOST_LEMON" ]; then
+    mkdir -p "$(dirname "$HOST_LEMON")"
+    xcrun clang -O2 -w -o "$HOST_LEMON" "$SRC/thirdparty/lemon/lemon.c"
+fi
+
 CONFIGURE_ONLY=0
 if [ "${1:-}" = "--configure-only" ]; then CONFIGURE_ONLY=1; shift; fi
 
@@ -28,6 +35,7 @@ if [ "${1:-}" = "--configure-only" ]; then CONFIGURE_ONLY=1; shift; fi
     -DwxWidgets_CONFIG_EXECUTABLE="$WX/bin/wx-config" \
     -DwxWidgets_CONFIG_OPTIONS="--prefix=$WX" \
     -DPYTHON_EXECUTABLE="$(command -v python3)" \
+    -DLEMON_EXE="$HOST_LEMON" \
     -DNGSPICE_LIB_NAME=libngspice.so \
     -DOCC_INCLUDE_DIR="$DEPS/include/opencascade" \
     -DKICAD_BUILD_QA_TESTS=OFF \
