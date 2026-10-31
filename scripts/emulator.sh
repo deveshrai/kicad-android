@@ -11,10 +11,20 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
-AVD=KiCad_Tablet
+# KA_AVD_API=35 (default): google_apis image with host-GPU rendering.  API 37 images force
+# software GLES, which is very slow at tablet resolution (ANRs).
+KA_AVD_API="${KA_AVD_API:-35}"
+if [ "$KA_AVD_API" = 37 ]; then
+    AVD=KiCad_Tablet
+    SYSIMG="system-images/android-37.0/google_apis_playstore/arm64-v8a/"
+    TAG=google_apis_playstore; PLAYSTORE=true; TARGET=android-37.0
+else
+    AVD=KiCad_Tablet${KA_AVD_API}
+    SYSIMG="system-images/android-${KA_AVD_API}/google_apis/arm64-v8a/"
+    TAG=google_apis; PLAYSTORE=false; TARGET=android-${KA_AVD_API}
+fi
 AVDROOT="$HOME/.android/avd"
 AVDDIR="$AVDROOT/$AVD.avd"
-SYSIMG="system-images/android-37.0/google_apis_playstore/arm64-v8a/"
 
 # The cmdline-tools avdmanager in this SDK writes placeholder values (<temp>, <build>) that
 # crash emulator 37.x, so write the AVD by hand.  The emulator fills in other defaults.
@@ -24,19 +34,18 @@ if [ ! -f "$AVDDIR/config.ini" ]; then
 avd.ini.encoding=UTF-8
 path=$AVDDIR
 path.rel=avd/$AVD.avd
-target=android-37.0
+target=$TARGET
 EOF
     cat > "$AVDDIR/config.ini" <<EOF
 AvdId=$AVD
-avd.ini.displayname=KiCad Tablet API 37
+avd.ini.displayname=KiCad Tablet API $KA_AVD_API
 avd.ini.encoding=UTF-8
 abi.type=arm64-v8a
 hw.cpu.arch=arm64
 hw.cpu.ncore=4
 image.sysdir.1=$SYSIMG
-tag.id=google_apis_playstore
-tag.display=Google Play
-PlayStore.enabled=true
+tag.id=$TAG
+PlayStore.enabled=$PLAYSTORE
 hw.device.name=pixel_tablet
 hw.device.manufacturer=Google
 hw.lcd.width=2560
@@ -48,7 +57,7 @@ hw.mainKeys=no
 hw.ramSize=4096
 disk.dataPartition.size=16G
 hw.gpu.enabled=yes
-hw.gpu.mode=auto
+hw.gpu.mode=host
 showDeviceFrame=no
 skin.dynamic=yes
 skin.name=2560x1600

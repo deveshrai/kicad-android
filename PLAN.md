@@ -116,10 +116,19 @@ Build lessons (all handled in scripts/patches):
 - [x] wx patch 7: wxQt crashed drawing invalid bitmaps (AUI toolbar)
 - [ ] Emulator API 37 forces software GLES -> very slow frames and ANRs at 2560x1600. Use an
       API 35 image with host GPU for interactive testing.
-- [ ] Menu bar not shown on Android (wxQt menubar -> needs an in-window QMenuBar)
-- [ ] Open project: Qt's file dialog on Android uses the system document picker (content:// URIs);
-      needs SAF handling (kiandroid)
-- [ ] Open pcbnew/eeschema with a project and test the canvas (Cairo GAL fallback) with KBM
+- [x] Menu bar shown in-window (wx patch 8: `setNativeMenuBar(false)` on Android)
+- [x] File dialogs use Qt's own dialog on Android (paths, not content:// URIs). TODO: Storage
+      Access Framework integration for files outside app storage (kiandroid)
+- [x] **pcbnew renders a real board on the emulator** (Cairo GAL after the expected OpenGL fallback
+      message), `docs/pcbnew-android-first-board.png`. KBM verified on the canvas: click-select a
+      footprint (properties panel fills), Escape deselect, wheel zoom at cursor, PgDn active layer,
+      Home zoom-fit; Ctrl+O + typed path + Enter opens a project.
+- [ ] Faster emulator: `KA_AVD_API=35 scripts/emulator.sh` (host GPU)
+- [ ] Modern GAL (Vulkan) on Android: VK_KHR_android_surface from the canvas QWindow
+- [ ] Startup: skip the "Could not use OpenGL" message on Android (default to Cairo/Modern)
+- [ ] Polish: dialogs open small/unframed; tree icon overlap in the project panel; frames should
+      default to full screen; Ctrl/Alt char codes; right/middle buttons need a real mouse test
+- [ ] eeschema, footprint/symbol editors, 3D viewer (raytracer)
 - Gradle/androiddeployqt APK; single process hosting kicad + kifaces (pcbnew/eeschema as `.so` loaded by `KIWAY`, which already works this way).
 - Canvas: Cairo GAL first, then Modern GAL via `VK_KHR_android_surface` (`QWindow` to `ANativeWindow`).
 - Rust platform crate: paths, SAF file dialogs, fonts, secrets, intents.
