@@ -26,6 +26,10 @@ while IFS= read -r f; do
     stage "$f"; EXTRA+=("$LIBSTAGE/$(basename "$f")")
 done < <(find "$BUILD" -name "*.so" -not -path "*/CMakeFiles/*")
 
+# operator new/delete on mimalloc; must load before libc++_shared (see android/kimalloc)
+"$KA_ROOT/scripts/build-kimalloc.sh"
+stage "$KA_ROOT/build/kimalloc/libkimalloc.so"; EXTRA+=("$LIBSTAGE/libkimalloc.so")
+
 for f in "$KA_ROOT"/build/install/android/lib/libwx_*.so "$KA_ROOT"/deps/vcpkg_installed/arm64-android/lib/*.so; do
     stage "$f"; EXTRA+=("$LIBSTAGE/$(basename "$f")")
 done
@@ -89,6 +93,13 @@ EOF
 
 # Patch Qt's main-loop thread to start with a large stack (android/qt-patches/...QtThread.java;
 # KiCad carves tool coroutine stacks out of it), then rebuild the package with the patched jar.
+# Qt's loader loads qt_libs in order; kimalloc has to come before c++_shared so every later
+# library (libc++_shared included) binds operator new/delete to it
+LIBSXML="$OUT/res/values/libs.xml"
+grep -q "$ABI;kimalloc</item>" "$LIBSXML"
+perl -0pi -e "s|(<array name=\"qt_libs\">\s*)|\1<item>$ABI;kimalloc</item>\n        |" "$LIBSXML"
+grep -A2 '<array name="qt_libs">' "$LIBSXML" | grep -q "$ABI;kimalloc"
+
 PATCH_CLASSES="$KA_ROOT/build/qt-patches-classes"
 rm -rf "$PATCH_CLASSES" && mkdir -p "$PATCH_CLASSES"
 "$JAVA_HOME/bin/javac" --release 8 -nowarn -d "$PATCH_CLASSES" \

@@ -1,7 +1,7 @@
 From 0a26fa4e7c309f64ce46881af37a27df9f38d940 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 18:30:07 +0530
-Subject: [PATCH 01/10] kiplatform: add wxQt port and Android OS implementation
+Subject: [PATCH 01/11] kiplatform: add wxQt port and Android OS implementation
 
 Assisted-by: Claude Code
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

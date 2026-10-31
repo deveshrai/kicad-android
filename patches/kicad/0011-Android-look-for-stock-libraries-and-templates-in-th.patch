@@ -1,0 +1,30 @@
+From 2467412a7aafa2e6f31e33651c5e0c601243e50a Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 00:19:23 +0530
+Subject: [PATCH 11/11] Android: look for stock libraries and templates in the
+ stock data dir
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/paths.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/common/paths.cpp b/common/paths.cpp
+index d14da60f..25e3bb78 100644
+--- a/common/paths.cpp
++++ b/common/paths.cpp
+@@ -246,7 +246,8 @@ wxString PATHS::GetStockEDALibraryPath()
+ 
+ #if defined( __WXMAC__ )
+     path = GetOSXKicadMachineDataDir();
+-#elif defined( __WXMSW__ )
++#elif defined( __WXMSW__ ) || defined( __ANDROID__ )
++    // Android keeps libraries next to the rest of the stock data in app storage
+     path = GetStockDataPath( false );
+ #else
+     if( wxGetEnv( wxT( "APPDIR" ), &path ) )
+-- 
+2.54.0 (Apple Git-157)
+
