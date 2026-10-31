@@ -1,0 +1,28 @@
+From 5c23782fa3ed6092cc78fe996d69a6708db090ce Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 19:05:47 +0530
+Subject: [PATCH 5/5] cmake: don't look for desktop OpenGL in wxWidgetsConfig
+ on Android
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ build/cmake/wxWidgetsConfig.cmake.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/build/cmake/wxWidgetsConfig.cmake.in b/build/cmake/wxWidgetsConfig.cmake.in
+index f0fb7ba..315bbb2 100644
+--- a/build/cmake/wxWidgetsConfig.cmake.in
++++ b/build/cmake/wxWidgetsConfig.cmake.in
+@@ -184,7 +184,7 @@ if(TARGET wx::wxnet AND @wxUSE_WEBREQUEST_CURL@)
+     find_dependency(CURL)
+ endif()
+ 
+-if(TARGET wx::wxgl AND NOT (APPLE AND IOS))
++if(TARGET wx::wxgl AND NOT (APPLE AND IOS) AND NOT ANDROID)
+     # make sure OpenGL targets are available:
+     # The link interface of target "wx::wxgl" contains: OpenGL::GLU
+     find_dependency(OpenGL)
+-- 
+2.54.0 (Apple Git-157)
+
