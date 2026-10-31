@@ -1,0 +1,11 @@
+{
+  "name": "ngspice",
+  "version": "46",
+  "description": "ngspice shared library built with autotools, for Android (KiCad's registry port is MSBuild-only).",
+  "homepage": "http://ngspice.sourceforge.net/",
+  "license": "BSD-3-Clause",
+  "supports": "android",
+  "dependencies": [
+    { "name": "vcpkg-make", "host": true }
+  ]
+}

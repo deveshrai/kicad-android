@@ -9,4 +9,5 @@ exec vcpkg install \
     --triplet=arm64-android \
     --x-install-root="$KA_ROOT/deps/vcpkg_installed" \
     --clean-after-build \
+    --allow-unsupported \
     "$@"

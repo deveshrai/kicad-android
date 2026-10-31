@@ -1,0 +1,61 @@
+From 4fda0b13e6d06f675bf2027e1e46366b57cd6e7c Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 18:25:27 +0530
+Subject: [PATCH 3/4] cmake: fix cross-compiling for Android from a macOS host
+
+Enable Objective-C++ only after project(), when APPLE describes the target
+rather than the host, and only assume getservbyname_r() exists when it
+does: bionic provides gethostbyname_r() but not getservbyname_r().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt          | 8 ++++++--
+ build/cmake/setup.cmake | 9 ++++++---
+ 2 files changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bf5b06d..75dae7c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -94,12 +94,16 @@ set(wxVERSION ${wxMAJOR_VERSION}.${wxMINOR_VERSION}.${wxRELEASE_NUMBER} CACHE IN
+ set(wxCOPYRIGHT "2002-2026 wxWidgets" CACHE INTERNAL "wxWidgets copyright")
+ 
+ set(wxLANGUAGES C CXX)
++
++project(wxWidgets VERSION ${wxVERSION} LANGUAGES ${wxLANGUAGES})
++
++# APPLE describes the target only after project(): before it, a macOS host
++# cross-compiling for e.g. Android would wrongly enable Objective-C++.
+ if(APPLE AND NOT CMAKE_VERSION VERSION_LESS "3.16")
++    enable_language(OBJCXX)
+     list(APPEND wxLANGUAGES OBJCXX)
+ endif()
+ 
+-project(wxWidgets VERSION ${wxVERSION} LANGUAGES ${wxLANGUAGES})
+-
+ include(build/cmake/main.cmake)
+ 
+ # Set the default startup project for Visual Studio
+diff --git a/build/cmake/setup.cmake b/build/cmake/setup.cmake
+index b8f25b0..5988391 100644
+--- a/build/cmake/setup.cmake
++++ b/build/cmake/setup.cmake
+@@ -451,9 +451,12 @@ if(UNIX)
+             )
+ 
+         if(HAVE_FUNC_GETHOSTBYNAME_R_6)
+-            # Assume that we have getservbyname_r() with consistent signature,
+-            # this does seem to be the case in practice.
+-            set(HAVE_FUNC_GETSERVBYNAME_R_6 1)
++            # Assume that getservbyname_r(), when present, has the consistent
++            # signature. Android's bionic has gethostbyname_r() but not it.
++            check_symbol_exists(getservbyname_r netdb.h HAVE_GETSERVBYNAME_R_SYMBOL)
++            if(HAVE_GETSERVBYNAME_R_SYMBOL)
++                set(HAVE_FUNC_GETSERVBYNAME_R_6 1)
++            endif()
+         else()
+             wx_check_c_source_compiles(
+                 [[struct hostent ret;
+-- 
+2.54.0 (Apple Git-157)
+

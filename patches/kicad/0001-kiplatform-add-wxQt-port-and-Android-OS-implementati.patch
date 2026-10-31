@@ -1,0 +1,872 @@
+From 0a26fa4e7c309f64ce46881af37a27df9f38d940 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 18:30:07 +0530
+Subject: [PATCH] kiplatform: add wxQt port and Android OS implementation
+
+Assisted-by: Claude Code
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ libs/kiplatform/CMakeLists.txt             |  30 ++
+ libs/kiplatform/os/android/app.cpp         | 106 +++++++
+ libs/kiplatform/os/android/environment.cpp | 144 +++++++++
+ libs/kiplatform/os/android/printing.cpp    |  43 +++
+ libs/kiplatform/os/android/secrets.cpp     |  53 ++++
+ libs/kiplatform/port/wxqt/touchpad.cpp     |  33 +++
+ libs/kiplatform/port/wxqt/ui.cpp           | 327 +++++++++++++++++++++
+ libs/kiplatform/port/wxqt/webview.cpp      |  47 +++
+ 8 files changed, 783 insertions(+)
+ create mode 100644 libs/kiplatform/os/android/app.cpp
+ create mode 100644 libs/kiplatform/os/android/environment.cpp
+ create mode 100644 libs/kiplatform/os/android/printing.cpp
+ create mode 100644 libs/kiplatform/os/android/secrets.cpp
+ create mode 100644 libs/kiplatform/port/wxqt/touchpad.cpp
+ create mode 100644 libs/kiplatform/port/wxqt/ui.cpp
+ create mode 100644 libs/kiplatform/port/wxqt/webview.cpp
+
+diff --git a/libs/kiplatform/CMakeLists.txt b/libs/kiplatform/CMakeLists.txt
+index 0d06b9ba..5d869878 100644
+--- a/libs/kiplatform/CMakeLists.txt
++++ b/libs/kiplatform/CMakeLists.txt
+@@ -36,6 +36,21 @@ elseif( KICAD_WX_PORT STREQUAL gtk )
+     include_directories( SYSTEM ${GTK3_INCLUDE_DIRS} )
+     link_directories( ${GTK3_LIBRARY_DIRS} )
+     add_definitions( ${GTK3_CFLAGS_OTHER} )
++elseif( KICAD_WX_PORT STREQUAL qt )
++    # wxQt: wxWindow::GetHandle() is a QWidget, so the port talks to Qt directly
++    set( PLATFORM_SRCS
++        port/wxqt/touchpad.cpp
++        port/wxqt/ui.cpp
++        port/wxqt/webview.cpp
++        )
++
++    find_package( Qt6 REQUIRED COMPONENTS Core Gui Widgets )
++
++    set( PLATFORM_LIBS
++        Qt6::Core
++        Qt6::Gui
++        Qt6::Widgets
++        )
+ endif()
+ 
+ 
+@@ -80,6 +95,21 @@ elseif( WIN32 )
+         "imm32"
+         "windowsapp"
+         )
++elseif( ANDROID )
++    # Android: the generic POSIX pieces come from os/unix, the rest has no glib/gtk/libsecret
++    list( APPEND PLATFORM_SRCS
++        os/android/app.cpp
++        os/android/environment.cpp
++        os/android/printing.cpp
++        os/android/secrets.cpp
++        os/unix/drivers.cpp
++        os/unix/io.cpp
++        os/unix/policy.cpp
++        os/unix/sysinfo.cpp
++        )
++
++    find_package( Qt6 REQUIRED COMPONENTS Core )
++    list( APPEND PLATFORM_LIBS Qt6::Core log android )
+ elseif( UNIX )
+     list( APPEND PLATFORM_SRCS
+         os/unix/app.cpp
+diff --git a/libs/kiplatform/os/android/app.cpp b/libs/kiplatform/os/android/app.cpp
+new file mode 100644
+index 00000000..0ccfd88f
+--- /dev/null
++++ b/libs/kiplatform/os/android/app.cpp
+@@ -0,0 +1,106 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <kiplatform/app.h>
++
++#include <sys/resource.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++
++#include <wx/string.h>
++
++
++bool KIPLATFORM::APP::Init()
++{
++    return true;
++}
++
++
++void KIPLATFORM::APP::EnableDarkMode( bool aForce )
++{
++    // Qt follows the system night mode
++}
++
++
++bool KIPLATFORM::APP::AttachConsole( bool aTryAlloc )
++{
++    // stdout/stderr go to logcat via the Qt Android runtime
++    return true;
++}
++
++
++bool KIPLATFORM::APP::IsOperatingSystemUnsupported()
++{
++    return false;
++}
++
++
++bool KIPLATFORM::APP::RegisterApplicationRestart( const wxString& aCommandLine )
++{
++    // Android restores the activity itself; there is no command line to relaunch with
++    return true;
++}
++
++
++bool KIPLATFORM::APP::UnregisterApplicationRestart()
++{
++    return true;
++}
++
++
++bool KIPLATFORM::APP::SupportsShutdownBlockReason()
++{
++    return false;
++}
++
++
++void KIPLATFORM::APP::SetShutdownBlockReason( wxWindow* aWindow, const wxString& aReason )
++{
++}
++
++
++void KIPLATFORM::APP::RemoveShutdownBlockReason( wxWindow* aWindow )
++{
++}
++
++
++void KIPLATFORM::APP::ForceTimerMessagesToBeCreatedIfNecessary()
++{
++}
++
++
++void KIPLATFORM::APP::AddDynamicLibrarySearchPath( const wxString& aPath )
++{
++    // All native libraries are extracted to the APK's native library directory
++}
++
++
++bool KIPLATFORM::APP::SetCurrentThreadPriority( bool aRaise )
++{
++    // Apps may raise their own threads as far as THREAD_PRIORITY_DISPLAY (nice -4)
++    // without privileges, which is what Process.setThreadPriority() allows from Java
++    const pid_t tid = static_cast<pid_t>( syscall( SYS_gettid ) );
++    return setpriority( PRIO_PROCESS, tid, aRaise ? -4 : 5 ) == 0;
++}
++
++
++void KIPLATFORM::APP::TerminateWithCode( int aExitCode )
++{
++    _exit( aExitCode );
++}
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+new file mode 100644
+index 00000000..ca8f9051
+--- /dev/null
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -0,0 +1,144 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++/*
++ * Android paths live inside the app sandbox.  QStandardPaths maps them to the right
++ * Context directories (getFilesDir(), getCacheDir(), getExternalFilesDir()), so we use it
++ * rather than calling into JNI directly.
++ */
++
++#include <kiplatform/environment.h>
++
++#include <wx/filename.h>
++#include <wx/utils.h>
++
++#include <QDir>
++#include <QStandardPaths>
++
++
++namespace
++{
++wxString standardPath( QStandardPaths::StandardLocation aLocation )
++{
++    const QString path = QStandardPaths::writableLocation( aLocation );
++    QDir().mkpath( path );
++    return wxString::FromUTF8( path.toUtf8().constData() );
++}
++} // namespace
++
++
++void KIPLATFORM::ENV::Init()
++{
++}
++
++
++bool KIPLATFORM::ENV::MoveToTrash( const wxString& aPath, wxString& aError )
++{
++    // Android has no app-accessible trash; delete instead
++    bool ok = wxFileName::DirExists( aPath ) ? wxFileName::Rmdir( aPath, wxPATH_RMDIR_RECURSIVE )
++                                             : wxRemoveFile( aPath );
++
++    if( !ok )
++        aError = wxString::Format( wxT( "Unable to delete '%s'" ), aPath );
++
++    return ok;
++}
++
++
++bool KIPLATFORM::ENV::IsNetworkPath( const wxString& aPath )
++{
++    return false;
++}
++
++
++bool KIPLATFORM::ENV::IsRemovablePath( const wxString& aPath )
++{
++    // Removable volumes are mounted under /storage/<UUID>; the built-in volume is
++    // /storage/emulated
++    return aPath.StartsWith( wxT( "/storage/" ) ) && !aPath.StartsWith( wxT( "/storage/emulated" ) );
++}
++
++
++wxString KIPLATFORM::ENV::GetDocumentsPath()
++{
++    // App-specific external storage: visible to the user over USB and in the Files app,
++    // and needs no storage permission.  TODO(android): Storage Access Framework for
++    // projects elsewhere.
++    return standardPath( QStandardPaths::DocumentsLocation );
++}
++
++
++wxString KIPLATFORM::ENV::GetUserConfigPath()
++{
++    return standardPath( QStandardPaths::AppConfigLocation );
++}
++
++
++wxString KIPLATFORM::ENV::GetUserDataPath()
++{
++    return standardPath( QStandardPaths::AppDataLocation );
++}
++
++
++wxString KIPLATFORM::ENV::GetUserLocalDataPath()
++{
++    return standardPath( QStandardPaths::AppLocalDataLocation );
++}
++
++
++wxString KIPLATFORM::ENV::GetUserCachePath()
++{
++    return standardPath( QStandardPaths::CacheLocation );
++}
++
++
++bool KIPLATFORM::ENV::GetSystemProxyConfig( const wxString& aURL, PROXY_CONFIG& aCfg )
++{
++    // TODO(android): read the system proxy via ConnectivityManager.getDefaultProxy()
++    return false;
++}
++
++
++bool KIPLATFORM::ENV::VerifyFileSignature( const wxString& aPath )
++{
++    return true;
++}
++
++
++wxString KIPLATFORM::ENV::GetAppUserModelId()
++{
++    return wxEmptyString;
++}
++
++
++void KIPLATFORM::ENV::SetAppDetailsForWindow( wxWindow* aWindow, const wxString& aRelaunchCommand,
++                                              const wxString& aRelaunchDisplayName )
++{
++}
++
++
++wxString KIPLATFORM::ENV::GetCommandLineStr()
++{
++    return wxEmptyString;
++}
++
++
++void KIPLATFORM::ENV::AddToRecentDocs( const wxString& aPath )
++{
++}
+diff --git a/libs/kiplatform/os/android/printing.cpp b/libs/kiplatform/os/android/printing.cpp
+new file mode 100644
+index 00000000..208f6fc6
+--- /dev/null
++++ b/libs/kiplatform/os/android/printing.cpp
+@@ -0,0 +1,43 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++/*
++ * TODO(android): hand the plotted PDF to android.print.PrintManager through the kiandroid
++ * library.  PrintManager renders PDFs natively, so no PDF rasterizer is needed.
++ */
++
++#include <printing.h>
++
++#include <wx/cmndata.h>
++
++
++namespace KIPLATFORM::PRINTING
++{
++
++PRINT_RESULT PrintPDF( const std::string& aFile, int aCurrentPage )
++{
++    return PRINT_RESULT::UNSUPPORTED;
++}
++
++
++void ResetPrintToFilePath( wxPrintData& aData )
++{
++}
++
++} // namespace KIPLATFORM::PRINTING
+diff --git a/libs/kiplatform/os/android/secrets.cpp b/libs/kiplatform/os/android/secrets.cpp
+new file mode 100644
+index 00000000..5a332f86
+--- /dev/null
++++ b/libs/kiplatform/os/android/secrets.cpp
+@@ -0,0 +1,53 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++/*
++ * TODO(android): back these with the Android Keystore through the kiandroid Rust library
++ * (an AES key in AndroidKeyStore encrypting entries in app-private storage).  Until then no
++ * secrets are persisted, so callers fall back to prompting.
++ */
++
++#include <kiplatform/secrets.h>
++
++
++bool KIPLATFORM::SECRETS::StoreSecret( const wxString& aService, const wxString& aKey,
++                                       const wxString& aSecret )
++{
++    return false;
++}
++
++
++bool KIPLATFORM::SECRETS::GetSecret( const wxString& aService, const wxString& aKey,
++                                     wxString& aSecret )
++{
++    return false;
++}
++
++
++bool KIPLATFORM::SECRETS::GetSecretNoPrompt( const wxString& aService, const wxString& aKey,
++                                             wxString& aSecret )
++{
++    return false;
++}
++
++
++bool KIPLATFORM::SECRETS::DeleteSecret( const wxString& aService, const wxString& aKey )
++{
++    return false;
++}
+diff --git a/libs/kiplatform/port/wxqt/touchpad.cpp b/libs/kiplatform/port/wxqt/touchpad.cpp
+new file mode 100644
+index 00000000..425daa35
+--- /dev/null
++++ b/libs/kiplatform/port/wxqt/touchpad.cpp
+@@ -0,0 +1,33 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your option)
++ * any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include <kiplatform/touchpad.h>
++
++
++bool KIPLATFORM::UI::IsNativeTouchpadGestureAvailable()
++{
++    return false;
++}
++
++
++std::unique_ptr<KIPLATFORM::UI::TOUCHPAD_GESTURE_HANDLER>
++KIPLATFORM::UI::CreateTouchpadGestureHandler( wxWindow*, TOUCHPAD_GESTURE_CALLBACK )
++{
++    return nullptr;
++}
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+new file mode 100644
+index 00000000..a646e1eb
+--- /dev/null
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -0,0 +1,327 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++/*
++ * wxQt port of the KIPLATFORM::UI functions.  Under wxQt, wxWindow::GetHandle() returns the
++ * QWidget backing the window, so platform queries go straight to Qt.  This port serves desktop
++ * Qt (for development) and Qt for Android.
++ */
++
++#include <kiplatform/ui.h>
++
++#include <wx/choice.h>
++#include <wx/dialog.h>
++#include <wx/nonownedwnd.h>
++#include <wx/settings.h>
++#include <wx/toplevel.h>
++#include <wx/window.h>
++
++#include <QCursor>
++#include <QGuiApplication>
++#include <QPalette>
++#include <QScreen>
++#include <QStyleHints>
++#include <QWidget>
++#include <QWindow>
++
++
++namespace
++{
++QWidget* qtWidget( const wxWindow* aWindow )
++{
++    return aWindow ? static_cast<QWidget*>( aWindow->GetHandle() ) : nullptr;
++}
++
++
++wxColour toWx( const QColor& aColor )
++{
++    return wxColour( aColor.red(), aColor.green(), aColor.blue(), aColor.alpha() );
++}
++} // namespace
++
++
++bool KIPLATFORM::UI::IsDarkTheme()
++{
++    Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
++
++    if( scheme != Qt::ColorScheme::Unknown )
++        return scheme == Qt::ColorScheme::Dark;
++
++    // Fall back to the palette brightness when the platform doesn't report a scheme
++    const QColor window = QGuiApplication::palette().color( QPalette::Window );
++    return window.lightness() < 128;
++}
++
++
++wxColour KIPLATFORM::UI::GetDialogBGColour()
++{
++    return toWx( QGuiApplication::palette().color( QPalette::Window ) );
++}
++
++
++void KIPLATFORM::UI::ForceFocus( wxWindow* aWindow )
++{
++    if( !aWindow )
++        return;
++
++    aWindow->SetFocus();
++
++    if( QWidget* w = qtWidget( aWindow ) )
++        w->activateWindow();
++}
++
++
++bool KIPLATFORM::UI::IsWindowActive( wxWindow* aWindow )
++{
++    QWidget* w = qtWidget( aWindow );
++    return w && w->isActiveWindow();
++}
++
++
++void KIPLATFORM::UI::ReparentModal( wxNonOwnedWindow* aWindow )
++{
++    // Not needed: Qt keeps modal dialogs above their parents
++}
++
++
++void KIPLATFORM::UI::ReparentWindow( wxNonOwnedWindow* aWindow, wxTopLevelWindow* aParent )
++{
++}
++
++
++void KIPLATFORM::UI::FixupCancelButtonCmdKeyCollision( wxWindow* aWindow )
++{
++    // macOS-only issue
++}
++
++
++bool KIPLATFORM::UI::IsStockCursorOk( wxStockCursor aCursor )
++{
++    switch( aCursor )
++    {
++    case wxCURSOR_BULLSEYE:
++    case wxCURSOR_HAND:
++    case wxCURSOR_ARROW:
++    case wxCURSOR_BLANK:
++        return true;
++
++    default:
++        return false;
++    }
++}
++
++
++void KIPLATFORM::UI::LargeChoiceBoxHack( wxChoice* aChoice )
++{
++    // QComboBox handles large item counts without special configuration
++}
++
++
++void KIPLATFORM::UI::EllipsizeChoiceBox( wxChoice* aChoice )
++{
++    // QComboBox elides overlong text by default
++}
++
++
++double KIPLATFORM::UI::GetPixelScaleFactor( const wxWindow* aWindow )
++{
++    if( QWidget* w = qtWidget( aWindow ) )
++        return w->devicePixelRatioF();
++
++    return qGuiApp ? qGuiApp->devicePixelRatio() : 1.0;
++}
++
++
++double KIPLATFORM::UI::GetContentScaleFactor( const wxWindow* aWindow )
++{
++    return GetPixelScaleFactor( aWindow );
++}
++
++
++double KIPLATFORM::UI::GetDisplayRefreshRate( const wxWindow* aWindow )
++{
++    QScreen* screen = nullptr;
++
++    if( QWidget* w = qtWidget( aWindow ) )
++        screen = w->screen();
++
++    if( !screen && qGuiApp )
++        screen = qGuiApp->primaryScreen();
++
++    return screen ? screen->refreshRate() : 0.0;
++}
++
++
++void KIPLATFORM::UI::GetInfoBarColours( wxColour& aFGColour, wxColour& aBGColour )
++{
++    aBGColour = wxSystemSettings::GetColour( wxSYS_COLOUR_INFOBK );
++    aFGColour = wxSystemSettings::GetColour( wxSYS_COLOUR_INFOTEXT );
++}
++
++
++wxWindow* KIPLATFORM::UI::CreateCanvasOverlay( wxWindow* aCanvas )
++{
++    // Qt composites child widgets over the canvas, so overlays can be plain children
++    return nullptr;
++}
++
++
++wxSize KIPLATFORM::UI::GetUnobscuredSize( const wxWindow* aWindow )
++{
++    return wxSize( aWindow->GetSize().GetX() - wxSystemSettings::GetMetric( wxSYS_VSCROLL_X ),
++                   aWindow->GetSize().GetY() - wxSystemSettings::GetMetric( wxSYS_HSCROLL_Y ) );
++}
++
++
++void KIPLATFORM::UI::SetOverlayScrolling( const wxWindow* aWindow, bool overlay )
++{
++}
++
++
++bool KIPLATFORM::UI::AllowIconsInMenus()
++{
++    return !QCoreApplication::testAttribute( Qt::AA_DontShowIconsInMenus );
++}
++
++
++bool KIPLATFORM::UI::SupportsKeyState()
++{
++    // wxQt's wxGetKeyState() only tracks modifiers reliably
++    return false;
++}
++
++
++wxPoint KIPLATFORM::UI::GetMousePosition()
++{
++    const QPoint p = QCursor::pos();
++    return wxPoint( p.x(), p.y() );
++}
++
++
++bool KIPLATFORM::UI::WarpPointer( wxWindow* aWindow, int aX, int aY )
++{
++#ifdef __ANDROID__
++    // Android does not allow apps to move the pointer.  Pointer capture (relative motion)
++    // is the replacement and is handled by the infinite-drag functions once implemented.
++    return false;
++#else
++    QWidget* w = qtWidget( aWindow );
++
++    if( !w )
++        return false;
++
++    QCursor::setPos( w->mapToGlobal( QPoint( aX, aY ) ) );
++    return true;
++#endif
++}
++
++
++void KIPLATFORM::UI::ImmControl( wxWindow* aWindow, bool aEnable )
++{
++    if( QWidget* w = qtWidget( aWindow ) )
++        w->setAttribute( Qt::WA_InputMethodEnabled, aEnable );
++}
++
++
++void KIPLATFORM::UI::ImeNotifyCancelComposition( wxWindow* aWindow )
++{
++    if( QInputMethod* im = QGuiApplication::inputMethod() )
++        im->reset();
++}
++
++
++bool KIPLATFORM::UI::InfiniteDragPrepareWindow( wxWindow* aWindow )
++{
++    // TODO(android): use View.requestPointerCapture() for relative mouse motion
++    return false;
++}
++
++
++void KIPLATFORM::UI::InfiniteDragReleaseWindow()
++{
++}
++
++
++void KIPLATFORM::UI::EnsureVisible( wxWindow* aWindow )
++{
++}
++
++
++void KIPLATFORM::UI::StabilizeWindowPosition( wxWindow* aWindow )
++{
++}
++
++
++void KIPLATFORM::UI::SetFloatLevel( wxWindow* aWindow )
++{
++}
++
++
++void KIPLATFORM::UI::ReleaseChildWindow( wxNonOwnedWindow* aWindow )
++{
++}
++
++
++void KIPLATFORM::UI::AllowNetworkFileSystems( wxDialog* aDialog )
++{
++}
++
++
++void KIPLATFORM::UI::CancelPendingScroll( wxDataViewCtrl* aCtrl )
++{
++}
++
++
++void KIPLATFORM::UI::SetWMClass( wxWindow* aWindow, const wxString& aClass )
++{
++    // Qt takes the application identity from QGuiApplication::desktopFileName()
++}
++
++
++void KIPLATFORM::UI::GetNativeWindowHandles( wxWindow* aWindow, void** aHandle, void** aDisplay,
++                                             int* aDisplayType )
++{
++    *aHandle = nullptr;
++    *aDisplay = nullptr;
++
++    if( aDisplayType )
++        *aDisplayType = DISPLAY_UNKNOWN;
++
++    // TODO(android): return the ANativeWindow of the canvas' QWindow so the Modern (Vulkan)
++    // GAL can create a VK_KHR_android_surface.  Until then callers fall back to Cairo.
++}
++
++
++void KIPLATFORM::UI::PrepareForExternalRendering( wxWindow* aWindow )
++{
++    if( QWidget* w = qtWidget( aWindow ) )
++    {
++        // The GPU owns the widget's contents; stop Qt painting over them
++        w->setAttribute( Qt::WA_NativeWindow );
++        w->setAttribute( Qt::WA_PaintOnScreen );
++        w->setAttribute( Qt::WA_NoSystemBackground );
++    }
++}
++
++
++void KIPLATFORM::UI::KeepAboveExternalRendering( wxWindow* aChild )
++{
++    if( QWidget* w = qtWidget( aChild ) )
++        w->setAttribute( Qt::WA_NativeWindow );
++}
+diff --git a/libs/kiplatform/port/wxqt/webview.cpp b/libs/kiplatform/port/wxqt/webview.cpp
+new file mode 100644
+index 00000000..c09a74ff
+--- /dev/null
++++ b/libs/kiplatform/port/wxqt/webview.cpp
+@@ -0,0 +1,47 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++/*
++ * wxQt has no wxWebView backend.  These stubs keep the interface linkable; web-based panels
++ * are disabled when wxUSE_WEBVIEW is 0.
++ */
++
++#include <kiplatform/webview.h>
++
++namespace KIPLATFORM::WEBVIEW
++{
++
++bool SaveCookies( wxWebView* aWebView, const wxString& aTargetFile )
++{
++    return false;
++}
++
++
++bool LoadCookies( wxWebView* aWebView, const wxString& aSourceFile )
++{
++    return false;
++}
++
++
++bool DeleteCookies( wxWebView* aWebView )
++{
++    return false;
++}
++
++} // namespace KIPLATFORM::WEBVIEW
+-- 
+2.54.0 (Apple Git-157)
+

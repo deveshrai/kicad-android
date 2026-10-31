@@ -1,0 +1,175 @@
+From ab1cbb4c45505dd198c20895c8e4d0b5e84532dd Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 18:16:49 +0530
+Subject: [PATCH 2/4] qt: build the backend-independent wxWebView library for
+ wxQt
+
+wxQt has no built-in web engine, but applications can register one with
+wxWebView::RegisterFactory(). Build the common classes so code using
+wxWebView compiles and links, with wxWebView::New() returning nullptr when
+no backend has been registered.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ build/cmake/files.cmake                |  4 ++++
+ build/cmake/init.cmake                 |  7 ++++--
+ build/cmake/lib/webview/CMakeLists.txt |  9 ++++++--
+ include/wx/chkconf.h                   |  4 +++-
+ include/wx/qt/webviewhistoryitem.h     | 30 ++++++++++++++++++++++++++
+ include/wx/webview.h                   |  2 ++
+ src/common/webview.cpp                 |  6 +++++-
+ 7 files changed, 56 insertions(+), 6 deletions(-)
+ create mode 100644 include/wx/qt/webviewhistoryitem.h
+
+diff --git a/build/cmake/files.cmake b/build/cmake/files.cmake
+index 0132998..6972404 100644
+--- a/build/cmake/files.cmake
++++ b/build/cmake/files.cmake
+@@ -2527,6 +2527,10 @@ set(WEBVIEW_GTK_HDR
+     wx/gtk/webviewhistoryitem_webkit.h
+ )
+ 
++set(WEBVIEW_QT_HDR
++    wx/qt/webviewhistoryitem.h
++)
++
+ set(WEBVIEW_WEBKIT2_EXTENSION_SRC
+     src/gtk/webview_webkit2_extension.cpp
+ )
+diff --git a/build/cmake/init.cmake b/build/cmake/init.cmake
+index a15cf06..50ce044 100644
+--- a/build/cmake/init.cmake
++++ b/build/cmake/init.cmake
+@@ -438,7 +438,10 @@ if(wxUSE_GUI)
+ 
+     # WXQT checks
+     if(WXQT)
+-        wx_option_force_value(wxUSE_WEBVIEW OFF)
++        # Only the backend-independent wxWebView classes are built for wxQt; applications
++        # can register a backend with wxWebView::RegisterFactory().
++        wx_option_force_value(wxUSE_WEBVIEW_WEBKIT OFF)
++        wx_option_force_value(wxUSE_WEBVIEW_CHROMIUM OFF)
+         wx_option_force_value(wxUSE_METAFILE OFF)
+         if(WIN32)
+             wx_option_force_value(wxUSE_ACCESSIBILITY OFF)
+@@ -606,7 +609,7 @@ if(wxUSE_GUI)
+                 message(WARNING "webkit or chromium not found or enabled, wxWebview won't be available")
+                 wx_option_force_value(wxUSE_WEBVIEW OFF)
+             endif()
+-        elseif(APPLE)
++        elseif(APPLE AND NOT WXQT)
+             if(NOT wxUSE_WEBVIEW_WEBKIT AND NOT wxUSE_WEBVIEW_CHROMIUM)
+                 message(WARNING "webkit and chromium not found or enabled, wxWebview won't be available")
+                 wx_option_force_value(wxUSE_WEBVIEW OFF)
+diff --git a/build/cmake/lib/webview/CMakeLists.txt b/build/cmake/lib/webview/CMakeLists.txt
+index ee6f256..06b4879 100644
+--- a/build/cmake/lib/webview/CMakeLists.txt
++++ b/build/cmake/lib/webview/CMakeLists.txt
+@@ -34,7 +34,10 @@ endfunction()
+ 
+ 
+ wx_append_sources(WEBVIEW_FILES WEBVIEW_CMN)
+-if(WXMSW)
++if(WXQT)
++    # No built-in backend for wxQt, only the common classes
++    wx_append_sources(WEBVIEW_FILES WEBVIEW_QT)
++elseif(WXMSW)
+     wx_append_sources(WEBVIEW_FILES WEBVIEW_MSW)
+ elseif(WXGTK)
+     wx_append_sources(WEBVIEW_FILES WEBVIEW_GTK)
+@@ -44,7 +47,9 @@ endif()
+ 
+ wx_add_library(wxwebview ${WEBVIEW_FILES})
+ 
+-if(APPLE)
++if(WXQT)
++    # nothing to link
++elseif(APPLE)
+     wx_lib_link_libraries(wxwebview PUBLIC "-framework WebKit")
+ elseif(WXMSW)
+     if(wxUSE_WEBVIEW_EDGE)
+diff --git a/include/wx/chkconf.h b/include/wx/chkconf.h
+index ef82c4f..f26701e 100644
+--- a/include/wx/chkconf.h
++++ b/include/wx/chkconf.h
+@@ -2266,7 +2266,9 @@
+ #   endif
+ #endif /* wxUSE_TREELISTCTRL */
+ 
+-#if wxUSE_WEBVIEW && !(wxUSE_WEBVIEW_WEBKIT || wxUSE_WEBVIEW_WEBKIT2 || \
++/* wxQt has no built-in backend: applications register one at run time. */
++#if wxUSE_WEBVIEW && !defined(__WXQT__) && \
++                     !(wxUSE_WEBVIEW_WEBKIT || wxUSE_WEBVIEW_WEBKIT2 || \
+                        wxUSE_WEBVIEW_IE || wxUSE_WEBVIEW_EDGE || \
+                        wxUSE_WEBVIEW_CHROMIUM)
+ #   ifdef wxABORT_ON_CONFIG_ERROR
+diff --git a/include/wx/qt/webviewhistoryitem.h b/include/wx/qt/webviewhistoryitem.h
+new file mode 100644
+index 0000000..265e309
+--- /dev/null
++++ b/include/wx/qt/webviewhistoryitem.h
+@@ -0,0 +1,30 @@
++/////////////////////////////////////////////////////////////////////////////
++// Name:        include/wx/qt/webviewhistoryitem.h
++// Purpose:     wxWebViewHistoryItem header for Qt
++// Licence:     wxWindows licence
++/////////////////////////////////////////////////////////////////////////////
++
++#ifndef _WX_QT_WEBVIEWHISTORYITEM_H_
++#define _WX_QT_WEBVIEWHISTORYITEM_H_
++
++#include "wx/setup.h"
++
++#if wxUSE_WEBVIEW && defined(__WXQT__)
++
++// wxQt has no built-in web engine; backends are registered at run time through
++// wxWebView::RegisterFactory(), so the history item only stores URL and title.
++class WXDLLIMPEXP_WEBVIEW wxWebViewHistoryItem
++{
++public:
++    wxWebViewHistoryItem(const wxString& url, const wxString& title) :
++                     m_url(url), m_title(title) {}
++    wxString GetUrl() { return m_url; }
++    wxString GetTitle() { return m_title; }
++
++private:
++    wxString m_url, m_title;
++};
++
++#endif // wxUSE_WEBVIEW && defined(__WXQT__)
++
++#endif // _WX_QT_WEBVIEWHISTORYITEM_H_
+diff --git a/include/wx/webview.h b/include/wx/webview.h
+index 654e192..59feb9b 100644
+--- a/include/wx/webview.h
++++ b/include/wx/webview.h
+@@ -26,6 +26,8 @@
+     #include "wx/gtk/webviewhistoryitem_webkit.h"
+ #elif defined(__WXMSW__)
+     #include "wx/msw/webviewhistoryitem_ie.h"
++#elif defined(__WXQT__)
++    #include "wx/qt/webviewhistoryitem.h"
+ #else
+     #error "wxWebView not implemented on this platform."
+ #endif
+diff --git a/src/common/webview.cpp b/src/common/webview.cpp
+index cefb468..06d1f11 100644
+--- a/src/common/webview.cpp
++++ b/src/common/webview.cpp
+@@ -38,8 +38,12 @@ extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendEdge[] = "wxWebViewE
+ extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendWebKit[] = "wxWebViewWebKit";
+ extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendChromium[] = "wxWebViewChromium";
+ 
+-#ifdef __WXMSW__
++#if defined(__WXMSW__)
+ extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendDefault[] = "";
++#elif defined(__WXQT__)
++// No built-in backend: wxWebView::New() returns nullptr unless an application registers a
++// factory under this name.
++extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendDefault[] = "wxWebViewQt";
+ #else
+ extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendDefault[] = "wxWebViewWebKit";
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+

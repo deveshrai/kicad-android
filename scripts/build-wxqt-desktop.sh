@@ -15,8 +15,9 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
     -DwxBUILD_TOOLKIT=qt \
     -DwxBUILD_SHARED=ON \
     -DwxBUILD_SAMPLES=SOME \
-    -DwxUSE_WEBVIEW=OFF \
+    -DwxUSE_WEBVIEW=ON \
     -DwxUSE_MEDIACTRL=OFF \
+    -DwxUSE_JOYSTICK=OFF \
     -DwxUSE_OPENGL=ON \
     -DwxUSE_STC=ON \
     -DwxUSE_PROPGRID=ON \

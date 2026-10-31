@@ -1,0 +1,32 @@
+From b64fc9ca15b6fbbcaa40dcd22195366d04d01b4e Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 18:10:01 +0530
+Subject: [PATCH 1/4] qt: include the platform's GL header in wx/qt/glcanvas.h
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/wx/qt/glcanvas.h | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/include/wx/qt/glcanvas.h b/include/wx/qt/glcanvas.h
+index 847316d..0a92454 100644
+--- a/include/wx/qt/glcanvas.h
++++ b/include/wx/qt/glcanvas.h
+@@ -8,7 +8,13 @@
+ #ifndef _WX_GLCANVAS_H_
+ #define _WX_GLCANVAS_H_
+ 
+-#include <GL/gl.h>
++#if defined(__APPLE__)
++    #include <OpenGL/gl.h>
++#elif defined(__ANDROID__)
++    #include <GLES3/gl3.h>
++#else
++    #include <GL/gl.h>
++#endif
+ 
+ class QOpenGLWidget;
+ class QOpenGLContext;
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,52 @@
+From 4118949ada1c79a5acf0f0df6bbb83a2896de7e0 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 18:27:37 +0530
+Subject: [PATCH 4/4] qt: support wxGLCanvas on Android with OpenGL ES
+
+Use the NDK's GLES and EGL libraries instead of FindOpenGL, which only
+finds desktop GL, and enable the wxGLAPI immediate-mode emulation as on iOS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ build/cmake/init.cmake   | 5 +++++
+ include/wx/qt/glcanvas.h | 7 ++++++-
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/build/cmake/init.cmake b/build/cmake/init.cmake
+index 50ce044..d189a3a 100644
+--- a/build/cmake/init.cmake
++++ b/build/cmake/init.cmake
+@@ -538,6 +538,11 @@ if(wxUSE_GUI)
+             set(OPENGL_FOUND TRUE)
+             set(OPENGL_INCLUDE_DIR "")
+             set(OPENGL_LIBRARIES "-framework OpenGLES" "-framework QuartzCore" "-framework GLKit")
++        elseif(ANDROID)
++            # The NDK provides OpenGL ES and EGL; FindOpenGL looks for desktop GL only
++            set(OPENGL_FOUND TRUE)
++            set(OPENGL_INCLUDE_DIR "")
++            set(OPENGL_LIBRARIES GLESv1_CM GLESv3 EGL)
+         else()
+             find_package(OpenGL)
+             if(OPENGL_FOUND)
+diff --git a/include/wx/qt/glcanvas.h b/include/wx/qt/glcanvas.h
+index 0a92454..07f34e0 100644
+--- a/include/wx/qt/glcanvas.h
++++ b/include/wx/qt/glcanvas.h
+@@ -11,7 +11,12 @@
+ #if defined(__APPLE__)
+     #include <OpenGL/gl.h>
+ #elif defined(__ANDROID__)
+-    #include <GLES3/gl3.h>
++    // Like iOS: OpenGL ES 1 headers, with wxGLAPI emulating the immediate mode
++    // functions used by the common wxGLCanvas code
++    #include <GLES/gl.h>
++    #include <GLES/glext.h>
++    #define wxUSE_OPENGL_EMULATION 1
++    #define wxHAS_OPENGL_ES
+ #else
+     #include <GL/gl.h>
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+

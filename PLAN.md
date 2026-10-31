@@ -52,36 +52,36 @@ Bootstrap: fontconfig is cross-compiled via vcpkg initially, so the Rust font pr
 ## 4. Phases
 
 ### Phase 0 — Toolchain & dependencies  ← *in progress*
-- [x] Android SDK cmdline-tools, NDK r29 (29.0.14206865), platform 35
-- [x] CMake 4.x + Ninja (venv), Rust 1.99 + `aarch64-linux-android`
-- [x] vcpkg + `deps/vcpkg.json` (KiCad's manifest minus wx/python/opengl, plus vulkan-headers/fontconfig), custom `arm64-android` triplet (static, API 29)
-- [ ] Qt 6.12 (macOS host + android_arm64_v8a) via aqtinstall
-- [ ] All vcpkg deps build for arm64-android (expect overlay-port fixes: ngspice, OCCT, libgit2, nng)
+- [x] Android SDK cmdline-tools, NDK r29 (29.0.14206865), platforms 35/37
+- [x] CMake 4.x + Ninja (venv), Rust 1.99 + Android targets, host autotools + pkgconf (`scripts/install-autotools.sh`, no Homebrew)
+- [x] vcpkg + `deps/vcpkg.json`, custom `arm64-android` triplet (static, API 29), KiCad's registry for OCCT
+- [x] Qt 6.12 (macOS host + android_arm64_v8a). Note: aqt's default mirror stalls on qtbase; use `-b https://mirrors.ocf.berkeley.edu/qt/`
+- [x] **wxWidgets master (wxQt) builds for Android arm64**: all 15 libs incl. `gl`, `webview`, `stc`, `propgrid`, `aui`. 4 patches in `patches/wxwidgets/`:
+  1. platform GL header in `wx/qt/glcanvas.h`
+  2. backend-less `wxWebView` library for wxQt (register a backend at run time)
+  3. cross-compiling from a macOS host (OBJCXX after `project()`, `getservbyname_r` check)
+  4. `wxGLCanvas` on Android via GLES + wxGLAPI emulation (as on iOS)
+- [ ] vcpkg deps for arm64-android (in progress). Overlay ports: `ngspice` (KiCad's is MSBuild-only; first pass without XSPICE code models, which need a host `cmpp`), `libspnav` (no X11, socket client only; keeps KiCad's `__linux__` SpaceMouse path compiling unchanged)
 
-### Phase 1 — wxQt on desktop first (fast iteration)
-Shake out wxQt problems on macOS with a debugger before going to a device.
-- Build wxWidgets master `--with-qt` against desktop Qt 6.
-- Build KiCad on macOS against wxQt (Cairo GAL), add `libs/kiplatform/port/wxqt`.
-- Fix and log wxQt gaps (patch queue in `patches/wxwidgets/`, upstream when possible).
-- Exit: pcbnew + eeschema open, render and edit a demo project on desktop wxQt.
+### Phase 1 — KiCad configures and compiles for Android
+Decision (2026-10-31): **skip the macOS KiCad-on-wxQt spike.** KiCad has 24 `__APPLE__` files and 42 CMake `if(APPLE)` blocks plus Metal assumptions that would make mac+Qt its own porting target, and it would need a second full deps build. Iterate on the arm64 Android emulator instead; the desktop wxQt build stays as a sandbox for reproducing wxQt bugs with wx samples.
+- [x] `libs/kiplatform/port/wxqt` (ui/touchpad/webview) and `libs/kiplatform/os/android` (app/environment/secrets/printing; reuses os/unix drivers/io/policy/sysinfo)
+- [ ] Root CMake: exclude Android from `UNIX_NOT_APPLE` desktop branches (GTK, metainfo, Wayland app ids), keep libspnav (`__linux__` is defined on Android)
+- [ ] OpenGL: `find_package(OpenGL)` fails on Android; GAL OpenGL + 3D viewer need compiling out or a GLES path
+- [ ] `kicad-cli` links and runs via `adb shell` (`QT_QPA_PLATFORM=offscreen`)
 
-### Phase 2 — Cross-compile for Android
-- wxQt for Android (CMake build against Qt for Android, `wxUSE_WEBVIEW=0`, OpenGL off initially).
-- KiCad Android CMake toolchain profile: `kiplatform/os/android`, disable 3D OpenGL viewer, IPC API, update check, sentry, spacenav.
-- First target: `kicad-cli` binary run via `adb shell` with `QT_QPA_PLATFORM=offscreen`. It validates the whole core (file I/O, DRC/ERC, plotting, fonts) on device.
-
-### Phase 3 — App on device (KBM)
+### Phase 2 — App on device (KBM)
 - Gradle/androiddeployqt APK; single process hosting kicad + kifaces (pcbnew/eeschema as `.so` loaded by `KIWAY`, which already works this way).
 - Canvas: Cairo GAL first, then Modern GAL via `VK_KHR_android_surface` (`QWindow` to `ANativeWindow`).
 - Rust platform crate: paths, SAF file dialogs, fonts, secrets, intents.
 - KBM polish: right-click, middle-drag pan, wheel zoom, hotkeys (capture Meta/Esc before Android does), pointer capture.
 - Lifecycle: save state on `onStop`, survive config changes, multi-window/freeform.
 
-### Phase 4 — Content & distribution
+### Phase 3 — Content & distribution
 - Libraries on demand (symbols/footprints/3D), templates, demos.
 - Signing, AAB, size budget, crash reporting.
 
-### Phase 5 — Touch (later)
+### Phase 4 — Touch (later)
 Gesture mapping in GAL tools, larger hit targets, touch-friendly dialogs and toolbars.
 
 ## 5. Repo layout
