@@ -31,6 +31,16 @@ if [ "${1:-}" = "--push" ]; then
     cp "$QT_ANDROID_PATH/plugins/platforms/libplugins_platforms_qoffscreen_arm64-v8a.so" \
        "$STAGE/plugins/platforms/"
 
+    # KiCad's stock data (schemas, templates, drawing sheets); from a DESTDIR install
+    SHARE="$KA_ROOT/build/install/kicad-android/usr/local/share/kicad"
+    [ -d "$SHARE" ] || DESTDIR="$KA_ROOT/build/install/kicad-android" cmake --install "$BUILD" >/dev/null
+    mkdir -p "$STAGE/share"
+    cp -R "$SHARE" "$STAGE/share/kicad"
+
+    # Debug info makes the kifaces multi-GB; strip it for the device copy
+    STRIP="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip"
+    find "$STAGE/bin" "$STAGE/lib" "$STAGE/plugins" -type f -exec "$STRIP" --strip-debug {} \; 2>/dev/null || true
+
     # fontconfig: scan Android's system fonts
     cat > "$STAGE/etc/fonts/fonts.conf" <<EOF
 <?xml version="1.0"?>
@@ -54,6 +64,7 @@ adb -e shell "cd $DEV && \
     QT_QPA_PLATFORM=offscreen \
     QT_PLUGIN_PATH=$DEV/plugins \
     FONTCONFIG_FILE=$DEV/etc/fonts/fonts.conf \
+    KICAD_STOCK_DATA_HOME=$DEV/share/kicad \
     HOME=$DEV/home \
     XDG_CONFIG_HOME=$DEV/home/.config \
     $DEV/bin/kicad-cli $*"

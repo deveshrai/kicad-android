@@ -1,0 +1,152 @@
+From d70176d5fe330ebc3f110b766a92dc9829590f9c Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 19:54:30 +0530
+Subject: [PATCH 4/4] Android: FreeType include layout, JVM-aware kiplatform
+ paths
+
+Assisted-by: Claude Code
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ include/font/outline_decomposer.h          |  6 +--
+ include/font/outline_font.h                |  6 +--
+ libs/kiplatform/os/android/environment.cpp | 56 +++++++++++++++++++---
+ 3 files changed, 56 insertions(+), 12 deletions(-)
+
+diff --git a/include/font/outline_decomposer.h b/include/font/outline_decomposer.h
+index a0ae046e..c16ce40c 100644
+--- a/include/font/outline_decomposer.h
++++ b/include/font/outline_decomposer.h
+@@ -24,10 +24,10 @@
+ #define OUTLINE_DECOMPOSER_H
+ 
+ #include <vector>
+-#ifdef _MSC_VER
+-#include <ft2build.h>
+-#else
++#if __has_include( <freetype2/ft2build.h> )
+ #include <freetype2/ft2build.h>
++#else
++#include <ft2build.h>
+ #endif
+ #include FT_FREETYPE_H
+ #include FT_OUTLINE_H
+diff --git a/include/font/outline_font.h b/include/font/outline_font.h
+index 831b75a2..8d06c018 100644
+--- a/include/font/outline_font.h
++++ b/include/font/outline_font.h
+@@ -25,10 +25,10 @@
+ 
+ #include <gal/gal.h>
+ #include <geometry/shape_poly_set.h>
+-#ifdef _MSC_VER
+-#include <ft2build.h>
+-#else
++#if __has_include( <freetype2/ft2build.h> )
+ #include <freetype2/ft2build.h>
++#else
++#include <ft2build.h>
+ #endif
+ #include FT_FREETYPE_H
+ #include FT_OUTLINE_H
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index ca8f9051..8c7b051e 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -31,11 +31,55 @@
+ #include <QDir>
+ #include <QStandardPaths>
+ 
++#include <dlfcn.h>
++#include <jni.h>
++
+ 
+ namespace
+ {
+-wxString standardPath( QStandardPaths::StandardLocation aLocation )
++/**
++ * QStandardPaths on Android asks the Java Context for its directories, which crashes in a
++ * process without a Java VM, e.g. kicad-cli started from a shell.  Detect the VM through
++ * JNI_GetCreatedJavaVMs, which is only resolvable once the runtime is loaded.
++ */
++bool hasJavaVM()
++{
++    using GET_VMS = jint ( * )( JavaVM**, jsize, jsize* );
++    static const bool s_hasVM = []()
++    {
++        auto getVMs = reinterpret_cast<GET_VMS>( dlsym( RTLD_DEFAULT, "JNI_GetCreatedJavaVMs" ) );
++        JavaVM* vm = nullptr;
++        jsize   count = 0;
++        return getVMs && getVMs( &vm, 1, &count ) == JNI_OK && count > 0;
++    }();
++
++    return s_hasVM;
++}
++
++
++/// XDG-style fallback under $HOME for processes without a Java VM
++wxString homePath( const wxString& aSubdir )
++{
++    wxString home;
++
++    if( !wxGetEnv( wxT( "HOME" ), &home ) || home.IsEmpty() )
++        home = wxT( "/data/local/tmp" );
++
++    wxFileName dir = wxFileName::DirName( home );
++
++    if( !aSubdir.IsEmpty() )
++        dir.AppendDir( aSubdir );
++
++    dir.Mkdir( wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++    return dir.GetPath();
++}
++
++
++wxString standardPath( QStandardPaths::StandardLocation aLocation, const wxString& aFallback )
+ {
++    if( !hasJavaVM() )
++        return homePath( aFallback );
++
+     const QString path = QStandardPaths::writableLocation( aLocation );
+     QDir().mkpath( path );
+     return wxString::FromUTF8( path.toUtf8().constData() );
+@@ -80,31 +124,31 @@ wxString KIPLATFORM::ENV::GetDocumentsPath()
+     // App-specific external storage: visible to the user over USB and in the Files app,
+     // and needs no storage permission.  TODO(android): Storage Access Framework for
+     // projects elsewhere.
+-    return standardPath( QStandardPaths::DocumentsLocation );
++    return standardPath( QStandardPaths::DocumentsLocation, wxT( "Documents" ) );
+ }
+ 
+ 
+ wxString KIPLATFORM::ENV::GetUserConfigPath()
+ {
+-    return standardPath( QStandardPaths::AppConfigLocation );
++    return standardPath( QStandardPaths::AppConfigLocation, wxT( ".config" ) );
+ }
+ 
+ 
+ wxString KIPLATFORM::ENV::GetUserDataPath()
+ {
+-    return standardPath( QStandardPaths::AppDataLocation );
++    return standardPath( QStandardPaths::AppDataLocation, wxT( ".local/share" ) );
+ }
+ 
+ 
+ wxString KIPLATFORM::ENV::GetUserLocalDataPath()
+ {
+-    return standardPath( QStandardPaths::AppLocalDataLocation );
++    return standardPath( QStandardPaths::AppLocalDataLocation, wxT( ".local/share" ) );
+ }
+ 
+ 
+ wxString KIPLATFORM::ENV::GetUserCachePath()
+ {
+-    return standardPath( QStandardPaths::CacheLocation );
++    return standardPath( QStandardPaths::CacheLocation, wxT( ".cache" ) );
+ }
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+

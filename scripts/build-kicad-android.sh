@@ -18,6 +18,18 @@ if [ ! -x "$HOST_LEMON" ] || [ "$SRC/thirdparty/lemon/lemon.c" -nt "$HOST_LEMON"
     xcrun clang -O2 -w -o "$HOST_LEMON" "$SRC/thirdparty/lemon/lemon.c"
 fi
 
+# -z global (DF_1_GLOBAL): bionic's global lookup group holds only the executable and libraries
+# with this flag, unlike glibc where it covers all of the executable's dependencies.  Without
+# it a dlopen'ed kiface binds weak RTTI to its own copy instead of libkicommon's, and
+# dynamic_cast across modules fails (libc++ compares type_info by address).
+#
+# vcpkg's static archives don't record their own dependencies, and KiCad's find modules link
+# only the top-level library.  Append the full static closure (from vcpkg's .pc files) to
+# every link; lld resolves archives regardless of position.
+STATIC_PKGS="cairo fontconfig harfbuzz freetype2 libcurl libgit2 libzstd sqlite3 icu-uc icu-i18n odbc libjpeg uuid"
+STATIC_LIBS="$(PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig" pkgconf --define-variable=prefix="$DEPS" \
+    --static --libs $STATIC_PKGS | tr ' ' '\n' | grep -vxE -- '-lc\+\+|-pthread' | tr '\n' ' ')"
+
 CONFIGURE_ONLY=0
 if [ "${1:-}" = "--configure-only" ]; then CONFIGURE_ONLY=1; shift; fi
 
@@ -36,6 +48,10 @@ if [ "${1:-}" = "--configure-only" ]; then CONFIGURE_ONLY=1; shift; fi
     -DwxWidgets_CONFIG_OPTIONS="--prefix=$WX" \
     -DPYTHON_EXECUTABLE="$(command -v python3)" \
     -DLEMON_EXE="$HOST_LEMON" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,global" \
+    -DCMAKE_MODULE_LINKER_FLAGS="-Wl,-z,global" \
+    -DCMAKE_C_STANDARD_LIBRARIES="$STATIC_LIBS" \
+    -DCMAKE_CXX_STANDARD_LIBRARIES="$STATIC_LIBS" \
     -DNGSPICE_LIB_NAME=libngspice.so \
     -DOCC_INCLUDE_DIR="$DEPS/include/opencascade" \
     -DKICAD_BUILD_QA_TESTS=OFF \

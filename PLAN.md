@@ -82,11 +82,26 @@ KiCad_Tablet AVD (2560x1600, API 37). Results:
 ### Phase 1 — KiCad configures and compiles for Android
 Decision (2026-10-31): **skip the macOS KiCad-on-wxQt spike.** KiCad has 24 `__APPLE__` files and 42 CMake `if(APPLE)` blocks plus Metal assumptions that would make mac+Qt its own porting target, and it would need a second full deps build. Iterate on the arm64 Android emulator instead; the desktop wxQt build stays as a sandbox for reproducing wxQt bugs with wx samples.
 - [x] `libs/kiplatform/port/wxqt` (ui/touchpad/webview) and `libs/kiplatform/os/android` (app/environment/secrets/printing; reuses os/unix drivers/io/policy/sysinfo)
-- [ ] Root CMake: exclude Android from `UNIX_NOT_APPLE` desktop branches (GTK, metainfo, Wayland app ids), keep libspnav (`__linux__` is defined on Android)
-- [ ] OpenGL: `find_package(OpenGL)` fails on Android; GAL OpenGL + 3D viewer need compiling out or a GLES path
-- [ ] `kicad-cli` links and runs via `adb shell` (`QT_QPA_PLATFORM=offscreen`)
+- [x] Root CMake: Android excluded from `UNIX_NOT_APPLE` desktop branches; libspnav kept (`__linux__` is defined on Android)
+- [x] OpenGL: no desktop GL on Android. GL goes through glad at run time, GLU vendored in `thirdparty/glu` (SGI-B), GLES/EGL linked; the OpenGL GAL will fail to start and KiCad falls back to Cairo/Modern
+- [x] **Entire KiCad tree builds for Android arm64** (1299 steps: kicad, kicad-cli, pcbnew, eeschema, gerbview, cvpcb, pl_editor, pcb_calculator) via `scripts/build-kicad-android.sh`
+- [x] **`kicad-cli` works on the emulator** (`scripts/run-kicad-cli.sh --push ...`), verified on demos/pic_programmer:
+  ERC, DRC, schematic PDF/SVG, netlist, BOM, board SVG, Gerbers + job file, drill, STEP (OCCT). Output checked visually.
 
-### Phase 2 — App on device (KBM)
+Build lessons (all handled in scripts/patches):
+- Host `lemon` for parser generation (cross build can't run the target one)
+- vcpkg static archives lack transitive deps: append pkg-config `--static` closure to every link
+- Static OCCT: link all `libTK*.a`
+- **`-Wl,-z,global` on KiCad shared libs/kifaces.** Bionic's global lookup group excludes the
+  executable's dependencies (glibc includes them), so a dlopen'ed kiface bound weak RTTI to its
+  own copy and cross-module `dynamic_cast` failed silently (libc++ compares type_info by address).
+  Symptom: schematic plot jobs returned ERR_UNKNOWN with no message.
+- `QStandardPaths` needs a Java VM; kiplatform falls back to `$HOME` paths without one (CLI)
+- KiCad stock data via `KICAD_STOCK_DATA_HOME` (DESTDIR install, paths are baked at configure)
+
+### Phase 2 — App on device (KBM)  ← *next*
+- `kicad` target as a shared library loaded by Qt's Android activity (bionic can't dlopen executables)
+- kifaces packaged as `lib*.so` in the APK and found by KIWAY in the native library dir
 - Gradle/androiddeployqt APK; single process hosting kicad + kifaces (pcbnew/eeschema as `.so` loaded by `KIWAY`, which already works this way).
 - Canvas: Cairo GAL first, then Modern GAL via `VK_KHR_android_surface` (`QWindow` to `ANativeWindow`).
 - Rust platform crate: paths, SAF file dialogs, fonts, secrets, intents.
