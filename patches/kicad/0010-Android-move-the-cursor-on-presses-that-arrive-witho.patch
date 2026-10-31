@@ -1,0 +1,37 @@
+From 4be1baea6db9fc6ef137f92261c00b3e986b1e28 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 23:14:32 +0530
+Subject: [PATCH 10/10] Android: move the cursor on presses that arrive without
+ a motion event
+
+Touch and stylus presses have no preceding motion, so tools acted at the
+previous press position.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/view/wx_view_controls.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/common/view/wx_view_controls.cpp b/common/view/wx_view_controls.cpp
+index f66d3ae8..d765c8a2 100644
+--- a/common/view/wx_view_controls.cpp
++++ b/common/view/wx_view_controls.cpp
+@@ -584,6 +584,13 @@ void WX_VIEW_CONTROLS::setState( STATE aNewState )
+ 
+ void WX_VIEW_CONTROLS::onButton( wxMouseEvent& aEvent )
+ {
++#ifdef __ANDROID__
++    // Touch and stylus presses arrive without a preceding motion event, so the press itself
++    // has to move the cursor or tools act at wherever the previous press left it
++    if( aEvent.ButtonDown() && m_state == IDLE )
++        m_cursorPos = GetClampedCoords( m_view->ToWorld( VECTOR2D( aEvent.GetX(), aEvent.GetY() ) ) );
++#endif
++
+     switch( m_state )
+     {
+     case IDLE:
+-- 
+2.54.0 (Apple Git-157)
+

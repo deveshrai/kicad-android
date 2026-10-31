@@ -1,0 +1,80 @@
+From 186869cc091178e3e9380d98512cbf7dc41745a5 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 23:14:32 +0530
+Subject: [PATCH] qt: don't report mouse buttons stuck down after
+ touch-synthesized releases on Android
+
+QApplication::mouseButtons() keeps a button held after the release of a
+mouse event Qt synthesized from touch or a stylus, so code polling
+wxGetMouseState() never saw the release. Also track the buttons of the
+mouse events wx receives and require both on Android.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ include/wx/qt/private/utils.h |  3 +++
+ src/qt/utils.cpp              | 17 ++++++++++++++++-
+ src/qt/window.cpp             |  2 ++
+ 3 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/include/wx/qt/private/utils.h b/include/wx/qt/private/utils.h
+index fecc700..25f0418 100644
+--- a/include/wx/qt/private/utils.h
++++ b/include/wx/qt/private/utils.h
+@@ -15,6 +15,9 @@
+ 
+ void wxQtFillMouseButtons( Qt::MouseButtons buttons, wxMouseState *state );
+ 
++// Buttons held according to the last mouse event wx received
++void wxQtSetEventMouseButtons( Qt::MouseButtons buttons );
++
+ void wxMissingImplementation( const char fileName[], unsigned lineNumber,
+     const char feature[] );
+ 
+diff --git a/src/qt/utils.cpp b/src/qt/utils.cpp
+index faa98ac..c3c6a39 100644
+--- a/src/qt/utils.cpp
++++ b/src/qt/utils.cpp
+@@ -56,10 +56,25 @@ void wxGetMousePosition( int *x, int *y )
+ #endif
+ 
+ #if wxUSE_GUI
++static Qt::MouseButtons gs_eventMouseButtons = Qt::NoButton;
++
++void wxQtSetEventMouseButtons( Qt::MouseButtons buttons )
++{
++    gs_eventMouseButtons = buttons;
++}
++
+ wxMouseState wxGetMouseState()
+ {
+     wxMouseState ms;
+-    wxQtFillMouseButtons( QApplication::mouseButtons(), &ms );
++    Qt::MouseButtons buttons = QApplication::mouseButtons();
++
++#ifdef __ANDROID__
++    // Qt keeps reporting a button held after the release of a mouse event it synthesized from
++    // touch or a stylus, so trust the buttons of the events themselves too
++    buttons &= gs_eventMouseButtons;
++#endif
++
++    wxQtFillMouseButtons( buttons, &ms );
+ 
+     return ms;
+ }
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index c59a043..35ed524 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1753,6 +1753,8 @@ bool wxWindowQt::QtHandleKeyEvent ( QWidget *WXUNUSED( handler ), QKeyEvent *eve
+ 
+ bool wxWindowQt::QtHandleMouseEvent ( QWidget *handler, QMouseEvent *event )
+ {
++    wxQtSetEventMouseButtons( event->buttons() );
++
+     // Convert event type
+     wxEventType wxType = 0;
+     switch ( event->type() )
+-- 
+2.54.0 (Apple Git-157)
+

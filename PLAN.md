@@ -144,7 +144,18 @@ Build lessons (all handled in scripts/patches):
         the canvas; popups (selection clarifier) composite over the GPU canvas correctly
       - verified on API 35 emulator (gfxstream -> MoltenVK, Apple M3): render, wheel zoom, Home,
         click-select with highlight
-- Debug: `echo KICAD_RHI > files/wxtrace` (via run-as) sends wx traces to logcat (tag KiCad-wx/wxWidgets)
+- [x] Routing + saving on the GPU canvas (2026-10-31): X starts the router, clicks fix segments,
+      End commits (370 -> 374 segments), Ctrl+Z / Ctrl+Y undo/redo, Ctrl+S writes the
+      .kicad_pcb (format upgraded, new segments present in the file). Escape mid-route discards it.
+  - Fixed: taps became drags in every tool after the first. `QApplication::mouseButtons()` keeps
+    Left held after a touch-synthesized release, and KiCad's dispatcher detects button-up by
+    polling `wxGetMouseState()` (wx patch 9: also track the buttons of received events)
+  - Fixed: presses without a preceding motion left the tool cursor at the previous point
+    (kicad patch 10, `WX_VIEW_CONTROLS::onButton`)
+- Debug: `adb shell setprop debug.kicad.wxtrace KICAD_TOOL_STACK` (the prop wins over the
+  `files/wxtrace` file; clear it with `setprop debug.kicad.wxtrace "''"`) sends wx traces to
+  logcat (tag KiCad-wx/wxWidgets). Masks: KICAD_RHI, KICAD_TOOL_STACK, KICAD_KEY_EVENTS
+- Noise: a hidden canvas (windowId=1, IsShownOnScreen=0) retries ForceRefresh every 100 ms
 - Testing note: `adb shell input mouse tap` events never reach Qt; use `input touchscreen tap`
   (Qt synthesizes mouse) and `input mouse scroll` for the wheel
 - [ ] Polish: dialogs open small/unframed; tree icon overlap in the project panel; frames should
