@@ -1,0 +1,16 @@
+[package]
+name = "kiandroid"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+roxmltree = "0.21.2"
+ttf-parser = "0.25.1"
+
+[lib]
+# staticlib: linked into KiCad's Android .so; rlib: for tests / other Rust crates
+crate-type = ["staticlib", "rlib"]
+
+[profile.release]
+panic = "abort"
+lto = true

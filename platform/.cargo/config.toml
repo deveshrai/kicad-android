@@ -1,0 +1,8 @@
+# NDK linkers for Android targets (API 29). Regenerate if the NDK version changes.
+[target.aarch64-linux-android]
+linker = "/Users/devesh/Library/Android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android29-clang"
+ar = "/Users/devesh/Library/Android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+
+[target.x86_64-linux-android]
+linker = "/Users/devesh/Library/Android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android29-clang"
+ar = "/Users/devesh/Library/Android/sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"

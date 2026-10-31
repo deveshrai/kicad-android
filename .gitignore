@@ -1,0 +1,6 @@
+/kicad/
+/toolchain/
+/build/
+/deps/vcpkg_installed/
+target/
+.DS_Store
