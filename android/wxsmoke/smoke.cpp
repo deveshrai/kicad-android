@@ -4,7 +4,51 @@
 
 #include <wx/wx.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define SMOKE_LOG( ... ) __android_log_print( ANDROID_LOG_INFO, "WXSMOKE", __VA_ARGS__ )
+#else
+#define SMOKE_LOG( ... ) ( fprintf( stderr, "WXSMOKE " __VA_ARGS__ ), fputc( '\n', stderr ) )
+#endif
+
 #include <deque>
+
+#include <QCoreApplication>
+#include <QInputMethodEvent>
+#include <QKeyEvent>
+
+
+// Logs keyboard-related Qt events before wxQt sees them, to tell Qt delivery problems
+// apart from wxQt translation problems.
+class QT_KEY_SPY : public QObject
+{
+protected:
+    bool eventFilter( QObject* aWatched, QEvent* aEvent ) override
+    {
+        switch( aEvent->type() )
+        {
+        case QEvent::KeyPress:
+        case QEvent::ShortcutOverride:
+        {
+            auto ke = static_cast<QKeyEvent*>( aEvent );
+            SMOKE_LOG( "qt %s key=0x%x text='%s' mods=0x%x to %s",
+                       aEvent->type() == QEvent::KeyPress ? "KeyPress" : "ShortcutOverride",
+                       ke->key(), ke->text().toUtf8().constData(), (unsigned) ke->modifiers(),
+                       aWatched->metaObject()->className() );
+            break;
+        }
+        case QEvent::InputMethod:
+            SMOKE_LOG( "qt InputMethod commit='%s' to %s",
+                       static_cast<QInputMethodEvent*>( aEvent )->commitString().toUtf8().constData(),
+                       aWatched->metaObject()->className() );
+            break;
+        default:
+            break;
+        }
+
+        return false;
+    }
+};
 
 
 class INPUT_PANEL : public wxPanel
@@ -32,7 +76,7 @@ private:
     void log( const wxString& aLine )
     {
         // Mirror to logcat so tests can assert on events without screenshots
-        fprintf( stderr, "WXSMOKE %s\n", aLine.utf8_str().data() );
+        SMOKE_LOG( "%s", aLine.utf8_str().data() );
         m_lines.push_front( aLine );
 
         if( m_lines.size() > 30 )
@@ -147,7 +191,7 @@ public:
               },
               wxID_OPEN );
 
-        fprintf( stderr, "WXSMOKE frame created\n" );
+        SMOKE_LOG( "frame created, size %dx%d", GetSize().x, GetSize().y );
     }
 
 private:
@@ -158,11 +202,46 @@ private:
 class SMOKE_APP : public wxApp
 {
 public:
+    // Startup markers: show which stage of wxEntry() is reached on Android
+    bool Initialize( int& argc, wxChar** argv ) override
+    {
+        SMOKE_LOG( "Initialize: enter" );
+        bool ok = wxApp::Initialize( argc, argv );
+        SMOKE_LOG( "Initialize: returned %d", ok );
+        return ok;
+    }
+
+    bool OnInitGui() override
+    {
+        SMOKE_LOG( "OnInitGui: enter" );
+        bool ok = wxApp::OnInitGui();
+        SMOKE_LOG( "OnInitGui: returned %d", ok );
+        return ok;
+    }
+
+    int OnRun() override
+    {
+        SMOKE_LOG( "OnRun: entering main loop" );
+        return wxApp::OnRun();
+    }
+
     bool OnInit() override
     {
-        ( new SMOKE_FRAME )->Show();
+        SMOKE_LOG( "OnInit" );
+        qApp->installEventFilter( new QT_KEY_SPY );
+        SMOKE_FRAME* frame = new SMOKE_FRAME;
+        bool shown = frame->Show();
+        SMOKE_LOG( "frame Show() returned %d, IsShown %d", shown, frame->IsShown() );
         return true;
     }
 };
 
-wxIMPLEMENT_APP( SMOKE_APP );
+wxIMPLEMENT_APP_NO_MAIN( SMOKE_APP );
+
+int main( int argc, char** argv )
+{
+    SMOKE_LOG( "main: enter, argc=%d", argc );
+    int rc = wxEntry( argc, argv );
+    SMOKE_LOG( "main: wxEntry returned %d", rc );
+    return rc;
+}

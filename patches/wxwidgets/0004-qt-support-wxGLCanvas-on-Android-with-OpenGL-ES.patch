@@ -1,7 +1,7 @@
 From 4118949ada1c79a5acf0f0df6bbb83a2896de7e0 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 18:27:37 +0530
-Subject: [PATCH 4/5] qt: support wxGLCanvas on Android with OpenGL ES
+Subject: [PATCH 4/6] qt: support wxGLCanvas on Android with OpenGL ES
 
 Use the NDK's GLES and EGL libraries instead of FindOpenGL, which only
 finds desktop GL, and enable the wxGLAPI immediate-mode emulation as on iOS.

@@ -2,6 +2,9 @@
 # Cross-compile wxWidgets (wxQt port, with patches/wxwidgets applied on branch kicad-android)
 # for Android arm64 against Qt for Android.
 #
+# iconv off: bionic's iconv fails wx's UTF-32 conversions (E2BIG) and wxEntry() hangs;
+# wx's built-in converters cover what KiCad needs.
+#
 # Shared libraries: KiCad loads its kifaces (pcbnew, eeschema, ...) as separate .so modules,
 # and each must see the same wx instance.
 set -euo pipefail
@@ -40,6 +43,7 @@ PREFIX="$KA_ROOT/build/install/android"
     -DwxUSE_REGEX=builtin \
     -DwxUSE_EXPAT=builtin \
     -DwxUSE_ZLIB=sys \
+    -DwxUSE_LIBICONV=OFF \
     "$@"
 
 cmake --build "$BUILD"

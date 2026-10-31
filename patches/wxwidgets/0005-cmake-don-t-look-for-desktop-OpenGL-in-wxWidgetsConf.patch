@@ -1,7 +1,7 @@
 From 5c23782fa3ed6092cc78fe996d69a6708db090ce Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 19:05:47 +0530
-Subject: [PATCH 5/5] cmake: don't look for desktop OpenGL in wxWidgetsConfig
+Subject: [PATCH 5/6] cmake: don't look for desktop OpenGL in wxWidgetsConfig
  on Android
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

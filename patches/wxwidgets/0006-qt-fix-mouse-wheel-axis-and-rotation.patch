@@ -1,0 +1,40 @@
+From b5fc9793b2d0311e579d8692f0e38b653f0fb417 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 19:16:20 +0530
+Subject: [PATCH 6/6] qt: fix mouse wheel axis and rotation
+
+Scrolling down was reported as a horizontal wheel event with zero rotation,
+because the axis test only accepted positive vertical deltas. The rotation
+was also divided by 8 while m_wheelDelta stays 120; Qt's angleDelta() already
+uses 120 per notch, so pass it through unscaled.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/window.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 5078257..c59a043 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1631,10 +1631,14 @@ bool wxWindowQt::QtHandleWheelEvent ( QWidget *WXUNUSED( handler ), QWheelEvent
+     wxMouseEvent e( wxEVT_MOUSEWHEEL );
+ #if (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0))
+     QPoint qPt = event->position().toPoint();
+-    wxMouseWheelAxis wheelAxis = event->angleDelta().y() > 0
++    // angleDelta() is in eighths of a degree, 120 per wheel notch, which is the same
++    // convention as wxMouseEvent::m_wheelDelta, so it is used unscaled. Any non-zero
++    // vertical component (in either direction) makes this a vertical wheel event.
++    const QPoint angleDelta = event->angleDelta();
++    wxMouseWheelAxis wheelAxis = angleDelta.y() != 0
+                                ? wxMOUSE_WHEEL_VERTICAL : wxMOUSE_WHEEL_HORIZONTAL;
+     int wheelRotation = wheelAxis == wxMOUSE_WHEEL_VERTICAL
+-                      ? (event->angleDelta().y() / 8) : (event->angleDelta().x() / 8);
++                      ? angleDelta.y() : angleDelta.x();
+ #else
+     QPoint qPt = event->pos();
+     wxMouseWheelAxis wheelAxis = event->orientation() == Qt::Vertical
+-- 
+2.54.0 (Apple Git-157)
+

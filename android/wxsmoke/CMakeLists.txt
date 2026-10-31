@@ -9,7 +9,7 @@ find_package( Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Test
 find_package( wxWidgets 3.3 REQUIRED CONFIG )
 
 qt_add_executable( wxsmoke smoke.cpp )
-target_link_libraries( wxsmoke PRIVATE wx::wxcore wx::wxbase Qt6::Widgets )
+target_link_libraries( wxsmoke PRIVATE wx::wxcore wx::wxbase Qt6::Widgets $<$<PLATFORM_ID:Android>:log> )
 
 # androiddeployqt only bundles Qt's own dependencies; list the wx shared libraries.
 file( GLOB WX_SHARED_LIBS "${wxWidgets_DIR}/../../libwx_*.so" )

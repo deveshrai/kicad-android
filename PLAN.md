@@ -63,6 +63,22 @@ Bootstrap: fontconfig is cross-compiled via vcpkg initially, so the Rust font pr
   4. `wxGLCanvas` on Android via GLES + wxGLAPI emulation (as on iOS)
 - [ ] vcpkg deps for arm64-android (in progress). Overlay ports: `ngspice` (KiCad's is MSBuild-only; first pass without XSPICE code models, which need a host `cmpp`), `libspnav` (no X11, socket client only; keeps KiCad's `__linux__` SpaceMouse path compiling unchanged)
 
+### Emulator KBM smoke test (2026-10-31) — wxQt on Android **works**
+`android/wxsmoke` (APK via `scripts/build-wxsmoke.sh`, run with `scripts/run-wxsmoke.sh`) on the
+KiCad_Tablet AVD (2560x1600, API 37). Results:
+- [x] wx 3.3.5 starts, frame/panel/status bar render with correct HiDPI (2x) scaling
+- [x] Click (left down/up, correct logical coords), drag (motion with button held)
+- [x] Keyboard: letters, digits, F-keys, arrows, Tab, Backspace/Delete, Ctrl/Shift/Alt chords
+- [x] Wheel: +/-120 per notch, multi-notch, horizontal (after wx patch 6)
+- [ ] Right/middle button: `adb shell input` can't inject mouse buttons; verify by hand in the
+      emulator window, then on the Samsung tablet with a real mouse
+- Fixed: wxEntry() hung in bionic iconv (E2BIG on UTF-32) -> wx built with `wxUSE_LIBICONV=OFF`
+- Fixed: wxQt wheel axis/rotation bug (patch 6, affects all wxQt platforms)
+- Open: top-level frames open at default size instead of filling the screen; menu bar and the
+  wxTextCtrl are not visible; Ctrl/Alt chords give char code 0 (other ports give control codes)
+- Emulator must be started outside Claude Code's sandbox (needs Hypervisor.framework):
+  `! scripts/emulator.sh`. A physical Samsung tablet is for testing after the emulator passes.
+
 ### Phase 1 — KiCad configures and compiles for Android
 Decision (2026-10-31): **skip the macOS KiCad-on-wxQt spike.** KiCad has 24 `__APPLE__` files and 42 CMake `if(APPLE)` blocks plus Metal assumptions that would make mac+Qt its own porting target, and it would need a second full deps build. Iterate on the arm64 Android emulator instead; the desktop wxQt build stays as a sandbox for reproducing wxQt bugs with wx samples.
 - [x] `libs/kiplatform/port/wxqt` (ui/touchpad/webview) and `libs/kiplatform/os/android` (app/environment/secrets/printing; reuses os/unix drivers/io/policy/sysinfo)
