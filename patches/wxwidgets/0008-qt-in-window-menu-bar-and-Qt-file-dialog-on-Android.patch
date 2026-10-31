@@ -1,0 +1,81 @@
+From 2bbda0cd1024cfa38fa491ba3c37c2e14fdffb36 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 20:52:19 +0530
+Subject: [PATCH 8/8] qt: in-window menu bar and Qt file dialog on Android
+
+Android's native menu bar is the action bar overflow menu, which hides
+application menus; use a regular in-window QMenuBar. The native file dialog
+is the system document picker, which returns content:// URIs rather than
+paths; use Qt's own dialog.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/filedlg.cpp |  5 +++++
+ src/qt/menu.cpp    | 20 +++++++++++++++++---
+ 2 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/src/qt/filedlg.cpp b/src/qt/filedlg.cpp
+index 22d141b..1bb28f7 100644
+--- a/src/qt/filedlg.cpp
++++ b/src/qt/filedlg.cpp
+@@ -28,6 +28,11 @@ public:
+                     const wxString& defaultFile, const wxString& wildCard, long style )
+         : wxQtEventSignalHandler<QFileDialog,wxDialog>(parent, handler)
+     {
++#ifdef __ANDROID__
++        // The native dialog is the system document picker, which returns content:// URIs
++        // rather than paths; Qt's own dialog browses the file system directly.
++        setOption(QFileDialog::DontUseNativeDialog, true);
++#endif
+         setLabelText(QFileDialog::LookIn, wxQtConvertString(message));
+         setDirectory(wxQtConvertString(defaultDir));
+         selectFile(wxQtConvertString(defaultFile));
+diff --git a/src/qt/menu.cpp b/src/qt/menu.cpp
+index 3c263e3..c76d316 100644
+--- a/src/qt/menu.cpp
++++ b/src/qt/menu.cpp
+@@ -225,23 +225,37 @@ QMenu *wxMenu::GetHandle() const
+ 
+ //##############################################################################
+ 
++namespace
++{
++QMenuBar* wxQtCreateMenuBar()
++{
++    QMenuBar* bar = new QMenuBar();
++#ifdef __ANDROID__
++    // Android's "native" menu bar is the action bar overflow menu, which hides the menus;
++    // show a regular menu bar inside the window instead.
++    bar->setNativeMenuBar(false);
++#endif
++    return bar;
++}
++} // anonymous namespace
++
+ wxMenuBar::wxMenuBar()
+ {
+-    m_qtWindow = new QMenuBar();
++    m_qtWindow = wxQtCreateMenuBar();
+ 
+     wxMenuBarBase::Create(nullptr, wxID_ANY);
+ }
+ 
+ wxMenuBar::wxMenuBar( long style )
+ {
+-    m_qtWindow = new QMenuBar();
++    m_qtWindow = wxQtCreateMenuBar();
+ 
+     wxMenuBarBase::Create(nullptr, wxID_ANY, wxDefaultPosition, wxDefaultSize, style);
+ }
+ 
+ wxMenuBar::wxMenuBar(size_t count, wxMenu *menus[], const wxString titles[], long style)
+ {
+-    m_qtWindow = new QMenuBar();
++    m_qtWindow = wxQtCreateMenuBar();
+ 
+     for ( size_t i = 0; i < count; ++i )
+     {
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,7 +1,7 @@
 From 041ce2291d467691000dbbc18717ecfd4ce28701 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 20:23:49 +0530
-Subject: [PATCH 7/7] qt: don't crash drawing an invalid bitmap
+Subject: [PATCH 7/8] qt: don't crash drawing an invalid bitmap
 
 wxQtDCImpl::DoDrawBitmap() dereferenced the bitmap's QPixmap without checking
 the bitmap first; invalid bitmaps (e.g. from toolbar items without an image)
