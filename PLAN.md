@@ -99,9 +99,27 @@ Build lessons (all handled in scripts/patches):
 - `QStandardPaths` needs a Java VM; kiplatform falls back to `$HOME` paths without one (CLI)
 - KiCad stock data via `KICAD_STOCK_DATA_HOME` (DESTDIR install, paths are baked at configure)
 
-### Phase 2 — App on device (KBM)  ← *next*
-- `kicad` target as a shared library loaded by Qt's Android activity (bionic can't dlopen executables)
-- kifaces packaged as `lib*.so` in the APK and found by KIWAY in the native library dir
+### Phase 2 — App on device (KBM)  ← *in progress*
+- [x] `kicad` built as `libkicad_arm64-v8a.so` (bionic can't dlopen executables), `main` exported
+- [x] kifaces packaged as `lib_<name>.so`, found by KIWAY next to the loaded library (`dladdr`)
+- [x] APK via `scripts/build-kicad-apk.sh` (androiddeployqt, compileSdk 37, stripped libs, ~300 MB)
+- [x] Stock data shipped as APK assets (`.kad` suffix so aapt keeps `.gz` intact), extracted on
+      first launch by kiplatform via `AAssetManager`, exported as `KICAD_STOCK_DATA_HOME`
+- [x] **KiCad GUI runs on the emulator**: first-run wizard, project manager (icons, AUI panes,
+      launcher), dialogs; input via taps/keyboard
+- [x] **Tool coroutines vs. the Android runtime.** ART only accepts Java frames/JNI refs within the
+      thread's own stack; KiCad tools run on separate stacks and call Java (dialogs, windows) ->
+      CheckJNI aborts and spurious `StackOverflowError`. Fix: Qt's `QtThread` patched
+      (`android/qt-patches`, swapped into Qt6Android.jar at packaging) to start the main loop with a
+      512 MB stack, and KiCad carves coroutine stacks from it (`common/android_coroutine_stacks.cpp`).
+      Verified with CheckJNI on.
+- [x] wx patch 7: wxQt crashed drawing invalid bitmaps (AUI toolbar)
+- [ ] Emulator API 37 forces software GLES -> very slow frames and ANRs at 2560x1600. Use an
+      API 35 image with host GPU for interactive testing.
+- [ ] Menu bar not shown on Android (wxQt menubar -> needs an in-window QMenuBar)
+- [ ] Open project: Qt's file dialog on Android uses the system document picker (content:// URIs);
+      needs SAF handling (kiandroid)
+- [ ] Open pcbnew/eeschema with a project and test the canvas (Cairo GAL fallback) with KBM
 - Gradle/androiddeployqt APK; single process hosting kicad + kifaces (pcbnew/eeschema as `.so` loaded by `KIWAY`, which already works this way).
 - Canvas: Cairo GAL first, then Modern GAL via `VK_KHR_android_surface` (`QWindow` to `ANativeWindow`).
 - Rust platform crate: paths, SAF file dialogs, fonts, secrets, intents.

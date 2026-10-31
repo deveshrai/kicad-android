@@ -1,0 +1,318 @@
+From 67a4ffc996fc2834b86b6367df3903174e2783f6 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 31 Oct 2026 20:41:48 +0530
+Subject: [PATCH 6/6] Android: carve tool coroutine stacks from the Qt
+ main-loop thread stack
+
+The Android runtime rejects Java frames and JNI references outside the
+calling thread's stack, so tool coroutines that open windows or dialogs
+failed (invalid JNI transition reference, spurious StackOverflowError).
+Coroutine stacks now come from a pool inside the main-loop thread's
+(enlarged) stack.
+
+Assisted-by: Claude Code
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/CMakeLists.txt               |   5 +
+ common/android_coroutine_stacks.cpp | 165 ++++++++++++++++++++++++++++
+ include/android_coroutine_stacks.h  |  54 +++++++++
+ include/tool/coroutine.h            |  19 +++-
+ 4 files changed, 242 insertions(+), 1 deletion(-)
+ create mode 100644 common/android_coroutine_stacks.cpp
+ create mode 100644 include/android_coroutine_stacks.h
+
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index 9ef6f95d..dba47e3a 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -415,6 +415,11 @@ if( UNIX AND NOT APPLE )
+     )
+ endif()
+ 
++if( ANDROID )
++    # Coroutine stacks inside the Qt main-loop thread's stack (one pool per process)
++    list( APPEND KICOMMON_SRCS android_coroutine_stacks.cpp )
++endif()
++
+ list( APPEND KICOMMON_SRCS
+     navlib_safe_init.cpp
+ )
+diff --git a/common/android_coroutine_stacks.cpp b/common/android_coroutine_stacks.cpp
+new file mode 100644
+index 00000000..eacd44bc
+--- /dev/null
++++ b/common/android_coroutine_stacks.cpp
+@@ -0,0 +1,165 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <android_coroutine_stacks.h>
++
++#include <android/log.h>
++#include <pthread.h>
++#include <sys/mman.h>
++#include <unistd.h>
++
++#include <cstdint>
++#include <mutex>
++#include <vector>
++
++
++namespace
++{
++/// Room left for the thread's own (main) stack above the pool
++constexpr std::size_t MAIN_STACK_HEADROOM = 32 * 1024 * 1024;
++
++/// Kept clear at the bottom of the thread stack (ART's guard and reserved overflow area)
++constexpr std::size_t BOTTOM_RESERVE = 1024 * 1024;
++
++/// Don't bother with small thread stacks: they can't hold coroutine stacks
++constexpr std::size_t MIN_THREAD_STACK = 128 * 1024 * 1024;
++
++
++struct BLOCK
++{
++    std::uintptr_t base;
++    std::size_t    size;
++};
++
++
++class POOL
++{
++public:
++    void* Alloc( std::size_t aSize )
++    {
++        std::lock_guard<std::mutex> lock( m_mutex );
++
++        if( !m_initialized )
++            init();
++
++        // Only the thread whose stack hosts the pool may use it
++        if( !m_enabled || !pthread_equal( pthread_self(), m_owner ) )
++            return nullptr;
++
++        for( auto it = m_free.begin(); it != m_free.end(); ++it )
++        {
++            if( it->size == aSize )
++            {
++                std::uintptr_t base = it->base;
++                m_free.erase( it );
++                return reinterpret_cast<void*>( base );
++            }
++        }
++
++        if( m_next - m_floor < aSize )
++        {
++            __android_log_print( ANDROID_LOG_WARN, "KiCad",
++                                 "coroutine stack pool exhausted, using heap stack" );
++            return nullptr;
++        }
++
++        m_next -= aSize;
++        return reinterpret_cast<void*>( m_next );
++    }
++
++    bool Free( void* aBase, std::size_t aSize )
++    {
++        std::lock_guard<std::mutex> lock( m_mutex );
++        std::uintptr_t base = reinterpret_cast<std::uintptr_t>( aBase );
++
++        if( !m_enabled || base < m_floor || base >= m_ceiling )
++            return false;
++
++        // The caller turned the lowest page into a guard page; make it usable again
++        mprotect( aBase, getpagesize(), PROT_READ | PROT_WRITE );
++        m_free.push_back( { base, aSize } );
++        return true;
++    }
++
++private:
++    void init()
++    {
++        m_initialized = true;
++        m_owner = pthread_self();
++
++        pthread_attr_t attr;
++
++        if( pthread_getattr_np( m_owner, &attr ) != 0 )
++            return;
++
++        void*       stackAddr = nullptr;
++        std::size_t stackSize = 0;
++        pthread_attr_getstack( &attr, &stackAddr, &stackSize );
++        pthread_attr_destroy( &attr );
++
++        const std::uintptr_t page = getpagesize();
++        const std::uintptr_t here = reinterpret_cast<std::uintptr_t>( __builtin_frame_address( 0 ) );
++        const std::uintptr_t bottom = reinterpret_cast<std::uintptr_t>( stackAddr );
++
++        if( stackSize < MIN_THREAD_STACK || here < bottom + MAIN_STACK_HEADROOM + BOTTOM_RESERVE )
++        {
++            __android_log_print( ANDROID_LOG_WARN, "KiCad",
++                                 "thread stack too small (%zu KB) for coroutine stacks",
++                                 stackSize / 1024 );
++            return;
++        }
++
++        m_ceiling = ( here - MAIN_STACK_HEADROOM ) & ~( page - 1 );
++        m_floor = ( bottom + BOTTOM_RESERVE + page - 1 ) & ~( page - 1 );
++        m_next = m_ceiling;
++        m_enabled = true;
++
++        __android_log_print( ANDROID_LOG_INFO, "KiCad", "coroutine stack pool: %zu MB",
++                             static_cast<std::size_t>( ( m_ceiling - m_floor ) >> 20 ) );
++    }
++
++    std::mutex         m_mutex;
++    bool               m_initialized = false;
++    bool               m_enabled = false;
++    pthread_t          m_owner = {};
++    std::uintptr_t     m_floor = 0;     ///< Lowest usable address
++    std::uintptr_t     m_ceiling = 0;   ///< One past the highest usable address
++    std::uintptr_t     m_next = 0;      ///< Bump allocator, grows down from m_ceiling
++    std::vector<BLOCK> m_free;
++};
++
++
++POOL& pool()
++{
++    static POOL s_pool;
++    return s_pool;
++}
++} // namespace
++
++
++void* KiAndroidAllocCoroutineStack( std::size_t aSize )
++{
++    return pool().Alloc( aSize );
++}
++
++
++bool KiAndroidFreeCoroutineStack( void* aBase, std::size_t aSize )
++{
++    return pool().Free( aBase, aSize );
++}
+diff --git a/include/android_coroutine_stacks.h b/include/android_coroutine_stacks.h
+new file mode 100644
+index 00000000..4c655b45
+--- /dev/null
++++ b/include/android_coroutine_stacks.h
+@@ -0,0 +1,54 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef ANDROID_COROUTINE_STACKS_H
++#define ANDROID_COROUTINE_STACKS_H
++
++#ifdef __ANDROID__
++
++#include <cstddef>
++#include <kicommon.h>
++
++/*
++ * Tool coroutines call into Java (window creation, dialogs, clipboard, ...).  The Android
++ * runtime only accepts Java frames and JNI references inside the calling thread's own stack,
++ * so coroutine stacks allocated elsewhere fail ("invalid JNI transition frame reference",
++ * spurious StackOverflowError).  The Qt main-loop thread is therefore started with a very
++ * large stack, and coroutine stacks are carved out of its lower part.
++ */
++
++/**
++ * Reserve a coroutine stack of @p aSize bytes (a multiple of the page size) inside the
++ * current thread's stack.
++ *
++ * @return the lowest address of the block, or nullptr when the thread's stack is too small
++ *         or the pool is exhausted; the caller then falls back to ordinary memory.
++ */
++KICOMMON_API void* KiAndroidAllocCoroutineStack( std::size_t aSize );
++
++/**
++ * Return a block obtained from KiAndroidAllocCoroutineStack().
++ *
++ * @return false if @p aBase was not allocated by the pool (the caller frees it itself).
++ */
++KICOMMON_API bool KiAndroidFreeCoroutineStack( void* aBase, std::size_t aSize );
++
++#endif // __ANDROID__
++
++#endif // ANDROID_COROUTINE_STACKS_H
+diff --git a/include/tool/coroutine.h b/include/tool/coroutine.h
+index 1366a75a..65fb6233 100644
+--- a/include/tool/coroutine.h
++++ b/include/tool/coroutine.h
+@@ -38,6 +38,10 @@
+ #endif
+ 
+ #include <libcontext.h>
++
++#ifdef __ANDROID__
++#include <android_coroutine_stacks.h>
++#endif
+ #include <functional>
+ #include <optional>
+ #include <memory>
+@@ -449,7 +453,14 @@ private:
+         std::size_t m_size = 0;
+ 
+         void SetSize( std::size_t aSize ) { m_size = aSize; }
+-        void operator()( void* aMem ) noexcept { ::munmap( aMem, m_size ); }
++        void operator()( void* aMem ) noexcept
++        {
++#ifdef __ANDROID__
++            if( KiAndroidFreeCoroutineStack( aMem, m_size ) )
++                return;
++#endif
++            ::munmap( aMem, m_size );
++        }
+ #endif
+     };
+ 
+@@ -482,6 +493,12 @@ private:
+         if( !mem )
+             throw std::bad_alloc();
+ #else
++#ifdef __ANDROID__
++        // Java frames on a coroutine stack must lie inside the thread's own stack
++        if( void* threadStackMem = KiAndroidAllocCoroutineStack( aAllocSize ) )
++            return threadStackMem;
++#endif
++
+         void* mem = ::mmap( 0, aAllocSize, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
+ 
+         if( mem == (void*) -1 )
+-- 
+2.54.0 (Apple Git-157)
+

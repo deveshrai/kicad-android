@@ -85,7 +85,19 @@ cat > "$OUT/deployment-settings.json" <<EOF
 EOF
 
 "$QT_HOST_PATH/bin/androiddeployqt" --input "$OUT/deployment-settings.json" --output "$OUT" \
-    --android-platform "android-37.0" --gradle --debug --jdk "$JAVA_HOME"
+    --android-platform "android-37.0" --gradle --${KICAD_APK_MODE:-debug} --jdk "$JAVA_HOME"
+
+# Patch Qt's main-loop thread to start with a large stack (android/qt-patches/...QtThread.java;
+# KiCad carves tool coroutine stacks out of it), then rebuild the package with the patched jar.
+PATCH_CLASSES="$KA_ROOT/build/qt-patches-classes"
+rm -rf "$PATCH_CLASSES" && mkdir -p "$PATCH_CLASSES"
+"$JAVA_HOME/bin/javac" --release 8 -nowarn -d "$PATCH_CLASSES" \
+    "$KA_ROOT"/android/qt-patches/org/qtproject/qt/android/*.java 2>/dev/null
+( cd "$PATCH_CLASSES" && zip -q -d "$OUT/libs/Qt6Android.jar" 'org/qtproject/qt/android/QtThread$*' || true
+  zip -q "$OUT/libs/Qt6Android.jar" org/qtproject/qt/android/QtThread*.class )
+GRADLE_TASK=assembleDebug
+[ "${KICAD_APK_MODE:-debug}" = release ] && GRADLE_TASK=assembleRelease
+( cd "$OUT" && ./gradlew -q "$GRADLE_TASK" )
 
 APK="$(find "$OUT/build/outputs/apk" -name "*.apk" | head -1)"
 "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$HOME/.android/debug.keystore" \
