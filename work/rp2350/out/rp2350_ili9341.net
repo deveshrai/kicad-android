@@ -1,0 +1,6590 @@
+(export
+	(version "E")
+	(design
+		(source "/Users/devesh/projects/KiCadAndroid0/work/rp2350/out/rp2350_ili9341.kicad_sch")
+		(date "2026-11-01T20:26:07")
+		(tool "Eeschema 10.99.0-unknown-i")
+		(sheet
+			(number "1")
+			(name "/")
+			(tstamps "/")
+			(title_block
+				(title "RP2350A + ILI9341 board")
+				(company)
+				(rev "A")
+				(date "2026-11-01")
+				(source "rp2350_ili9341.kicad_sch")
+				(comment
+					(number "1")
+					(value "Generated from KiCad 10.0.8 library symbols")
+				)
+				(comment
+					(number "2")
+					(value "")
+				)
+				(comment
+					(number "3")
+					(value "")
+				)
+				(comment
+					(number "4")
+					(value "")
+				)
+				(comment
+					(number "5")
+					(value "")
+				)
+				(comment
+					(number "6")
+					(value "")
+				)
+				(comment
+					(number "7")
+					(value "")
+				)
+				(comment
+					(number "8")
+					(value "")
+				)
+				(comment
+					(number "9")
+					(value "")
+				)
+			)
+		)
+	)
+	(components
+		(comp
+			(ref "C1")
+			(value "1u")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 1uF 50V X5R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10A105KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 1uF 50V X5R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10A105KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "a22689a1-1370-4348-b17d-bba79a28ab31")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C2")
+			(value "1u")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 1uF 50V X5R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10A105KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 1uF 50V X5R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10A105KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "b922df0d-4988-42ad-b898-a0638c133be9")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C3")
+			(value "10u")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(description "Capacitor 10uF 25V X5R 10% 0805")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL21A106KAYNNNE")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0805_2012Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 10uF 25V X5R 10% 0805")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL21A106KAYNNNE")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "c61931e3-84f8-494a-b979-2e9a41000db3")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C4")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "156e721b-0419-4f4d-9791-842d9887415d")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C5")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "83e4568f-ce72-426d-89ac-a17a4ed94e18")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C6")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "c2a70899-947b-4526-abd4-0af15032fdb7")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C7")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "02babd35-f369-4dc3-8891-7740d696aa85")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C8")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "3756015f-16ae-4f64-ac57-a4b03342c1f9")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C9")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "ced4b7d6-7ec6-4190-90a4-be9e4df26cde")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C10")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "1021f9e8-462e-4b55-8eee-9e8cfb0fe255")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C11")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "f47657d3-56f0-40f3-80f3-73b755506be1")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C12")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "6d25862a-d344-4dc8-8c07-60248c70d794")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C13")
+			(value "4.7u")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(description "Capacitor 4.7uF 25V X5R 10% 0805")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL21A475KAQNNNE")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0805_2012Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 4.7uF 25V X5R 10% 0805")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL21A475KAQNNNE")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "2656dc3a-d110-4b1c-9d61-140877250ddf")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C14")
+			(value "4.7u")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(description "Capacitor 4.7uF 25V X5R 10% 0805")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL21A475KAQNNNE")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0805_2012Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 4.7uF 25V X5R 10% 0805")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL21A475KAQNNNE")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "c8bdf8d3-a2e2-473b-84eb-5cc46d3d920d")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C15")
+			(value "4.7u")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(description "Capacitor 4.7uF 25V X5R 10% 0805")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL21A475KAQNNNE")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0805_2012Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 4.7uF 25V X5R 10% 0805")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL21A475KAQNNNE")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "c27e140a-50b1-4d37-88a8-0cf6b8987825")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C16")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "26a77c50-6062-4816-998d-d3bc760c20f5")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C17")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "704226d4-4f6c-443d-9b09-12d926fe282e")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C18")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "cf0a2ae0-4f97-48de-afc2-6447c70d76b1")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C19")
+			(value "100n")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 100nF 50V X7R 10% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10B104KB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 100nF 50V X7R 10% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10B104KB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "70766273-39d0-4bcc-bcc6-9eb261e1a2e1")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C20")
+			(value "15p")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 15pF 50V C0G 5% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10C150JB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 15pF 50V C0G 5% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10C150JB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "b9cfa251-3b55-4351-b7eb-65ffad92e13f")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "C21")
+			(value "15p")
+			(footprint "Capacitor_SMD:C_0603_1608Metric")
+			(description "Capacitor 15pF 50V C0G 5% 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Samsung")
+				(field
+					(name "MPN") "CL10C150JB8NNNC")
+				(field
+					(name "Footprint") "Capacitor_SMD:C_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Capacitor 15pF 50V C0G 5% 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "C_Small")
+				(description "Unpolarized capacitor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Samsung")
+			)
+			(property
+				(name "MPN")
+				(value "CL10C150JB8NNNC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "capacitor cap")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "C_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "9d0debb9-85fd-4abf-90c8-39347f6a7b4e")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "D1")
+			(value "Red")
+			(footprint "LED_SMD:LED_0603_1608Metric")
+			(description "LED red 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Kingbright")
+				(field
+					(name "MPN") "APT1608EC")
+				(field
+					(name "Footprint") "LED_SMD:LED_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "LED red 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "LED_Small")
+				(description "Light emitting diode, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Kingbright")
+			)
+			(property
+				(name "MPN")
+				(value "APT1608EC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "LED diode light-emitting-diode")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "LED* LED_SMD:* LED_THT:*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "437c68aa-5aa0-4761-ac91-288bc9da4246")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "D2")
+			(value "Green")
+			(footprint "LED_SMD:LED_0603_1608Metric")
+			(description "LED green 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Kingbright")
+				(field
+					(name "MPN") "APT1608SGC")
+				(field
+					(name "Footprint") "LED_SMD:LED_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "LED green 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "LED_Small")
+				(description "Light emitting diode, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Kingbright")
+			)
+			(property
+				(name "MPN")
+				(value "APT1608SGC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "LED diode light-emitting-diode")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "LED* LED_SMD:* LED_THT:*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "ab40c0d5-4348-4960-bc41-24f628279331")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "D3")
+			(value "Blue")
+			(footprint "LED_SMD:LED_0603_1608Metric")
+			(description "LED blue 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Kingbright")
+				(field
+					(name "MPN") "APT1608QBC/D")
+				(field
+					(name "Footprint") "LED_SMD:LED_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "LED blue 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "LED_Small")
+				(description "Light emitting diode, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Kingbright")
+			)
+			(property
+				(name "MPN")
+				(value "APT1608QBC/D")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "LED diode light-emitting-diode")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "LED* LED_SMD:* LED_THT:*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "b4508874-9a2e-4fe2-946c-f94e8b302879")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "H1")
+			(value "MountingHole")
+			(footprint "MountingHole:MountingHole_2.7mm_M2.5")
+			(description "Mounting Hole without connection")
+			(fields
+				(field
+					(name "Footprint") "MountingHole:MountingHole_2.7mm_M2.5")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Mounting Hole without connection")
+			)
+			(libsource
+				(lib "Mechanical")
+				(part "MountingHole")
+				(description "Mounting Hole without connection")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "exclude_from_bom")
+			)
+			(property
+				(name "ki_keywords")
+				(value "mounting hole")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "MountingHole*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "bc8360ab-6b2a-49da-b231-9b0f34ddadc2")
+			(units
+				(unit
+					(name "A")
+					(pins)
+				)
+			)
+		)
+		(comp
+			(ref "H2")
+			(value "MountingHole")
+			(footprint "MountingHole:MountingHole_2.7mm_M2.5")
+			(description "Mounting Hole without connection")
+			(fields
+				(field
+					(name "Footprint") "MountingHole:MountingHole_2.7mm_M2.5")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Mounting Hole without connection")
+			)
+			(libsource
+				(lib "Mechanical")
+				(part "MountingHole")
+				(description "Mounting Hole without connection")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "exclude_from_bom")
+			)
+			(property
+				(name "ki_keywords")
+				(value "mounting hole")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "MountingHole*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "083d34a5-82be-4b1c-991f-dbb202302617")
+			(units
+				(unit
+					(name "A")
+					(pins)
+				)
+			)
+		)
+		(comp
+			(ref "H3")
+			(value "MountingHole")
+			(footprint "MountingHole:MountingHole_2.7mm_M2.5")
+			(description "Mounting Hole without connection")
+			(fields
+				(field
+					(name "Footprint") "MountingHole:MountingHole_2.7mm_M2.5")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Mounting Hole without connection")
+			)
+			(libsource
+				(lib "Mechanical")
+				(part "MountingHole")
+				(description "Mounting Hole without connection")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "exclude_from_bom")
+			)
+			(property
+				(name "ki_keywords")
+				(value "mounting hole")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "MountingHole*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "b422695a-5090-4cf8-8106-825f9c978d2d")
+			(units
+				(unit
+					(name "A")
+					(pins)
+				)
+			)
+		)
+		(comp
+			(ref "H4")
+			(value "MountingHole")
+			(footprint "MountingHole:MountingHole_2.7mm_M2.5")
+			(description "Mounting Hole without connection")
+			(fields
+				(field
+					(name "Footprint") "MountingHole:MountingHole_2.7mm_M2.5")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Mounting Hole without connection")
+			)
+			(libsource
+				(lib "Mechanical")
+				(part "MountingHole")
+				(description "Mounting Hole without connection")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "exclude_from_bom")
+			)
+			(property
+				(name "ki_keywords")
+				(value "mounting hole")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "MountingHole*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "d2bdfa86-fe7a-42dd-b945-efff42189bca")
+			(units
+				(unit
+					(name "A")
+					(pins)
+				)
+			)
+		)
+		(comp
+			(ref "J1")
+			(value "USB_C")
+			(footprint "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12")
+			(datasheet "https://www.usb.org/sites/default/files/documents/usb_type-c.zip")
+			(description "USB-C receptacle USB 2.0 16-pin SMD")
+			(fields
+				(field
+					(name "Manufacturer") "HRO")
+				(field
+					(name "MPN") "TYPE-C-31-M-12")
+				(field
+					(name "Footprint") "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12")
+				(field
+					(name "Datasheet") "https://www.usb.org/sites/default/files/documents/usb_type-c.zip")
+				(field
+					(name "Description") "USB-C receptacle USB 2.0 16-pin SMD")
+			)
+			(libsource
+				(lib "Connector")
+				(part "USB_C_Receptacle_USB2.0_16P")
+				(description "USB 2.0-only 16P Type-C Receptacle connector")
+			)
+			(property
+				(name "Manufacturer")
+				(value "HRO")
+			)
+			(property
+				(name "MPN")
+				(value "TYPE-C-31-M-12")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "usb universal serial bus type-C USB2.0")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "USB*C*Receptacle*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "54f0d4d8-8d8b-4eb5-8859-17dfc5431d42")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "SH")
+						)
+						(pin
+							(num "A1")
+						)
+						(pin
+							(num "A12")
+						)
+						(pin
+							(num "B1")
+						)
+						(pin
+							(num "B12")
+						)
+						(pin
+							(num "A4")
+						)
+						(pin
+							(num "A9")
+						)
+						(pin
+							(num "B4")
+						)
+						(pin
+							(num "B9")
+						)
+						(pin
+							(num "A5")
+						)
+						(pin
+							(num "B5")
+						)
+						(pin
+							(num "A7")
+						)
+						(pin
+							(num "B7")
+						)
+						(pin
+							(num "A6")
+						)
+						(pin
+							(num "B6")
+						)
+						(pin
+							(num "A8")
+						)
+						(pin
+							(num "B8")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "J2")
+			(value "IO")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_2x20_P2.54mm_Vertical")
+			(description "Male header 2x20 2.54mm vertical")
+			(fields
+				(field
+					(name "Manufacturer") "Sullins")
+				(field
+					(name "MPN") "PRPC020DAAN-RC")
+				(field
+					(name "Footprint") "Connector_PinHeader_2.54mm:PinHeader_2x20_P2.54mm_Vertical")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Male header 2x20 2.54mm vertical")
+			)
+			(libsource
+				(lib "Connector_Generic")
+				(part "Conn_02x20_Odd_Even")
+				(description "Generic connector, double row, 02x20, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Sullins")
+			)
+			(property
+				(name "MPN")
+				(value "PRPC020DAAN-RC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "connector")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "Connector*:*_2x??_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "32be3ec1-f70b-4fde-9181-b67a22f8d332")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "3")
+						)
+						(pin
+							(num "5")
+						)
+						(pin
+							(num "7")
+						)
+						(pin
+							(num "9")
+						)
+						(pin
+							(num "11")
+						)
+						(pin
+							(num "13")
+						)
+						(pin
+							(num "15")
+						)
+						(pin
+							(num "17")
+						)
+						(pin
+							(num "19")
+						)
+						(pin
+							(num "21")
+						)
+						(pin
+							(num "23")
+						)
+						(pin
+							(num "25")
+						)
+						(pin
+							(num "27")
+						)
+						(pin
+							(num "29")
+						)
+						(pin
+							(num "31")
+						)
+						(pin
+							(num "33")
+						)
+						(pin
+							(num "35")
+						)
+						(pin
+							(num "37")
+						)
+						(pin
+							(num "39")
+						)
+						(pin
+							(num "2")
+						)
+						(pin
+							(num "4")
+						)
+						(pin
+							(num "6")
+						)
+						(pin
+							(num "8")
+						)
+						(pin
+							(num "10")
+						)
+						(pin
+							(num "12")
+						)
+						(pin
+							(num "14")
+						)
+						(pin
+							(num "16")
+						)
+						(pin
+							(num "18")
+						)
+						(pin
+							(num "20")
+						)
+						(pin
+							(num "22")
+						)
+						(pin
+							(num "24")
+						)
+						(pin
+							(num "26")
+						)
+						(pin
+							(num "28")
+						)
+						(pin
+							(num "30")
+						)
+						(pin
+							(num "32")
+						)
+						(pin
+							(num "34")
+						)
+						(pin
+							(num "36")
+						)
+						(pin
+							(num "38")
+						)
+						(pin
+							(num "40")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "J3")
+			(value "ILI9341_SPI")
+			(footprint "Connector_PinSocket_2.54mm:PinSocket_1x14_P2.54mm_Vertical")
+			(description "Female header 1x14 2.54mm vertical (ILI9341 2.8in module)")
+			(fields
+				(field
+					(name "Manufacturer") "Sullins")
+				(field
+					(name "MPN") "PPTC141LFBN-RC")
+				(field
+					(name "Footprint") "Connector_PinSocket_2.54mm:PinSocket_1x14_P2.54mm_Vertical")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Female header 1x14 2.54mm vertical (ILI9341 2.8in module)")
+			)
+			(libsource
+				(lib "Connector_Generic")
+				(part "Conn_01x14")
+				(description "Generic connector, single row, 01x14, script generated (kicad-library-utils/schlib/autogen/connector/)")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Sullins")
+			)
+			(property
+				(name "MPN")
+				(value "PPTC141LFBN-RC")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "connector")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "Connector*:*_1x??_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "8163c552-28b8-4b09-9bdf-cc6e897b0378")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+						(pin
+							(num "3")
+						)
+						(pin
+							(num "4")
+						)
+						(pin
+							(num "5")
+						)
+						(pin
+							(num "6")
+						)
+						(pin
+							(num "7")
+						)
+						(pin
+							(num "8")
+						)
+						(pin
+							(num "9")
+						)
+						(pin
+							(num "10")
+						)
+						(pin
+							(num "11")
+						)
+						(pin
+							(num "12")
+						)
+						(pin
+							(num "13")
+						)
+						(pin
+							(num "14")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "L1")
+			(value "3.3u")
+			(footprint "Inductor_SMD:L_Abracon_AOTA-B201610S")
+			(description "Power inductor 3.3uH 2016 (RP2350 core regulator)")
+			(fields
+				(field
+					(name "Manufacturer") "Abracon")
+				(field
+					(name "MPN") "AOTA-B201610S3R3-101-T")
+				(field
+					(name "Footprint") "Inductor_SMD:L_Abracon_AOTA-B201610S")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Power inductor 3.3uH 2016 (RP2350 core regulator)")
+			)
+			(libsource
+				(lib "Device")
+				(part "L_Small")
+				(description "Inductor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Abracon")
+			)
+			(property
+				(name "MPN")
+				(value "AOTA-B201610S3R3-101-T")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "inductor choke coil reactor magnetic")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "Choke_* *Coil* Inductor_* L_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "685ab3ba-53f5-48dc-b01d-94e58c634931")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R1")
+			(value "5.1k")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 5.1k 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-075K1L")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 5.1k 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-075K1L")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "70714711-3022-4923-b018-a4c1b3fb77c1")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R2")
+			(value "5.1k")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 5.1k 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-075K1L")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 5.1k 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-075K1L")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "51246e8c-ee36-4c85-b040-3359abd2427c")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R3")
+			(value "27")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 27R 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-0727RL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 27R 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-0727RL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "7b4e789e-c62f-4992-837b-a7fb761fb8c3")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R4")
+			(value "27")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 27R 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-0727RL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 27R 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-0727RL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "20d4ddb4-85b2-4ad7-9ff0-c1539447322d")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R5")
+			(value "33")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 33R 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-0733RL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 33R 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-0733RL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "bd5fc9a9-621e-4914-b07e-2741de770a00")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R6")
+			(value "1k")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 1k 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-071KL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 1k 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-071KL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "3e1c7834-3b48-4b7f-a6b3-6f7ef7cd0df7")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R7")
+			(value "1k")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 1k 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-071KL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 1k 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-071KL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "0931ba42-3af0-4812-be0a-60a870985538")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R8")
+			(value "10k")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 10k 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-0710KL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 10k 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-0710KL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "6a374115-9ca2-4c0a-b346-f18552e6b42e")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R9")
+			(value "330")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 330R 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-07330RL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 330R 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-07330RL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "e6496cdb-f490-4ecd-9bf3-ac752569b7a7")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R10")
+			(value "330")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 330R 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-07330RL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 330R 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-07330RL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "1dc27f64-2dd5-4775-a938-ecb522aed158")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R11")
+			(value "330")
+			(footprint "Resistor_SMD:R_0603_1608Metric")
+			(description "Resistor 330R 1% 1/10W 0603")
+			(fields
+				(field
+					(name "Manufacturer") "Yageo")
+				(field
+					(name "MPN") "RC0603FR-07330RL")
+				(field
+					(name "Footprint") "Resistor_SMD:R_0603_1608Metric")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor 330R 1% 1/10W 0603")
+			)
+			(libsource
+				(lib "Device")
+				(part "R_Small")
+				(description "Resistor, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Yageo")
+			)
+			(property
+				(name "MPN")
+				(value "RC0603FR-07330RL")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "R resistor")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "R_*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "7b4e94d2-9006-46f8-a8f1-7e1a54823a5b")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "SW1")
+			(value "BTN1")
+			(footprint "Button_Switch_SMD:SW_SPST_TL3342")
+			(description "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			(fields
+				(field
+					(name "Manufacturer") "E-Switch")
+				(field
+					(name "MPN") "TL3342F160QG")
+				(field
+					(name "Footprint") "Button_Switch_SMD:SW_SPST_TL3342")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			)
+			(libsource
+				(lib "Switch")
+				(part "SW_Push")
+				(description "Push button switch, generic, two pins")
+			)
+			(property
+				(name "Manufacturer")
+				(value "E-Switch")
+			)
+			(property
+				(name "MPN")
+				(value "TL3342F160QG")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "switch normally-open pushbutton push-button")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "cb572da2-b0a9-41f4-9a06-96fcec0147af")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "SW2")
+			(value "BTN2")
+			(footprint "Button_Switch_SMD:SW_SPST_TL3342")
+			(description "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			(fields
+				(field
+					(name "Manufacturer") "E-Switch")
+				(field
+					(name "MPN") "TL3342F160QG")
+				(field
+					(name "Footprint") "Button_Switch_SMD:SW_SPST_TL3342")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			)
+			(libsource
+				(lib "Switch")
+				(part "SW_Push")
+				(description "Push button switch, generic, two pins")
+			)
+			(property
+				(name "Manufacturer")
+				(value "E-Switch")
+			)
+			(property
+				(name "MPN")
+				(value "TL3342F160QG")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "switch normally-open pushbutton push-button")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "cde84a21-c880-4f88-8856-cccc4ac9e4b3")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "SW3")
+			(value "BTN3")
+			(footprint "Button_Switch_SMD:SW_SPST_TL3342")
+			(description "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			(fields
+				(field
+					(name "Manufacturer") "E-Switch")
+				(field
+					(name "MPN") "TL3342F160QG")
+				(field
+					(name "Footprint") "Button_Switch_SMD:SW_SPST_TL3342")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			)
+			(libsource
+				(lib "Switch")
+				(part "SW_Push")
+				(description "Push button switch, generic, two pins")
+			)
+			(property
+				(name "Manufacturer")
+				(value "E-Switch")
+			)
+			(property
+				(name "MPN")
+				(value "TL3342F160QG")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "switch normally-open pushbutton push-button")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "ef6c2030-18ff-40c6-a33c-40da59b37b2f")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "SW4")
+			(value "BOOTSEL")
+			(footprint "Button_Switch_SMD:SW_SPST_TL3342")
+			(description "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			(fields
+				(field
+					(name "Manufacturer") "E-Switch")
+				(field
+					(name "MPN") "TL3342F160QG")
+				(field
+					(name "Footprint") "Button_Switch_SMD:SW_SPST_TL3342")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			)
+			(libsource
+				(lib "Switch")
+				(part "SW_Push")
+				(description "Push button switch, generic, two pins")
+			)
+			(property
+				(name "Manufacturer")
+				(value "E-Switch")
+			)
+			(property
+				(name "MPN")
+				(value "TL3342F160QG")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "switch normally-open pushbutton push-button")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "c08acf37-6b0e-4e0c-96e5-67e38ac83fa0")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "SW5")
+			(value "RESET")
+			(footprint "Button_Switch_SMD:SW_SPST_TL3342")
+			(description "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			(fields
+				(field
+					(name "Manufacturer") "E-Switch")
+				(field
+					(name "MPN") "TL3342F160QG")
+				(field
+					(name "Footprint") "Button_Switch_SMD:SW_SPST_TL3342")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Tactile switch SPST 4.2x3.2mm SMD 160gf")
+			)
+			(libsource
+				(lib "Switch")
+				(part "SW_Push")
+				(description "Push button switch, generic, two pins")
+			)
+			(property
+				(name "Manufacturer")
+				(value "E-Switch")
+			)
+			(property
+				(name "MPN")
+				(value "TL3342F160QG")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "switch normally-open pushbutton push-button")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "0874dba7-a7bf-4248-9b54-3d1db0f14c9c")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "U1")
+			(value "RP2350A")
+			(footprint "Package_DFN_QFN:QFN-60-1EP_7x7mm_P0.4mm_EP3.4x3.4mm")
+			(datasheet "https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf")
+			(description "MCU RP2350A dual Cortex-M33/Hazard3 150MHz 520KB SRAM QFN-60 7x7")
+			(fields
+				(field
+					(name "Manufacturer") "Raspberry Pi")
+				(field
+					(name "MPN") "RP2350A")
+				(field
+					(name "Footprint") "Package_DFN_QFN:QFN-60-1EP_7x7mm_P0.4mm_EP3.4x3.4mm")
+				(field
+					(name "Datasheet") "https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf")
+				(field
+					(name "Description") "MCU RP2350A dual Cortex-M33/Hazard3 150MHz 520KB SRAM QFN-60 7x7")
+			)
+			(libsource
+				(lib "MCU_RaspberryPi")
+				(part "RP2350A")
+				(description "A microcontroller by Raspberry Pi, dual CPU architecture (ARM Cortex-M33 / RISC-V Hazard3), 150MHz, no flash, 520KB SRAM, 12 PIO state machines, VQFN-60")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Raspberry Pi")
+			)
+			(property
+				(name "MPN")
+				(value "RP2350A")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "RPi Pico USB QSPI I2C UART ADC SC1509")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "*QFN*7x7mm?P0.4mm?EP3.4x3.4mm*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "db901203-2d92-4de8-83b9-fe25eb5c7e85")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "26")
+						)
+						(pin
+							(num "51")
+						)
+						(pin
+							(num "52")
+						)
+						(pin
+							(num "60")
+						)
+						(pin
+							(num "56")
+						)
+						(pin
+							(num "57")
+						)
+						(pin
+							(num "59")
+						)
+						(pin
+							(num "58")
+						)
+						(pin
+							(num "55")
+						)
+						(pin
+							(num "21")
+						)
+						(pin
+							(num "22")
+						)
+						(pin
+							(num "24")
+						)
+						(pin
+							(num "25")
+						)
+						(pin
+							(num "46")
+						)
+						(pin
+							(num "53")
+						)
+						(pin
+							(num "44")
+						)
+						(pin
+							(num "54")
+						)
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "45")
+						)
+						(pin
+							(num "11")
+						)
+						(pin
+							(num "38")
+						)
+						(pin
+							(num "30")
+						)
+						(pin
+							(num "20")
+						)
+						(pin
+							(num "47")
+						)
+						(pin
+							(num "61")
+						)
+						(pin
+							(num "49")
+						)
+						(pin
+							(num "48")
+						)
+						(pin
+							(num "50")
+						)
+						(pin
+							(num "23")
+						)
+						(pin
+							(num "39")
+						)
+						(pin
+							(num "6")
+						)
+						(pin
+							(num "2")
+						)
+						(pin
+							(num "3")
+						)
+						(pin
+							(num "4")
+						)
+						(pin
+							(num "5")
+						)
+						(pin
+							(num "7")
+						)
+						(pin
+							(num "8")
+						)
+						(pin
+							(num "9")
+						)
+						(pin
+							(num "10")
+						)
+						(pin
+							(num "12")
+						)
+						(pin
+							(num "13")
+						)
+						(pin
+							(num "14")
+						)
+						(pin
+							(num "15")
+						)
+						(pin
+							(num "16")
+						)
+						(pin
+							(num "17")
+						)
+						(pin
+							(num "18")
+						)
+						(pin
+							(num "19")
+						)
+						(pin
+							(num "27")
+						)
+						(pin
+							(num "28")
+						)
+						(pin
+							(num "29")
+						)
+						(pin
+							(num "31")
+						)
+						(pin
+							(num "32")
+						)
+						(pin
+							(num "33")
+						)
+						(pin
+							(num "34")
+						)
+						(pin
+							(num "35")
+						)
+						(pin
+							(num "36")
+						)
+						(pin
+							(num "37")
+						)
+						(pin
+							(num "40")
+						)
+						(pin
+							(num "41")
+						)
+						(pin
+							(num "42")
+						)
+						(pin
+							(num "43")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "U2")
+			(value "AP2112K-3.3")
+			(footprint "Package_TO_SOT_SMD:SOT-23-5")
+			(datasheet "https://www.diodes.com/assets/Datasheets/AP2112.pdf")
+			(description "LDO regulator 3.3V 600mA SOT-23-5")
+			(fields
+				(field
+					(name "Manufacturer") "Diodes Inc")
+				(field
+					(name "MPN") "AP2112K-3.3TRG1")
+				(field
+					(name "Footprint") "Package_TO_SOT_SMD:SOT-23-5")
+				(field
+					(name "Datasheet") "https://www.diodes.com/assets/Datasheets/AP2112.pdf")
+				(field
+					(name "Description") "LDO regulator 3.3V 600mA SOT-23-5")
+			)
+			(libsource
+				(lib "Regulator_Linear")
+				(part "AP2112K-3.3")
+				(description "600mA low dropout linear regulator, with enable pin, 3.8V-6V input voltage range, 3.3V fixed positive output, SOT-23-5")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Diodes Inc")
+			)
+			(property
+				(name "MPN")
+				(value "AP2112K-3.3TRG1")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "linear regulator ldo fixed positive")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "SOT?23?5*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "62dee059-4b31-4368-8e30-00596df89de0")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "3")
+						)
+						(pin
+							(num "2")
+						)
+						(pin
+							(num "4")
+						)
+						(pin
+							(num "5")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "U3")
+			(value "W25Q128JVS")
+			(footprint "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm")
+			(datasheet "https://www.winbond.com/resource-files/w25q128jv_dtr%20revc%2003272018%20plus.pdf")
+			(description "QSPI NOR flash 128Mbit (16MB) SOIC-8 208mil")
+			(fields
+				(field
+					(name "Manufacturer") "Winbond")
+				(field
+					(name "MPN") "W25Q128JVSIQ")
+				(field
+					(name "Footprint") "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm")
+				(field
+					(name "Datasheet") "https://www.winbond.com/resource-files/w25q128jv_dtr%20revc%2003272018%20plus.pdf")
+				(field
+					(name "Description") "QSPI NOR flash 128Mbit (16MB) SOIC-8 208mil")
+			)
+			(libsource
+				(lib "Memory_Flash")
+				(part "W25Q128JVS")
+				(description "128Mbit / 16MiB Serial Flash Memory, Standard/Dual/Quad SPI, 2.7-3.6V, SOIC-8")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Winbond")
+			)
+			(property
+				(name "MPN")
+				(value "W25Q128JVSIQ")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "flash memory SPI QPI DTR")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "*SOIC*5.3x5.3mm*P1.27mm*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "92a1ad2b-b213-44ed-bbe2-cff415c005bc")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "6")
+						)
+						(pin
+							(num "5")
+						)
+						(pin
+							(num "2")
+						)
+						(pin
+							(num "3")
+						)
+						(pin
+							(num "7")
+						)
+						(pin
+							(num "8")
+						)
+						(pin
+							(num "4")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "Y1")
+			(value "12MHz")
+			(footprint "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm")
+			(description "Crystal 12MHz 10pF 3225 4-pad")
+			(fields
+				(field
+					(name "Manufacturer") "Abracon")
+				(field
+					(name "MPN") "ABM8-272-T3")
+				(field
+					(name "Footprint") "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm")
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Crystal 12MHz 10pF 3225 4-pad")
+			)
+			(libsource
+				(lib "Device")
+				(part "Crystal_GND24_Small")
+				(description "Four pin crystal, GND on pins 2 and 4, small symbol")
+			)
+			(property
+				(name "Manufacturer")
+				(value "Abracon")
+			)
+			(property
+				(name "MPN")
+				(value "ABM8-272-T3")
+			)
+			(property
+				(name "Sheetname")
+				(value "rp2350_ili9341")
+			)
+			(property
+				(name "Sheetfile")
+				(value "rp2350_ili9341.kicad_sch")
+			)
+			(property
+				(name "ki_keywords")
+				(value "quartz ceramic resonator oscillator")
+			)
+			(property
+				(name "ki_fp_filters")
+				(value "Crystal*")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "3727baaf-9c9d-4e85-9b40-501c34260ab8")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+						(pin
+							(num "4")
+						)
+						(pin
+							(num "3")
+						)
+					)
+				)
+			)
+		)
+	)
+	(groups)
+	(variants)
+	(libparts
+		(libpart
+			(lib "Connector")
+			(part "USB_C_Receptacle_USB2.0_16P")
+			(description "USB 2.0-only 16P Type-C Receptacle connector")
+			(docs "https://www.usb.org/sites/default/files/documents/usb_type-c.zip")
+			(footprints
+				(fp "USB*C*Receptacle*")
+			)
+			(fields
+				(field
+					(name "Reference") "J")
+				(field
+					(name "Value") "USB_C_Receptacle_USB2.0_16P")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet") "https://www.usb.org/sites/default/files/documents/usb_type-c.zip")
+				(field
+					(name "Description") "USB 2.0-only 16P Type-C Receptacle connector")
+			)
+			(pins
+				(pin
+					(num "A1")
+					(name "GND")
+					(type "passive")
+				)
+				(pin
+					(num "A4")
+					(name "VBUS")
+					(type "passive")
+				)
+				(pin
+					(num "A5")
+					(name "CC1")
+					(type "bidirectional")
+				)
+				(pin
+					(num "A6")
+					(name "D+")
+					(type "bidirectional")
+				)
+				(pin
+					(num "A7")
+					(name "D-")
+					(type "bidirectional")
+				)
+				(pin
+					(num "A8")
+					(name "SBU1")
+					(type "bidirectional")
+				)
+				(pin
+					(num "A9")
+					(name "VBUS")
+					(type "passive")
+				)
+				(pin
+					(num "A12")
+					(name "GND")
+					(type "passive")
+				)
+				(pin
+					(num "B1")
+					(name "GND")
+					(type "passive")
+				)
+				(pin
+					(num "B4")
+					(name "VBUS")
+					(type "passive")
+				)
+				(pin
+					(num "B5")
+					(name "CC2")
+					(type "bidirectional")
+				)
+				(pin
+					(num "B6")
+					(name "D+")
+					(type "bidirectional")
+				)
+				(pin
+					(num "B7")
+					(name "D-")
+					(type "bidirectional")
+				)
+				(pin
+					(num "B8")
+					(name "SBU2")
+					(type "bidirectional")
+				)
+				(pin
+					(num "B9")
+					(name "VBUS")
+					(type "passive")
+				)
+				(pin
+					(num "B12")
+					(name "GND")
+					(type "passive")
+				)
+				(pin
+					(num "SH")
+					(name "SHIELD")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Connector_Generic")
+			(part "Conn_01x14")
+			(description "Generic connector, single row, 01x14, script generated (kicad-library-utils/schlib/autogen/connector/)")
+			(footprints
+				(fp "Connector*:*_1x??_*")
+			)
+			(fields
+				(field
+					(name "Reference") "J")
+				(field
+					(name "Value") "Conn_01x14")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Generic connector, single row, 01x14, script generated (kicad-library-utils/schlib/autogen/connector/)")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "Pin_1")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "Pin_2")
+					(type "passive")
+				)
+				(pin
+					(num "3")
+					(name "Pin_3")
+					(type "passive")
+				)
+				(pin
+					(num "4")
+					(name "Pin_4")
+					(type "passive")
+				)
+				(pin
+					(num "5")
+					(name "Pin_5")
+					(type "passive")
+				)
+				(pin
+					(num "6")
+					(name "Pin_6")
+					(type "passive")
+				)
+				(pin
+					(num "7")
+					(name "Pin_7")
+					(type "passive")
+				)
+				(pin
+					(num "8")
+					(name "Pin_8")
+					(type "passive")
+				)
+				(pin
+					(num "9")
+					(name "Pin_9")
+					(type "passive")
+				)
+				(pin
+					(num "10")
+					(name "Pin_10")
+					(type "passive")
+				)
+				(pin
+					(num "11")
+					(name "Pin_11")
+					(type "passive")
+				)
+				(pin
+					(num "12")
+					(name "Pin_12")
+					(type "passive")
+				)
+				(pin
+					(num "13")
+					(name "Pin_13")
+					(type "passive")
+				)
+				(pin
+					(num "14")
+					(name "Pin_14")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Connector_Generic")
+			(part "Conn_02x20_Odd_Even")
+			(description "Generic connector, double row, 02x20, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)")
+			(footprints
+				(fp "Connector*:*_2x??_*")
+			)
+			(fields
+				(field
+					(name "Reference") "J")
+				(field
+					(name "Value") "Conn_02x20_Odd_Even")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Generic connector, double row, 02x20, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "Pin_1")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "Pin_2")
+					(type "passive")
+				)
+				(pin
+					(num "3")
+					(name "Pin_3")
+					(type "passive")
+				)
+				(pin
+					(num "4")
+					(name "Pin_4")
+					(type "passive")
+				)
+				(pin
+					(num "5")
+					(name "Pin_5")
+					(type "passive")
+				)
+				(pin
+					(num "6")
+					(name "Pin_6")
+					(type "passive")
+				)
+				(pin
+					(num "7")
+					(name "Pin_7")
+					(type "passive")
+				)
+				(pin
+					(num "8")
+					(name "Pin_8")
+					(type "passive")
+				)
+				(pin
+					(num "9")
+					(name "Pin_9")
+					(type "passive")
+				)
+				(pin
+					(num "10")
+					(name "Pin_10")
+					(type "passive")
+				)
+				(pin
+					(num "11")
+					(name "Pin_11")
+					(type "passive")
+				)
+				(pin
+					(num "12")
+					(name "Pin_12")
+					(type "passive")
+				)
+				(pin
+					(num "13")
+					(name "Pin_13")
+					(type "passive")
+				)
+				(pin
+					(num "14")
+					(name "Pin_14")
+					(type "passive")
+				)
+				(pin
+					(num "15")
+					(name "Pin_15")
+					(type "passive")
+				)
+				(pin
+					(num "16")
+					(name "Pin_16")
+					(type "passive")
+				)
+				(pin
+					(num "17")
+					(name "Pin_17")
+					(type "passive")
+				)
+				(pin
+					(num "18")
+					(name "Pin_18")
+					(type "passive")
+				)
+				(pin
+					(num "19")
+					(name "Pin_19")
+					(type "passive")
+				)
+				(pin
+					(num "20")
+					(name "Pin_20")
+					(type "passive")
+				)
+				(pin
+					(num "21")
+					(name "Pin_21")
+					(type "passive")
+				)
+				(pin
+					(num "22")
+					(name "Pin_22")
+					(type "passive")
+				)
+				(pin
+					(num "23")
+					(name "Pin_23")
+					(type "passive")
+				)
+				(pin
+					(num "24")
+					(name "Pin_24")
+					(type "passive")
+				)
+				(pin
+					(num "25")
+					(name "Pin_25")
+					(type "passive")
+				)
+				(pin
+					(num "26")
+					(name "Pin_26")
+					(type "passive")
+				)
+				(pin
+					(num "27")
+					(name "Pin_27")
+					(type "passive")
+				)
+				(pin
+					(num "28")
+					(name "Pin_28")
+					(type "passive")
+				)
+				(pin
+					(num "29")
+					(name "Pin_29")
+					(type "passive")
+				)
+				(pin
+					(num "30")
+					(name "Pin_30")
+					(type "passive")
+				)
+				(pin
+					(num "31")
+					(name "Pin_31")
+					(type "passive")
+				)
+				(pin
+					(num "32")
+					(name "Pin_32")
+					(type "passive")
+				)
+				(pin
+					(num "33")
+					(name "Pin_33")
+					(type "passive")
+				)
+				(pin
+					(num "34")
+					(name "Pin_34")
+					(type "passive")
+				)
+				(pin
+					(num "35")
+					(name "Pin_35")
+					(type "passive")
+				)
+				(pin
+					(num "36")
+					(name "Pin_36")
+					(type "passive")
+				)
+				(pin
+					(num "37")
+					(name "Pin_37")
+					(type "passive")
+				)
+				(pin
+					(num "38")
+					(name "Pin_38")
+					(type "passive")
+				)
+				(pin
+					(num "39")
+					(name "Pin_39")
+					(type "passive")
+				)
+				(pin
+					(num "40")
+					(name "Pin_40")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Device")
+			(part "C_Small")
+			(description "Unpolarized capacitor, small symbol")
+			(footprints
+				(fp "C_*")
+			)
+			(fields
+				(field
+					(name "Reference") "C")
+				(field
+					(name "Value") "C_Small")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Unpolarized capacitor, small symbol")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Device")
+			(part "Crystal_GND24_Small")
+			(description "Four pin crystal, GND on pins 2 and 4, small symbol")
+			(footprints
+				(fp "Crystal*")
+			)
+			(fields
+				(field
+					(name "Reference") "Y")
+				(field
+					(name "Value") "Crystal_GND24_Small")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Four pin crystal, GND on pins 2 and 4, small symbol")
+				(field
+					(name "KLC_S3.3") "The rectangle is not a symbol body but a graphical element")
+				(field
+					(name "KLC_S4.1") "Some pins are on 50mil grid to make the symbol small")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "1")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "G")
+					(type "passive")
+				)
+				(pin
+					(num "3")
+					(name "3")
+					(type "passive")
+				)
+				(pin
+					(num "4")
+					(name "G")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Device")
+			(part "LED_Small")
+			(description "Light emitting diode, small symbol")
+			(footprints
+				(fp "LED*")
+				(fp "LED_SMD:*")
+				(fp "LED_THT:*")
+			)
+			(fields
+				(field
+					(name "Reference") "D")
+				(field
+					(name "Value") "LED_Small")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Light emitting diode, small symbol")
+				(field
+					(name "Sim.Pins") "1=K 2=A")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "K")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "A")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Device")
+			(part "L_Small")
+			(description "Inductor, small symbol")
+			(footprints
+				(fp "Choke_*")
+				(fp "*Coil*")
+				(fp "Inductor_*")
+				(fp "L_*")
+			)
+			(fields
+				(field
+					(name "Reference") "L")
+				(field
+					(name "Value") "L_Small")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Inductor, small symbol")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "Device")
+			(part "R_Small")
+			(description "Resistor, small symbol")
+			(footprints
+				(fp "R_*")
+			)
+			(fields
+				(field
+					(name "Reference") "R")
+				(field
+					(name "Value") "R_Small")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Resistor, small symbol")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "")
+					(type "passive")
+				)
+			)
+		)
+		(libpart
+			(lib "MCU_RaspberryPi")
+			(part "RP2350A")
+			(description "A microcontroller by Raspberry Pi, dual CPU architecture (ARM Cortex-M33 / RISC-V Hazard3), 150MHz, no flash, 520KB SRAM, 12 PIO state machines, VQFN-60")
+			(docs "https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf")
+			(footprints
+				(fp "*QFN*7x7mm?P0.4mm?EP3.4x3.4mm*")
+			)
+			(fields
+				(field
+					(name "Reference") "U")
+				(field
+					(name "Value") "RP2350A")
+				(field
+					(name "Footprint") "Package_DFN_QFN:QFN-60-1EP_7x7mm_P0.4mm_EP3.4x3.4mm")
+				(field
+					(name "Datasheet") "https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf")
+				(field
+					(name "Description") "A microcontroller by Raspberry Pi, dual CPU architecture (ARM Cortex-M33 / RISC-V Hazard3), 150MHz, no flash, 520KB SRAM, 12 PIO state machines, VQFN-60")
+				(field
+					(name "KLC_S4.2_DVDD") "Not a standalone power converter; internal on-chip voltage regulator for digital core supply; DVDD is the digital core power supply, should be placed next to voltage regulator output.")
+				(field
+					(name "KLC_S4.2_VREG_LX") "Should be placed next to DVDD.")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "IOVDD")
+					(type "power_in")
+				)
+				(pin
+					(num "2")
+					(name "GPIO0")
+					(type "bidirectional")
+				)
+				(pin
+					(num "3")
+					(name "GPIO1")
+					(type "bidirectional")
+				)
+				(pin
+					(num "4")
+					(name "GPIO2")
+					(type "bidirectional")
+				)
+				(pin
+					(num "5")
+					(name "GPIO3")
+					(type "bidirectional")
+				)
+				(pin
+					(num "6")
+					(name "DVDD")
+					(type "power_in")
+				)
+				(pin
+					(num "7")
+					(name "GPIO4")
+					(type "bidirectional")
+				)
+				(pin
+					(num "8")
+					(name "GPIO5")
+					(type "bidirectional")
+				)
+				(pin
+					(num "9")
+					(name "GPIO6")
+					(type "bidirectional")
+				)
+				(pin
+					(num "10")
+					(name "GPIO7")
+					(type "bidirectional")
+				)
+				(pin
+					(num "11")
+					(name "IOVDD")
+					(type "passive")
+				)
+				(pin
+					(num "12")
+					(name "GPIO8")
+					(type "bidirectional")
+				)
+				(pin
+					(num "13")
+					(name "GPIO9")
+					(type "bidirectional")
+				)
+				(pin
+					(num "14")
+					(name "GPIO10")
+					(type "bidirectional")
+				)
+				(pin
+					(num "15")
+					(name "GPIO11")
+					(type "bidirectional")
+				)
+				(pin
+					(num "16")
+					(name "GPIO12")
+					(type "bidirectional")
+				)
+				(pin
+					(num "17")
+					(name "GPIO13")
+					(type "bidirectional")
+				)
+				(pin
+					(num "18")
+					(name "GPIO14")
+					(type "bidirectional")
+				)
+				(pin
+					(num "19")
+					(name "GPIO15")
+					(type "bidirectional")
+				)
+				(pin
+					(num "20")
+					(name "IOVDD")
+					(type "passive")
+				)
+				(pin
+					(num "21")
+					(name "XIN")
+					(type "input")
+				)
+				(pin
+					(num "22")
+					(name "XOUT")
+					(type "output")
+				)
+				(pin
+					(num "23")
+					(name "DVDD")
+					(type "passive")
+				)
+				(pin
+					(num "24")
+					(name "SWCLK")
+					(type "input")
+				)
+				(pin
+					(num "25")
+					(name "SWDIO")
+					(type "bidirectional")
+				)
+				(pin
+					(num "26")
+					(name "RUN")
+					(type "input")
+				)
+				(pin
+					(num "27")
+					(name "GPIO16")
+					(type "bidirectional")
+				)
+				(pin
+					(num "28")
+					(name "GPIO17")
+					(type "bidirectional")
+				)
+				(pin
+					(num "29")
+					(name "GPIO18")
+					(type "bidirectional")
+				)
+				(pin
+					(num "30")
+					(name "IOVDD")
+					(type "passive")
+				)
+				(pin
+					(num "31")
+					(name "GPIO19")
+					(type "bidirectional")
+				)
+				(pin
+					(num "32")
+					(name "GPIO20")
+					(type "bidirectional")
+				)
+				(pin
+					(num "33")
+					(name "GPIO21")
+					(type "bidirectional")
+				)
+				(pin
+					(num "34")
+					(name "GPIO22")
+					(type "bidirectional")
+				)
+				(pin
+					(num "35")
+					(name "GPIO23")
+					(type "bidirectional")
+				)
+				(pin
+					(num "36")
+					(name "GPIO24")
+					(type "bidirectional")
+				)
+				(pin
+					(num "37")
+					(name "GPIO25")
+					(type "bidirectional")
+				)
+				(pin
+					(num "38")
+					(name "IOVDD")
+					(type "passive")
+				)
+				(pin
+					(num "39")
+					(name "DVDD")
+					(type "passive")
+				)
+				(pin
+					(num "40")
+					(name "GPIO26/ADC0")
+					(type "bidirectional")
+				)
+				(pin
+					(num "41")
+					(name "GPIO27/ADC1")
+					(type "bidirectional")
+				)
+				(pin
+					(num "42")
+					(name "GPIO28/ADC2")
+					(type "bidirectional")
+				)
+				(pin
+					(num "43")
+					(name "GPIO29/ADC3")
+					(type "bidirectional")
+				)
+				(pin
+					(num "44")
+					(name "ADC_AVDD")
+					(type "power_in")
+				)
+				(pin
+					(num "45")
+					(name "IOVDD")
+					(type "passive")
+				)
+				(pin
+					(num "46")
+					(name "VREG_AVDD")
+					(type "power_in")
+				)
+				(pin
+					(num "47")
+					(name "VREG_PGND")
+					(type "power_in")
+				)
+				(pin
+					(num "48")
+					(name "VREG_LX")
+					(type "power_out")
+				)
+				(pin
+					(num "49")
+					(name "VREG_VIN")
+					(type "power_in")
+				)
+				(pin
+					(num "50")
+					(name "VREG_FB")
+					(type "passive")
+				)
+				(pin
+					(num "51")
+					(name "USB_DM")
+					(type "bidirectional")
+				)
+				(pin
+					(num "52")
+					(name "USB_DP")
+					(type "bidirectional")
+				)
+				(pin
+					(num "53")
+					(name "USB_OTP_VDD")
+					(type "power_in")
+				)
+				(pin
+					(num "54")
+					(name "QSPI_IOVDD")
+					(type "power_in")
+				)
+				(pin
+					(num "55")
+					(name "QSPI_SD3")
+					(type "bidirectional")
+				)
+				(pin
+					(num "56")
+					(name "QSPI_SCLK")
+					(type "output")
+				)
+				(pin
+					(num "57")
+					(name "QSPI_SD0")
+					(type "bidirectional")
+				)
+				(pin
+					(num "58")
+					(name "QSPI_SD2")
+					(type "bidirectional")
+				)
+				(pin
+					(num "59")
+					(name "QSPI_SD1")
+					(type "bidirectional")
+				)
+				(pin
+					(num "60")
+					(name "~{QSPI_SS}")
+					(type "output")
+				)
+				(pin
+					(num "61")
+					(name "GND")
+					(type "power_in")
+				)
+			)
+		)
+		(libpart
+			(lib "Mechanical")
+			(part "MountingHole")
+			(description "Mounting Hole without connection")
+			(footprints
+				(fp "MountingHole*")
+			)
+			(fields
+				(field
+					(name "Reference") "H")
+				(field
+					(name "Value") "MountingHole")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Mounting Hole without connection")
+			)
+		)
+		(libpart
+			(lib "Memory_Flash")
+			(part "W25Q128JVS")
+			(description "128Mbit / 16MiB Serial Flash Memory, Standard/Dual/Quad SPI, 2.7-3.6V, SOIC-8")
+			(docs "https://www.winbond.com/resource-files/w25q128jv_dtr%20revc%2003272018%20plus.pdf")
+			(footprints
+				(fp "*SOIC*5.3x5.3mm*P1.27mm*")
+			)
+			(fields
+				(field
+					(name "Reference") "U")
+				(field
+					(name "Value") "W25Q128JVS")
+				(field
+					(name "Footprint") "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm")
+				(field
+					(name "Datasheet") "https://www.winbond.com/resource-files/w25q128jv_dtr%20revc%2003272018%20plus.pdf")
+				(field
+					(name "Description") "128Mbit / 16MiB Serial Flash Memory, Standard/Dual/Quad SPI, 2.7-3.6V, SOIC-8")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "~{CS}")
+					(type "input")
+				)
+				(pin
+					(num "2")
+					(name "DO/IO_{1}")
+					(type "bidirectional")
+				)
+				(pin
+					(num "3")
+					(name "~{WP}/IO_{2}")
+					(type "bidirectional")
+				)
+				(pin
+					(num "4")
+					(name "GND")
+					(type "power_in")
+				)
+				(pin
+					(num "5")
+					(name "DI/IO_{0}")
+					(type "bidirectional")
+				)
+				(pin
+					(num "6")
+					(name "CLK")
+					(type "input")
+				)
+				(pin
+					(num "7")
+					(name "~{HOLD}/~{RESET}/IO_{3}")
+					(type "bidirectional")
+				)
+				(pin
+					(num "8")
+					(name "VCC")
+					(type "power_in")
+				)
+			)
+		)
+		(libpart
+			(lib "Regulator_Linear")
+			(part "AP2112K-3.3")
+			(description "600mA low dropout linear regulator, with enable pin, 3.8V-6V input voltage range, 3.3V fixed positive output, SOT-23-5")
+			(docs "https://www.diodes.com/assets/Datasheets/AP2112.pdf")
+			(footprints
+				(fp "SOT?23?5*")
+			)
+			(fields
+				(field
+					(name "Reference") "U")
+				(field
+					(name "Value") "AP2112K-3.3")
+				(field
+					(name "Footprint") "Package_TO_SOT_SMD:SOT-23-5")
+				(field
+					(name "Datasheet") "https://www.diodes.com/assets/Datasheets/AP2112.pdf")
+				(field
+					(name "Description") "600mA low dropout linear regulator, with enable pin, 3.8V-6V input voltage range, 3.3V fixed positive output, SOT-23-5")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "VIN")
+					(type "power_in")
+				)
+				(pin
+					(num "2")
+					(name "GND")
+					(type "power_in")
+				)
+				(pin
+					(num "3")
+					(name "EN")
+					(type "input")
+				)
+				(pin
+					(num "4")
+					(name "NC")
+					(type "no_connect")
+				)
+				(pin
+					(num "5")
+					(name "VOUT")
+					(type "power_out")
+				)
+			)
+		)
+		(libpart
+			(lib "Switch")
+			(part "SW_Push")
+			(description "Push button switch, generic, two pins")
+			(fields
+				(field
+					(name "Reference") "SW")
+				(field
+					(name "Value") "SW_Push")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description") "Push button switch, generic, two pins")
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "1")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "2")
+					(type "passive")
+				)
+			)
+		)
+	)
+	(libraries
+		(library
+			(logical "Connector")
+			(uri "${KICAD10_SYMBOL_DIR}/Connector.kicad_symdir")
+		)
+		(library
+			(logical "Connector_Generic")
+			(uri "${KICAD10_SYMBOL_DIR}/Connector_Generic.kicad_symdir")
+		)
+		(library
+			(logical "Device")
+			(uri "${KICAD10_SYMBOL_DIR}/Device.kicad_symdir")
+		)
+		(library
+			(logical "MCU_RaspberryPi")
+			(uri "${KICAD10_SYMBOL_DIR}/MCU_RaspberryPi.kicad_symdir")
+		)
+		(library
+			(logical "Mechanical")
+			(uri "${KICAD10_SYMBOL_DIR}/Mechanical.kicad_symdir")
+		)
+		(library
+			(logical "Memory_Flash")
+			(uri "${KICAD10_SYMBOL_DIR}/Memory_Flash.kicad_symdir")
+		)
+		(library
+			(logical "Regulator_Linear")
+			(uri "${KICAD10_SYMBOL_DIR}/Regulator_Linear.kicad_symdir")
+		)
+		(library
+			(logical "Switch")
+			(uri "${KICAD10_SYMBOL_DIR}/Switch.kicad_symdir")
+		)
+	)
+	(nets
+		(net
+			(code "1")
+			(name "+1V1")
+			(class "Default")
+			(node
+				(ref "C15")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C16")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C17")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C18")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "L1")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "23")
+				(pinfunction "DVDD_23")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "39")
+				(pinfunction "DVDD_39")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "50")
+				(pinfunction "VREG_FB_50")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "6")
+				(pinfunction "DVDD_6")
+				(pintype "power_in")
+			)
+		)
+		(net
+			(code "2")
+			(name "+3V3")
+			(class "Default")
+			(node
+				(ref "C10")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C11")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C12")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C13")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C19")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C2")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C3")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C4")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C5")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C6")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C7")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C8")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "C9")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "2")
+				(pinfunction "Pin_2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "39")
+				(pinfunction "Pin_39_39")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "1")
+				(pinfunction "Pin_1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "R5")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "R8")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "1")
+				(pinfunction "IOVDD_1")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U1")
+				(pin "11")
+				(pinfunction "IOVDD_11")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "20")
+				(pinfunction "IOVDD_20")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "30")
+				(pinfunction "IOVDD_30")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "38")
+				(pinfunction "IOVDD_38")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "44")
+				(pinfunction "ADC_AVDD_44")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U1")
+				(pin "45")
+				(pinfunction "IOVDD_45")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "49")
+				(pinfunction "VREG_VIN_49")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U1")
+				(pin "53")
+				(pinfunction "USB_OTP_VDD_53")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U1")
+				(pin "54")
+				(pinfunction "QSPI_IOVDD_54")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U2")
+				(pin "5")
+				(pinfunction "VOUT_5")
+				(pintype "power_out")
+			)
+			(node
+				(ref "U3")
+				(pin "8")
+				(pinfunction "VCC_8")
+				(pintype "power_in")
+			)
+		)
+		(net
+			(code "3")
+			(name "/BOOT_SW")
+			(class "Default")
+			(node
+				(ref "R7")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW4")
+				(pin "1")
+				(pinfunction "1_1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "4")
+			(name "/CC1")
+			(class "Default")
+			(node
+				(ref "J1")
+				(pin "A5")
+				(pinfunction "CC1_A5")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "R1")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "5")
+			(name "/CC2")
+			(class "Default")
+			(node
+				(ref "J1")
+				(pin "B5")
+				(pinfunction "CC2_B5")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "R2")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "6")
+			(name "/GPIO0")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "5")
+				(pinfunction "Pin_5_5")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "2")
+				(pinfunction "GPIO0_2")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "7")
+			(name "/GPIO1")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "6")
+				(pinfunction "Pin_6_6")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "3")
+				(pinfunction "GPIO1_3")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "8")
+			(name "/GPIO2")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "7")
+				(pinfunction "Pin_7_7")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "4")
+				(pinfunction "GPIO2_4")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "9")
+			(name "/GPIO3")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "8")
+				(pinfunction "Pin_8_8")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "5")
+				(pinfunction "GPIO3_5")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "10")
+			(name "/GPIO4")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "9")
+				(pinfunction "Pin_9_9")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "7")
+				(pinfunction "GPIO4_7")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "11")
+			(name "/GPIO5")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "10")
+				(pinfunction "Pin_10_10")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "8")
+				(pinfunction "GPIO5_8")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "12")
+			(name "/GPIO6")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "11")
+				(pinfunction "Pin_11_11")
+				(pintype "passive")
+			)
+			(node
+				(ref "R9")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "9")
+				(pinfunction "GPIO6_9")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "13")
+			(name "/GPIO7")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "12")
+				(pinfunction "Pin_12_12")
+				(pintype "passive")
+			)
+			(node
+				(ref "R10")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "10")
+				(pinfunction "GPIO7_10")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "14")
+			(name "/GPIO8")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "13")
+				(pinfunction "Pin_13_13")
+				(pintype "passive")
+			)
+			(node
+				(ref "R11")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "12")
+				(pinfunction "GPIO8_12")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "15")
+			(name "/GPIO9")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "14")
+				(pinfunction "Pin_14_14")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "13")
+				(pinfunction "GPIO9_13")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "16")
+			(name "/GPIO10")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "15")
+				(pinfunction "Pin_15_15")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW1")
+				(pin "1")
+				(pinfunction "1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "14")
+				(pinfunction "GPIO10_14")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "17")
+			(name "/GPIO11")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "16")
+				(pinfunction "Pin_16_16")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW2")
+				(pin "1")
+				(pinfunction "1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "15")
+				(pinfunction "GPIO11_15")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "18")
+			(name "/GPIO12")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "17")
+				(pinfunction "Pin_17_17")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW3")
+				(pin "1")
+				(pinfunction "1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "16")
+				(pinfunction "GPIO12_16")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "19")
+			(name "/GPIO13")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "18")
+				(pinfunction "Pin_18_18")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "17")
+				(pinfunction "GPIO13_17")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "20")
+			(name "/GPIO14")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "19")
+				(pinfunction "Pin_19_19")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "14")
+				(pinfunction "Pin_14_14")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "18")
+				(pinfunction "GPIO14_18")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "21")
+			(name "/GPIO15")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "20")
+				(pinfunction "Pin_20_20")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "11")
+				(pinfunction "Pin_11_11")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "19")
+				(pinfunction "GPIO15_19")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "22")
+			(name "/GPIO16")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "21")
+				(pinfunction "Pin_21_21")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "13")
+				(pinfunction "Pin_13_13")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "9")
+				(pinfunction "Pin_9_9")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "27")
+				(pinfunction "GPIO16_27")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "23")
+			(name "/GPIO17")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "22")
+				(pinfunction "Pin_22_22")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "3")
+				(pinfunction "Pin_3_3")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "28")
+				(pinfunction "GPIO17_28")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "24")
+			(name "/GPIO18")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "23")
+				(pinfunction "Pin_23_23")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "10")
+				(pinfunction "Pin_10_10")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "7")
+				(pinfunction "Pin_7_7")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "29")
+				(pinfunction "GPIO18_29")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "25")
+			(name "/GPIO19")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "24")
+				(pinfunction "Pin_24_24")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "12")
+				(pinfunction "Pin_12_12")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "6")
+				(pinfunction "Pin_6_6")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "31")
+				(pinfunction "GPIO19_31")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "26")
+			(name "/GPIO20")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "25")
+				(pinfunction "Pin_25_25")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "5")
+				(pinfunction "Pin_5_5")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "32")
+				(pinfunction "GPIO20_32")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "27")
+			(name "/GPIO21")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "26")
+				(pinfunction "Pin_26_26")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "4")
+				(pinfunction "Pin_4_4")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "33")
+				(pinfunction "GPIO21_33")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "28")
+			(name "/GPIO22")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "27")
+				(pinfunction "Pin_27_27")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "8")
+				(pinfunction "Pin_8_8")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "34")
+				(pinfunction "GPIO22_34")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "29")
+			(name "/GPIO23")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "28")
+				(pinfunction "Pin_28_28")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "35")
+				(pinfunction "GPIO23_35")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "30")
+			(name "/GPIO24")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "29")
+				(pinfunction "Pin_29_29")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "36")
+				(pinfunction "GPIO24_36")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "31")
+			(name "/GPIO25")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "30")
+				(pinfunction "Pin_30_30")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "37")
+				(pinfunction "GPIO25_37")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "32")
+			(name "/GPIO26")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "31")
+				(pinfunction "Pin_31_31")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "40")
+				(pinfunction "GPIO26/ADC0_40")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "33")
+			(name "/GPIO27")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "32")
+				(pinfunction "Pin_32_32")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "41")
+				(pinfunction "GPIO27/ADC1_41")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "34")
+			(name "/GPIO28")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "33")
+				(pinfunction "Pin_33_33")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "42")
+				(pinfunction "GPIO28/ADC2_42")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "35")
+			(name "/GPIO29")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "34")
+				(pinfunction "Pin_34_34")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "43")
+				(pinfunction "GPIO29/ADC3_43")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "36")
+			(name "/LED_B")
+			(class "Default")
+			(node
+				(ref "D3")
+				(pin "2")
+				(pinfunction "A_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R11")
+				(pin "2")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "37")
+			(name "/LED_G")
+			(class "Default")
+			(node
+				(ref "D2")
+				(pin "2")
+				(pinfunction "A_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R10")
+				(pin "2")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "38")
+			(name "/LED_R")
+			(class "Default")
+			(node
+				(ref "D1")
+				(pin "2")
+				(pinfunction "A_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R9")
+				(pin "2")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "39")
+			(name "/QSPI_SCLK")
+			(class "Default")
+			(node
+				(ref "U1")
+				(pin "56")
+				(pinfunction "QSPI_SCLK_56")
+				(pintype "output")
+			)
+			(node
+				(ref "U3")
+				(pin "6")
+				(pinfunction "CLK_6")
+				(pintype "input")
+			)
+		)
+		(net
+			(code "40")
+			(name "/QSPI_SD0")
+			(class "Default")
+			(node
+				(ref "U1")
+				(pin "57")
+				(pinfunction "QSPI_SD0_57")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "U3")
+				(pin "5")
+				(pinfunction "DI/IO_{0}_5")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "41")
+			(name "/QSPI_SD1")
+			(class "Default")
+			(node
+				(ref "U1")
+				(pin "59")
+				(pinfunction "QSPI_SD1_59")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "U3")
+				(pin "2")
+				(pinfunction "DO/IO_{1}_2")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "42")
+			(name "/QSPI_SD2")
+			(class "Default")
+			(node
+				(ref "U1")
+				(pin "58")
+				(pinfunction "QSPI_SD2_58")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "U3")
+				(pin "3")
+				(pinfunction "~{WP}/IO_{2}_3")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "43")
+			(name "/QSPI_SD3")
+			(class "Default")
+			(node
+				(ref "U1")
+				(pin "55")
+				(pinfunction "QSPI_SD3_55")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "U3")
+				(pin "7")
+				(pinfunction "~{HOLD}/~{RESET}/IO_{3}_7")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "44")
+			(name "/QSPI_SS")
+			(class "Default")
+			(node
+				(ref "R7")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "60")
+				(pinfunction "~{QSPI_SS}_60")
+				(pintype "output")
+			)
+			(node
+				(ref "U3")
+				(pin "1")
+				(pinfunction "~{CS}_1")
+				(pintype "input")
+			)
+		)
+		(net
+			(code "45")
+			(name "/RUN")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "37")
+				(pinfunction "Pin_37_37")
+				(pintype "passive")
+			)
+			(node
+				(ref "R8")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW5")
+				(pin "1")
+				(pinfunction "1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "26")
+				(pinfunction "RUN_26")
+				(pintype "input")
+			)
+		)
+		(net
+			(code "46")
+			(name "/SWCLK")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "35")
+				(pinfunction "Pin_35_35")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "24")
+				(pinfunction "SWCLK_24")
+				(pintype "input")
+			)
+		)
+		(net
+			(code "47")
+			(name "/SWDIO")
+			(class "Default")
+			(node
+				(ref "J2")
+				(pin "36")
+				(pinfunction "Pin_36_36")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "25")
+				(pinfunction "SWDIO_25")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "48")
+			(name "/USB_CONN_DM")
+			(class "Default")
+			(node
+				(ref "J1")
+				(pin "A7")
+				(pinfunction "D-_A7")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "J1")
+				(pin "B7")
+				(pinfunction "D-_B7")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "R4")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "49")
+			(name "/USB_CONN_DP")
+			(class "Default")
+			(node
+				(ref "J1")
+				(pin "A6")
+				(pinfunction "D+_A6")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "J1")
+				(pin "B6")
+				(pinfunction "D+_B6")
+				(pintype "bidirectional")
+			)
+			(node
+				(ref "R3")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "50")
+			(name "/USB_DM")
+			(class "Default")
+			(node
+				(ref "R4")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "51")
+				(pinfunction "USB_DM_51")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "51")
+			(name "/USB_DP")
+			(class "Default")
+			(node
+				(ref "R3")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "52")
+				(pinfunction "USB_DP_52")
+				(pintype "bidirectional")
+			)
+		)
+		(net
+			(code "52")
+			(name "/VREG_AVDD")
+			(class "Default")
+			(node
+				(ref "C14")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "R5")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "46")
+				(pinfunction "VREG_AVDD_46")
+				(pintype "power_in")
+			)
+		)
+		(net
+			(code "53")
+			(name "/VREG_LX")
+			(class "Default")
+			(node
+				(ref "L1")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "48")
+				(pinfunction "VREG_LX_48")
+				(pintype "power_out")
+			)
+		)
+		(net
+			(code "54")
+			(name "/XIN")
+			(class "Default")
+			(node
+				(ref "C20")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "21")
+				(pinfunction "XIN_21")
+				(pintype "input")
+			)
+			(node
+				(ref "Y1")
+				(pin "1")
+				(pinfunction "1_1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "55")
+			(name "/XOUT")
+			(class "Default")
+			(node
+				(ref "R6")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "22")
+				(pinfunction "XOUT_22")
+				(pintype "output")
+			)
+		)
+		(net
+			(code "56")
+			(name "/XTAL_OUT")
+			(class "Default")
+			(node
+				(ref "C21")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "R6")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "Y1")
+				(pin "3")
+				(pinfunction "3_3")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "57")
+			(name "GND")
+			(class "Default")
+			(node
+				(ref "C1")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C10")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C11")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C12")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C13")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C14")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C15")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C16")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C17")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C18")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C19")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C2")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C20")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C21")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C3")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C4")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C5")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C6")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C7")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C8")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "C9")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "D1")
+				(pin "1")
+				(pinfunction "K_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "D2")
+				(pin "1")
+				(pinfunction "K_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "D3")
+				(pin "1")
+				(pinfunction "K_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "A1")
+				(pinfunction "GND_A1")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "A12")
+				(pinfunction "GND_A12")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "B1")
+				(pinfunction "GND_B1")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "B12")
+				(pinfunction "GND_B12")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "SH")
+				(pinfunction "SHIELD_SH")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "3")
+				(pinfunction "Pin_3_3")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "38")
+				(pinfunction "Pin_38_38")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "4")
+				(pinfunction "Pin_4_4")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "40")
+				(pinfunction "Pin_40_40")
+				(pintype "passive")
+			)
+			(node
+				(ref "J3")
+				(pin "2")
+				(pinfunction "Pin_2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R1")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R2")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW1")
+				(pin "2")
+				(pinfunction "2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW2")
+				(pin "2")
+				(pinfunction "2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW3")
+				(pin "2")
+				(pinfunction "2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW4")
+				(pin "2")
+				(pinfunction "2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "SW5")
+				(pin "2")
+				(pinfunction "2_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "U1")
+				(pin "47")
+				(pinfunction "VREG_PGND_47")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U1")
+				(pin "61")
+				(pinfunction "GND_61")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U2")
+				(pin "2")
+				(pinfunction "GND_2")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U3")
+				(pin "4")
+				(pinfunction "GND_4")
+				(pintype "power_in")
+			)
+			(node
+				(ref "Y1")
+				(pin "2")
+				(pinfunction "G_2")
+				(pintype "passive")
+			)
+			(node
+				(ref "Y1")
+				(pin "4")
+				(pinfunction "G_4")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "58")
+			(name "VBUS")
+			(class "Default")
+			(node
+				(ref "C1")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "A4")
+				(pinfunction "VBUS_A4")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "A9")
+				(pinfunction "VBUS_A9")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "B4")
+				(pinfunction "VBUS_B4")
+				(pintype "passive")
+			)
+			(node
+				(ref "J1")
+				(pin "B9")
+				(pinfunction "VBUS_B9")
+				(pintype "passive")
+			)
+			(node
+				(ref "J2")
+				(pin "1")
+				(pinfunction "Pin_1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "U2")
+				(pin "1")
+				(pinfunction "VIN_1")
+				(pintype "power_in")
+			)
+			(node
+				(ref "U2")
+				(pin "3")
+				(pinfunction "EN_3")
+				(pintype "input")
+			)
+		)
+		(net
+			(code "59")
+			(name "unconnected-(J1-SBU1-PadA8)")
+			(class "Default")
+			(node
+				(ref "J1")
+				(pin "A8")
+				(pinfunction "SBU1_A8")
+				(pintype "bidirectional+no_connect")
+			)
+		)
+		(net
+			(code "60")
+			(name "unconnected-(J1-SBU2-PadB8)")
+			(class "Default")
+			(node
+				(ref "J1")
+				(pin "B8")
+				(pinfunction "SBU2_B8")
+				(pintype "bidirectional+no_connect")
+			)
+		)
+		(net
+			(code "61")
+			(name "unconnected-(U2-NC-Pad4)")
+			(class "Default")
+			(node
+				(ref "U2")
+				(pin "4")
+				(pinfunction "NC_4")
+				(pintype "no_connect")
+			)
+		)
+	)
+)

@@ -1,0 +1,48 @@
+From 1c3592a50923cc353fc4146d594115f5be0d4f68 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 20:26:32 +0530
+Subject: [PATCH 20/20] macOS install: optional extra search dirs for @rpath
+ dependencies
+
+KICAD_MACOS_DEPENDENCY_DIRS (colon-separated) is passed to
+file(GET_RUNTIME_DEPENDENCIES) so locally built dependencies referenced
+through @rpath without an LC_RPATH (e.g. a self-built wxWidgets) get
+bundled.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ cmake/InstallSteps/InstallMacOS.cmake | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/cmake/InstallSteps/InstallMacOS.cmake b/cmake/InstallSteps/InstallMacOS.cmake
+index 41fb60db..01aec7b2 100644
+--- a/cmake/InstallSteps/InstallMacOS.cmake
++++ b/cmake/InstallSteps/InstallMacOS.cmake
+@@ -21,12 +21,22 @@ function( install_runtime_deps exe libs dest )
+     # set(CMAKE_MESSAGE_LOG_LEVEL DEBUG)
+     message( DEBUG "install_runtime_deps ${exe}\n  libs: ${libs}\n  dest: ${dest}" )
+ 
++    # Extra places to look for dependencies referenced through @rpath that the binaries carry
++    # no LC_RPATH for (e.g. a locally built wxWidgets): KICAD_MACOS_DEPENDENCY_DIRS=dir1:dir2
++    set( _dep_dirs "" )
++
++    if( DEFINED ENV{KICAD_MACOS_DEPENDENCY_DIRS} )
++        string( REPLACE ":" ";" _dep_dirs "$ENV{KICAD_MACOS_DEPENDENCY_DIRS}" )
++        list( PREPEND _dep_dirs DIRECTORIES )
++    endif()
++
+     file( GET_RUNTIME_DEPENDENCIES
+         LIBRARIES ${libs}
+         EXECUTABLES ${exe}
+         RESOLVED_DEPENDENCIES_VAR _r_deps
+         UNRESOLVED_DEPENDENCIES_VAR _u_deps
+         POST_EXCLUDE_FILES Python
++        ${_dep_dirs}
+     )
+ 
+     if( "${dest}" STREQUAL "" )
+-- 
+2.54.0 (Apple Git-157)
+

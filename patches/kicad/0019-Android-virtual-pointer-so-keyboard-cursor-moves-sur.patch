@@ -1,0 +1,86 @@
+From 584df3303979117dfeadc9e92f56b5514050be4c Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 19:03:24 +0530
+Subject: [PATCH 19/20] Android: virtual pointer so keyboard cursor moves
+ survive re-reading the pointer
+
+Android doesn't let apps warp the pointer, so after a dialog closed tools re-read the last
+touch position and dropped the cursor set with the arrow keys. Remember warped positions
+and report them until the real pointer moves.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ libs/kiplatform/port/wxqt/ui.cpp | 46 +++++++++++++++++++++++++++++---
+ 1 file changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index e78f9185..bb1e9164 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -418,9 +418,41 @@ bool KIPLATFORM::UI::SupportsKeyState()
+ }
+ 
+ 
++#ifdef __ANDROID__
++namespace
++{
++// Android doesn't let apps move the pointer. Keep a virtual pointer instead: a warp (e.g. the
++// cursor moved with the arrow keys) is reported by GetMousePosition() until the real pointer
++// moves, so tools that re-read the pointer (after a dialog closes, say) see the warped spot.
++struct VIRTUAL_POINTER
++{
++    bool   active = false;
++    QPoint warped;
++    QPoint realAtWarp;
++};
++
++VIRTUAL_POINTER& virtualPointer()
++{
++    static VIRTUAL_POINTER vp;
++    return vp;
++}
++} // namespace
++#endif
++
++
+ wxPoint KIPLATFORM::UI::GetMousePosition()
+ {
+-    const QPoint p = QCursor::pos();
++    QPoint p = QCursor::pos();
++
++#ifdef __ANDROID__
++    VIRTUAL_POINTER& vp = virtualPointer();
++
++    if( vp.active && p == vp.realAtWarp )
++        p = vp.warped;
++    else
++        vp.active = false;
++#endif
++
+     return wxPoint( p.x(), p.y() );
+ }
+ 
+@@ -428,8 +460,16 @@ wxPoint KIPLATFORM::UI::GetMousePosition()
+ bool KIPLATFORM::UI::WarpPointer( wxWindow* aWindow, int aX, int aY )
+ {
+ #ifdef __ANDROID__
+-    // Android does not allow apps to move the pointer.  Pointer capture (relative motion)
+-    // is the replacement and is handled by the infinite-drag functions once implemented.
++    // The real pointer can't move; remember the spot (see VIRTUAL_POINTER). Still report
++    // failure so infinite panning doesn't expect the pointer to jump.
++    if( QWidget* w = qtWidget( aWindow ) )
++    {
++        VIRTUAL_POINTER& vp = virtualPointer();
++        vp.active = true;
++        vp.warped = w->mapToGlobal( QPoint( aX, aY ) );
++        vp.realAtWarp = QCursor::pos();
++    }
++
+     return false;
+ #else
+     QWidget* w = qtWidget( aWindow );
+-- 
+2.54.0 (Apple Git-157)
+

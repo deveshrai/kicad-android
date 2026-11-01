@@ -1,7 +1,7 @@
 From 3ae39650e736b73ed37d718180f1b13c93e6d479 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 16:28:04 +0530
-Subject: [PATCH 17/18] RHI: remake a surface that never reaches the requested
+Subject: [PATCH 17/20] RHI: remake a surface that never reaches the requested
  size
 
 Android TextureViews replace their Surface when resized; a VkSurfaceKHR on

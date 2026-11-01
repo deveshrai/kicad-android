@@ -89,7 +89,36 @@ def effects(hide=False, justify=None):
 def prop(name, value, x, y, hide=False, rot=0):
     return ['property', Str(name), Str(value), ['at', r2(x), r2(y), rot]] + effects(hide)
 
+# Purchasing info for the BOM: (Manufacturer, MPN), by (library symbol, value)
+PARTS = {
+    ('Device:R_Small', '5.1k'): ('Yageo', 'RC0603FR-075K1L', 'Resistor 5.1k 1% 1/10W 0603'),
+    ('Device:R_Small', '27'): ('Yageo', 'RC0603FR-0727RL', 'Resistor 27R 1% 1/10W 0603'),
+    ('Device:R_Small', '33'): ('Yageo', 'RC0603FR-0733RL', 'Resistor 33R 1% 1/10W 0603'),
+    ('Device:R_Small', '330'): ('Yageo', 'RC0603FR-07330RL', 'Resistor 330R 1% 1/10W 0603'),
+    ('Device:R_Small', '1k'): ('Yageo', 'RC0603FR-071KL', 'Resistor 1k 1% 1/10W 0603'),
+    ('Device:R_Small', '10k'): ('Yageo', 'RC0603FR-0710KL', 'Resistor 10k 1% 1/10W 0603'),
+    ('Device:C_Small', '100n'): ('Samsung', 'CL10B104KB8NNNC', 'Capacitor 100nF 50V X7R 10% 0603'),
+    ('Device:C_Small', '1u'): ('Samsung', 'CL10A105KB8NNNC', 'Capacitor 1uF 50V X5R 10% 0603'),
+    ('Device:C_Small', '15p'): ('Samsung', 'CL10C150JB8NNNC', 'Capacitor 15pF 50V C0G 5% 0603'),
+    ('Device:C_Small', '4.7u'): ('Samsung', 'CL21A475KAQNNNE', 'Capacitor 4.7uF 25V X5R 10% 0805'),
+    ('Device:C_Small', '10u'): ('Samsung', 'CL21A106KAYNNNE', 'Capacitor 10uF 25V X5R 10% 0805'),
+    ('Device:L_Small', '3.3u'): ('Abracon', 'AOTA-B201610S3R3-101-T', 'Power inductor 3.3uH 2016 (RP2350 core regulator)'),
+    ('Device:Crystal_GND24_Small', '12MHz'): ('Abracon', 'ABM8-272-T3', 'Crystal 12MHz 10pF 3225 4-pad'),
+    ('Device:LED_Small', 'Red'): ('Kingbright', 'APT1608EC', 'LED red 0603'),
+    ('Device:LED_Small', 'Green'): ('Kingbright', 'APT1608SGC', 'LED green 0603'),
+    ('Device:LED_Small', 'Blue'): ('Kingbright', 'APT1608QBC/D', 'LED blue 0603'),
+    ('MCU_RaspberryPi:RP2350A', 'RP2350A'): ('Raspberry Pi', 'RP2350A', 'MCU RP2350A dual Cortex-M33/Hazard3 150MHz 520KB SRAM QFN-60 7x7'),
+    ('Regulator_Linear:AP2112K-3.3', 'AP2112K-3.3'): ('Diodes Inc', 'AP2112K-3.3TRG1', 'LDO regulator 3.3V 600mA SOT-23-5'),
+    ('Memory_Flash:W25Q128JVS', 'W25Q128JVS'): ('Winbond', 'W25Q128JVSIQ', 'QSPI NOR flash 128Mbit (16MB) SOIC-8 208mil'),
+    ('Connector:USB_C_Receptacle_USB2.0_16P', 'USB_C'): ('HRO', 'TYPE-C-31-M-12', 'USB-C receptacle USB 2.0 16-pin SMD'),
+    ('Switch:SW_Push', None): ('E-Switch', 'TL3342F160QG', 'Tactile switch SPST 4.2x3.2mm SMD 160gf'),
+    ('Connector_Generic:Conn_01x14', 'ILI9341_SPI'): ('Sullins', 'PPTC141LFBN-RC', 'Female header 1x14 2.54mm vertical (ILI9341 2.8in module)'),
+    ('Connector_Generic:Conn_02x20_Odd_Even', 'IO'): ('Sullins', 'PRPC020DAAN-RC', 'Male header 2x20 2.54mm vertical'),
+}
+
 def place(lib_id, ref, value, x, y, footprint='', unit=1, in_bom=True, on_board=True):
+    if lib_id == 'Mechanical:MountingHole':
+        in_bom = False          # a hole in the board, nothing to buy
     used.add(lib_id)
     pins = lib_pins(lib_id)
     ys = [-p[1] for v in pins.values() for p in v] or [0]
@@ -104,6 +133,12 @@ def place(lib_id, ref, value, x, y, footprint='', unit=1, in_bom=True, on_board=
            prop('Footprint', footprint, x, y, hide=True),
            prop('Datasheet', lib_prop(lib_id, 'Datasheet'), x, y, hide=True),
            prop('Description', lib_prop(lib_id, 'Description'), x, y, hide=True)]
+    mfr = PARTS.get((lib_id, value)) or PARTS.get((lib_id, None))
+    if mfr and not ref.startswith('#'):
+        sym += [prop('Manufacturer', mfr[0], x, y, hide=True), prop('MPN', mfr[1], x, y, hide=True)]
+        for f in sym:
+            if isinstance(f, list) and f[0] == 'property' and f[1] == 'Description':
+                f[2] = Str(mfr[2])
     for num in sorted(pins):
         sym.append(['pin', Str(num), ['uuid', uid()]])
     sym.append(['instances', ['project', Str(PROJECT),
@@ -277,7 +312,7 @@ for num, net in enumerate(header, 1):
 
 # Mounting holes
 for i in range(4):
-    place('Mechanical:MountingHole', f'H{i + 1}', 'MountingHole', 335.28 + i * 15.24, 264.16,
+    place('Mechanical:MountingHole', f'H{i + 1}', 'MountingHole', 254.0 + i * 15.24, 241.3,
           'MountingHole:MountingHole_2.7mm_M2.5')
 
 # Power flags for nets without a power output pin driving them

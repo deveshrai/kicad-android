@@ -1,0 +1,79 @@
+From c04277df79578fae6d7af0ce8c4b7a3590fc3172 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 17:23:22 +0530
+Subject: [PATCH] qt: keep dialogs usable when their parent window is disabled
+
+Qt disables every descendant widget, separate windows included, when a
+widget is disabled. Dialogs whose parent frame was disabled (e.g. a
+quasi-modal dialog disabling its parent) became unusable. Re-enable
+top-level children after disabling a window and when showing one.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/toplevel.cpp |  4 ++++
+ src/qt/window.cpp   | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/src/qt/toplevel.cpp b/src/qt/toplevel.cpp
+index 64fc417..7fb7bea 100644
+--- a/src/qt/toplevel.cpp
++++ b/src/qt/toplevel.cpp
+@@ -57,6 +57,10 @@ bool wxTopLevelWindowQt::Show(bool show)
+     if ( !wxTopLevelWindowBase::Show(show) )
+         return false;
+ 
++    // A window created under a disabled parent inherits the disabled state in Qt
++    if ( show && IsThisEnabled() && !m_qtWindow->isEnabled() )
++        m_qtWindow->setEnabled(true);
++
+     if ( show && !m_qtWindow->isActiveWindow() )
+         m_qtWindow->activateWindow();
+ 
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 35ed524..12001c9 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -565,10 +565,39 @@ wxString wxWindowQt::GetLabel() const
+     return ( wxQtConvertString( GetHandle()->windowTitle() ));
+ }
+ 
++namespace
++{
++// Qt disables every descendant widget, separate windows included, when a widget is disabled.
++// wx only disables the window itself and its non-top-level children, so dialogs that are Qt
++// children of a disabled frame (e.g. a quasi-modal dialog that disabled its parent) must be
++// enabled again. A window can be enabled while its parent is disabled.
++void wxQtReenableTopLevelChildren(wxWindow* win)
++{
++    for ( wxWindow* child : win->GetChildren() )
++    {
++        if ( child->IsTopLevel() )
++        {
++            if ( child->IsThisEnabled() && child->GetHandle()
++                    && !child->GetHandle()->isEnabled() )
++                child->GetHandle()->setEnabled(true);
++        }
++        else
++        {
++            wxQtReenableTopLevelChildren(child);
++        }
++    }
++}
++} // anonymous namespace
++
+ void wxWindowQt::DoEnable(bool enable)
+ {
+     if ( GetHandle() )
++    {
+         GetHandle()->setEnabled(enable);
++
++        if ( !enable )
++            wxQtReenableTopLevelChildren(this);
++    }
+ }
+ 
+ void wxWindowQt::SetFocus()
+-- 
+2.54.0 (Apple Git-157)
+

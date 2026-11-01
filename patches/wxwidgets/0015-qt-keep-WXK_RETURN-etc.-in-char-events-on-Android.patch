@@ -1,0 +1,46 @@
+From 06f710c9ab963968d67676e69e6a691a65cbf679 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 19:03:24 +0530
+Subject: [PATCH] qt: keep WXK_RETURN etc. in char events on Android
+
+Android reports Return with "\n" as its text, so the char event got key
+code 10 (Ctrl-J) instead of WXK_RETURN and Return-bound actions never
+fired. Keep the WXK_ code for Return, Enter, Tab, Backspace and Escape,
+as wxMSW and wxGTK do.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/window.cpp | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 12001c9..d403ac2 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1771,6 +1771,22 @@ bool wxWindowQt::QtHandleKeyEvent ( QWidget *WXUNUSED( handler ), QKeyEvent *eve
+         int translated = 0;
+         if ( !event->text().isEmpty() )
+             translated = event->text().at( 0 ).toLatin1();
++
++        switch ( event->key() )
++        {
++            case Qt::Key_Return:
++            case Qt::Key_Enter:
++            case Qt::Key_Tab:
++            case Qt::Key_Backtab:
++            case Qt::Key_Backspace:
++            case Qt::Key_Escape:
++                // Keep the WXK_ code (as wxMSW/wxGTK do): Android reports Return
++                // with "\n" as its text, which would make it Ctrl-J.
++                translated = 0;
++                e.m_uniChar = e.m_keyCode < WXK_START ? e.m_keyCode : 0;
++                break;
++        }
++
+         if ( translated )
+             e.m_keyCode = translated;
+ 
+-- 
+2.54.0 (Apple Git-157)
+

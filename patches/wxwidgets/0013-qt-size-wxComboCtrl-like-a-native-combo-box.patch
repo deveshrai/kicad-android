@@ -1,0 +1,43 @@
+From 0273ce49b8411a5683bf1f1fc4a361a205d67896 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 17:30:12 +0530
+Subject: [PATCH] qt: size wxComboCtrl like a native combo box
+
+The generic height estimate (point size * 2 + 5) gives a few pixels with
+the pixel-sized fonts Qt uses on Android, collapsing every wxComboCtrl
+(wxOwnerDrawnComboBox, custom filter combos). Measure a native wxComboBox
+as on GTK.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/common/combocmn.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/combocmn.cpp b/src/common/combocmn.cpp
+index c9295d8..71f4677 100644
+--- a/src/common/combocmn.cpp
++++ b/src/common/combocmn.cpp
+@@ -1205,7 +1205,9 @@ wxSize wxComboCtrlBase::DoGetSizeFromTextSize(int xlen, int ylen) const
+ 
+ #if defined(__WXMSW__) && !defined(__WXUNIVERSAL__)
+     fhei = EDIT_HEIGHT_FROM_CHAR_HEIGHT(GetCharHeight());
+-#elif defined(__WXGTK__) && !defined(__WXUNIVERSAL__)
++#elif (defined(__WXGTK__) || defined(__WXQT__)) && !defined(__WXUNIVERSAL__)
++    // Use the height of a native combo box (on Qt the point-size estimate below
++    // is far too small with pixel-sized fonts, e.g. on Android).
+     // Control creation is not entirely cheap, so cache the heights to
+     // avoid repeatedly creating dummy controls:
+     static wxString s_last_font;
+@@ -1220,7 +1222,7 @@ wxSize wxComboCtrlBase::DoGetSizeFromTextSize(int xlen, int ylen) const
+     else
+     {
+         wxComboBox* cb = new wxComboBox;
+-#ifndef __WXGTK3__
++#if !defined(__WXGTK3__) && !defined(__WXQT__)
+         // GTK3 returns zero for the preferred size of a hidden widget
+         cb->Hide();
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,52 @@
+From 95fb1a8cdfd817232ac8ada34be2c5ce3f617cf0 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 17:51:12 +0530
+Subject: [PATCH] qt: hide the Android soft keyboard when focus leaves text
+ input
+
+Qt leaves the soft keyboard up when focus moves from a text field to a
+widget that takes no text input, e.g. back to a canvas after a dialog
+closes, where it covers half the screen. Hide it on focus changes to
+widgets without input-method support.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/app.cpp | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/qt/app.cpp b/src/qt/app.cpp
+index 9521282..903675d 100644
+--- a/src/qt/app.cpp
++++ b/src/qt/app.cpp
+@@ -15,6 +15,8 @@
+ #include "wx/qt/private/converter.h"
+ #include <QtCore/QStringList>
+ #include <QtWidgets/QApplication>
++#include <QtGui/QInputMethod>
++#include <QtWidgets/QWidget>
+ #include <QSurfaceFormat>
+ 
+ #include <algorithm>
+@@ -67,6 +69,18 @@ bool wxApp::Initialize( int& argc_, wxChar** argv_ )
+     if ( m_qtApplication->platformName() == "xcb" )
+         m_qtApplication->processEvents(); // Avoids SIGPIPE on X11 when debugging
+ 
++#ifdef __ANDROID__
++    // Qt leaves the soft keyboard up when focus moves from a text field to a widget that
++    // takes no text input, e.g. back to a canvas after a dialog closes, where it then covers
++    // half the screen and eats hotkeys.
++    QObject::connect(m_qtApplication.get(), &QApplication::focusChanged,
++                     [](QWidget*, QWidget* now)
++                     {
++                         if ( !now || !now->testAttribute(Qt::WA_InputMethodEnabled) )
++                             QGuiApplication::inputMethod()->hide();
++                     });
++#endif
++
+     if ( argcA != argc_ )
+     {
+ #ifdef __WINDOWS__
+-- 
+2.54.0 (Apple Git-157)
+

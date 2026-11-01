@@ -21,7 +21,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
 ```
 - Versioning: build letter in `android/BUILD_LETTER`. `scripts/bump-build.sh` moves to the next
   letter (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter> and versionCode is
-  10990x. Bump for every build handed to the user. **Current: 10.99f** (installed on the tablet).
+  10990x. Bump for every build handed to the user. **Current: 10.99i** (installed on the tablet).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -78,3 +78,17 @@ Open (next):
 - Two-finger pinch/drag: zoom and pan the canvas.
 - One finger: select, draw wires/tracks, etc. (as the left mouse button).
 - Three-finger tap: zoom to fit.
+
+## Mac version (native wxOSX, Metal canvas), same KiCad tree
+- `scripts/build-wxosx.sh` (wx Cocoa -> build/install/wxosx), deps in `deps-mac/` (vcpkg arm64-osx;
+  ngspice from deps/overlay-ports, spirv-cross host tool), `scripts/build-kicad-mac.sh`
+  (-> build/install/kicad-mac/KiCad.app, kept as **dist/mac/KiCad-10.99i.app**, ad-hoc signed).
+- dist app also carries the 10.0.8 symbol/footprint libs in Contents/SharedSupport; global
+  sym-lib-table/fp-lib-table copied to ~/Library/Preferences/kicad/10.99.
+- kicad-cli: `dist/mac/KiCad-10.99i.app/Contents/MacOS/kicad-cli` (ERC/PDF/BOM verified).
+- RP2350 deliverables: work/rp2350/out (sch, PDF, netlist, BOM grouped by MPN, ERC 0).
+
+## Keyboard driving the app over adb (work/rp2350/app_drive.py)
+- Arrow keys move the KiCad cursor one grid step; Return clicks (needs 10.99i: wx patch 15 +
+  kiplatform virtual pointer). Never tap during a run (taps move the pointer). Chooser: Ctrl+A,
+  name, Tab, Enter. Paused at 10.99i after UserLAnd came to the front.

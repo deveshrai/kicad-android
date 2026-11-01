@@ -2,6 +2,7 @@
 # Pushes kicad-cli and everything it loads to the emulator under /data/local/tmp/kicad and
 # runs it there.  No GUI: Qt uses its offscreen platform plugin.
 #
+#   KA_ADB="-s SERIAL" targets a device instead of the emulator.
 # Usage: scripts/run-kicad-cli.sh [--push] [kicad-cli args...]   (default args: version)
 #   --push   (re)copy binaries and libraries first; otherwise reuse what's on the device
 set -euo pipefail
@@ -51,15 +52,15 @@ if [ "${1:-}" = "--push" ]; then
 </fontconfig>
 EOF
 
-    adb -e shell rm -rf "$DEV"
-    adb -e push "$STAGE" "$DEV" >/dev/null
-    adb -e shell chmod 755 "$DEV/bin/kicad-cli"
+    adb ${KA_ADB:--e} shell rm -rf "$DEV"
+    adb ${KA_ADB:--e} push "$STAGE" "$DEV" >/dev/null
+    adb ${KA_ADB:--e} shell chmod 755 "$DEV/bin/kicad-cli"
     echo "pushed $(du -sh "$STAGE" | cut -f1) to $DEV"
 fi
 
 [ $# -eq 0 ] && set -- version
 
-adb -e shell "cd $DEV && \
+adb ${KA_ADB:--e} shell "cd $DEV && \
     LD_LIBRARY_PATH=$DEV/lib \
     QT_QPA_PLATFORM=offscreen \
     QT_PLUGIN_PATH=$DEV/plugins \
