@@ -41,6 +41,7 @@ if [ "${1:-}" = "--configure-only" ]; then CONFIGURE_ONLY=1; shift; fi
     -DANDROID_ABI="$KA_ANDROID_ABI" \
     -DANDROID_STL=c++_shared \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DKICAD_VERSION_EXTRA="$(tr -d '[:space:]' < "$KA_ROOT/android/BUILD_LETTER")" \
     -DCMAKE_FIND_ROOT_PATH="$DEPS;$WX;$QT_ANDROID_PATH" \
     -DCMAKE_PREFIX_PATH="$DEPS;$DEPS/share;$WX" \
     -DCMAKE_PROGRAM_PATH="$HOSTDEPS/tools/glslang;$HOSTDEPS/tools/spirv-tools;$HOSTDEPS/tools/protobuf;$HOSTDEPS/tools/gettext/bin" \

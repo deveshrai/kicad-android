@@ -1,0 +1,76 @@
+From 8ff810c28415d9107b58d6f1de60cce27bdf27a5 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 14:36:14 +0530
+Subject: [PATCH 13/13] Android: default to the Cairo canvas, Vulkan opt-in
+
+Preview canvases crash on Mali when their Qt window surface is destroyed
+while the render thread still polls it.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/draw_panel_gal.cpp                  | 14 ++++++++++----
+ libs/kiplatform/os/android/environment.cpp | 13 +++++++++++++
+ 2 files changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/common/draw_panel_gal.cpp b/common/draw_panel_gal.cpp
+index f0828ea7..cf728001 100644
+--- a/common/draw_panel_gal.cpp
++++ b/common/draw_panel_gal.cpp
+@@ -1394,11 +1394,17 @@ bool EDA_DRAW_PANEL_GAL::SwitchBackend( GAL_TYPE aGalType )
+ {
+ #ifdef __ANDROID__
+     // Android has no desktop OpenGL.  Accelerated rendering means the Modern GAL (Vulkan through
+-    // KIPLATFORM::UI::CreateVulkanSurface()); once that has failed, use Cairo.
+-    if( aGalType == GAL_TYPE_OPENGL )
++    // KIPLATFORM::UI::CreateVulkanSurface()); once that has failed, use Cairo.  Until the Vulkan
++    // surface lifetime is safe on all drivers (preview canvases crash on Mali when their window
++    // goes away), Cairo is the default and Vulkan is opt-in through KICAD_ANDROID_VULKAN=1
++    // (set from the debug.kicad.vulkan property or a "vulkan" file in the app's home).
++    if( aGalType == GAL_TYPE_OPENGL || aGalType == GAL_TYPE_MODERN )
+     {
+-        aGalType = EDA_DRAW_FRAME::CanvasFailed( GAL_TYPE_MODERN ) ? GAL_TYPE_CAIRO
+-                                                                   : GAL_TYPE_MODERN;
++        wxString optIn;
++        bool     vulkan = wxGetEnv( wxS( "KICAD_ANDROID_VULKAN" ), &optIn ) && optIn == wxS( "1" );
++
++        aGalType = ( vulkan && !EDA_DRAW_FRAME::CanvasFailed( GAL_TYPE_MODERN ) ) ? GAL_TYPE_MODERN
++                                                                                  : GAL_TYPE_CAIRO;
+     }
+ 
+     wxLogTrace( traceRhi, wxS( "DrawPanel: Android GAL backend %s" ),
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index eff298fb..7816044e 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -27,6 +27,7 @@
+ 
+ #include <wx/filename.h>
+ #include <wx/ffile.h>
++#include <wx/filefn.h>
+ #include <wx/log.h>
+ #include <wx/tokenzr.h>
+ #include <wx/utils.h>
+@@ -286,6 +287,18 @@ void KIPLATFORM::ENV::Init()
+     if( !hasJavaVM() || wxGetEnv( wxT( "KICAD_STOCK_DATA_HOME" ), nullptr ) )
+         return;
+ 
++    // Vulkan canvases are opt-in for now (see EDA_DRAW_PANEL_GAL::SwitchBackend)
++    {
++        char     vkProp[PROP_VALUE_MAX] = {};
++        wxString vkHome;
++
++        if( ( __system_property_get( "debug.kicad.vulkan", vkProp ) > 0 && vkProp[0] == '1' )
++            || ( wxGetEnv( wxT( "HOME" ), &vkHome ) && wxFileExists( vkHome + wxT( "/vulkan" ) ) ) )
++        {
++            wxSetEnv( wxT( "KICAD_ANDROID_VULKAN" ), wxT( "1" ) );
++        }
++    }
++
+     wxString stockData = extractStockData();
+ 
+     if( !stockData.IsEmpty() )
+-- 
+2.54.0 (Apple Git-157)
+

@@ -63,6 +63,15 @@ if [ "${KICAD_BUNDLE_LIBS:-1}" != 0 ]; then
 fi
 QPLUG="$QT_ANDROID_PATH/plugins"
 
+# Build lettering on top of the upstream version: 10.99a, 10.99b, ... (android/BUILD_LETTER)
+LETTER="$(tr -d '[:space:]' < "$KA_ROOT/android/BUILD_LETTER")"
+KVER_MAJOR="$(sed -n 's/.*KICAD_MAJOR_VERSION *"\([0-9]*\)".*/\1/p' "$BUILD/kicad_build_version.h")"
+KVER_MINOR="$(sed -n 's/.*KICAD_MINOR_VERSION *"\([0-9]*\)".*/\1/p' "$BUILD/kicad_build_version.h")"
+VERSION_NAME="${KVER_MAJOR}.${KVER_MINOR}${LETTER}"
+# letters count up (a=1, b=2, ...); the upstream version scales it so a new upstream base sorts later
+VERSION_CODE=$(( (KVER_MAJOR * 100 + KVER_MINOR) * 100 + $(printf '%d' "'$LETTER") - 96 ))
+echo "APK version $VERSION_NAME ($VERSION_CODE)"
+
 cat > "$OUT/deployment-settings.json" <<EOF
 {
    "description": "KiCad for Android",
@@ -84,6 +93,8 @@ cat > "$OUT/deployment-settings.json" <<EOF
    "architectures": { "$ABI": "aarch64-linux-android" },
    "android-extra-libs": "$EXTRA_CSV",
    "android-package-name": "org.kicad.kicad",
+   "android-version-name": "$VERSION_NAME",
+   "android-version-code": "$VERSION_CODE",
    "android-package-source-directory": "$KA_ROOT/android/package",
    "android-app-name": "KiCad",
    "android-min-sdk-version": "$KA_ANDROID_API",
