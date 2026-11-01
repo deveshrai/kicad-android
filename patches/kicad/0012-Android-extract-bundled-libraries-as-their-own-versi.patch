@@ -1,0 +1,132 @@
+From 9355075a8c813bc129d93c340dc4f61f9b447bfd Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 14:08:19 +0530
+Subject: [PATCH 12/12] Android: extract bundled libraries as their own
+ versioned asset tree
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ libs/kiplatform/os/android/environment.cpp | 95 +++++++++++++---------
+ 1 file changed, 58 insertions(+), 37 deletions(-)
+
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index e9da6e66..eff298fb 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -156,11 +156,64 @@ std::string readAsset( AAssetManager* aMgr, const char* aAsset )
+ }
+ 
+ 
++/**
++ * Extract the asset tree @a aTree (listed in <aTree>/FILES.txt, versioned by <aTree>/VERSION)
++ * into @a aRoot, unless the stamp file @a aStamp already holds that version.  The NDK cannot list
++ * asset subdirectories, hence FILES.txt.  Assets carry a ".kad" suffix so aapt leaves them
++ * untouched (it would decompress *.gz); see scripts/build-kicad-apk.sh.
++ */
++bool extractAssetTree( AAssetManager* aMgr, const std::string& aTree, const std::string& aRoot,
++                       const std::string& aStamp )
++{
++    const std::string version = readAsset( aMgr, ( aTree + "/VERSION" ).c_str() );
++    const std::string stampFile = aRoot + "/" + aStamp;
++
++    if( version.empty() )
++        return false;           // tree not bundled in this APK
++
++    std::string installed;
++
++    if( FILE* f = fopen( stampFile.c_str(), "rb" ) )
++    {
++        char buf[256] = {};
++        installed.assign( buf, fread( buf, 1, sizeof( buf ) - 1, f ) );
++        fclose( f );
++    }
++
++    if( installed == version )
++        return true;
++
++    __android_log_print( ANDROID_LOG_INFO, "KiCad", "extracting %s (%s)", aTree.c_str(),
++                         version.c_str() );
++
++    std::istringstream list( readAsset( aMgr, ( aTree + "/FILES.txt" ).c_str() ) );
++    std::string        rel;
++    bool               ok = true;
++
++    while( std::getline( list, rel ) )
++    {
++        if( !rel.empty() )
++            ok &= copyAsset( aMgr, aTree + "/" + rel + ".kad", aRoot + "/" + rel );
++    }
++
++    if( ok )
++    {
++        if( FILE* f = fopen( stampFile.c_str(), "wb" ) )
++        {
++            fwrite( version.data(), 1, version.size(), f );
++            fclose( f );
++        }
++    }
++
++    return ok;
++}
++
++
+ /**
+  * KiCad reads its stock data (schemas, templates, drawing sheets, ...) from a directory.  The
+- * APK carries it as assets under kicad-data/, with FILES.txt listing every file (the NDK cannot
+- * list asset subdirectories) and VERSION identifying the build.  Extract it to app storage
+- * when the stamp differs from the last extraction.
++ * APK carries it as assets under kicad-data/, and the bundled symbol/footprint libraries under
++ * kicad-libs/ with their own version so app updates do not re-extract them.  Both land in
++ * <files>/kicad-data/kicad, the layout of a desktop install.
+  */
+ wxString extractStockData()
+ {
+@@ -180,41 +233,9 @@ wxString extractStockData()
+         return wxEmptyString;
+ 
+     const std::string root = filesPath.toStdString() + "/kicad-data";
+-    const std::string version = readAsset( mgr, "kicad-data/VERSION" );
+-    const std::string stampFile = root + "/.extracted";
+ 
+-    std::string installed;
+-
+-    if( FILE* f = fopen( stampFile.c_str(), "rb" ) )
+-    {
+-        char buf[256] = {};
+-        installed.assign( buf, fread( buf, 1, sizeof( buf ) - 1, f ) );
+-        fclose( f );
+-    }
+-
+-    if( version.empty() || installed != version )
+-    {
+-        std::istringstream list( readAsset( mgr, "kicad-data/FILES.txt" ) );
+-        std::string        rel;
+-        bool               ok = true;
+-
+-        while( std::getline( list, rel ) )
+-        {
+-            if( !rel.empty() )
+-                // Assets carry a ".kad" suffix so aapt leaves them untouched (it would
+-                // decompress *.gz); see scripts/build-kicad-apk.sh
+-                ok &= copyAsset( mgr, "kicad-data/" + rel + ".kad", root + "/" + rel );
+-        }
+-
+-        if( ok && !version.empty() )
+-        {
+-            if( FILE* f = fopen( stampFile.c_str(), "wb" ) )
+-            {
+-                fwrite( version.data(), 1, version.size(), f );
+-                fclose( f );
+-            }
+-        }
+-    }
++    extractAssetTree( mgr, "kicad-data", root, ".extracted" );
++    extractAssetTree( mgr, "kicad-libs", root + "/kicad", ".libs-extracted" );
+ 
+     return wxString::FromUTF8( root ) + wxT( "/kicad" );
+ }
+-- 
+2.54.0 (Apple Git-157)
+

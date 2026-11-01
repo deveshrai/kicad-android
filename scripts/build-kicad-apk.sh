@@ -49,6 +49,18 @@ cp -R "$SHARE" "$OUT/assets/kicad-data/kicad"
 # a neutral suffix keeps every file byte-for-byte.  Extraction strips it again.
 find "$OUT/assets/kicad-data/kicad" -type f -exec mv {} {}.kad \;
 date +%s > "$OUT/assets/kicad-data/VERSION"
+
+# Official symbol/footprint/template libraries, as their own asset tree with a fixed version so
+# app updates do not re-extract them (KICAD_BUNDLE_LIBS=0 to leave them out)
+if [ "${KICAD_BUNDLE_LIBS:-1}" != 0 ]; then
+    LIBS_SRC="$("$KA_ROOT/scripts/fetch-kicad-libs.sh" | tail -1)"
+    mkdir -p "$OUT/assets/kicad-libs"
+    ( cd "$LIBS_SRC" && find symbols footprints template -type f | sort > "$OUT/assets/kicad-libs/FILES.txt" )
+    ( cd "$LIBS_SRC" && tar cf - symbols footprints template ) | ( cd "$OUT/assets/kicad-libs" && tar xf - )
+    find "$OUT/assets/kicad-libs/symbols" "$OUT/assets/kicad-libs/footprints" \
+         "$OUT/assets/kicad-libs/template" -type f -exec sh -c 'for f; do mv "$f" "$f.kad"; done' _ {} +
+    cp "$LIBS_SRC/VERSION" "$OUT/assets/kicad-libs/VERSION"
+fi
 QPLUG="$QT_ANDROID_PATH/plugins"
 
 cat > "$OUT/deployment-settings.json" <<EOF
@@ -72,6 +84,7 @@ cat > "$OUT/deployment-settings.json" <<EOF
    "architectures": { "$ABI": "aarch64-linux-android" },
    "android-extra-libs": "$EXTRA_CSV",
    "android-package-name": "org.kicad.kicad",
+   "android-package-source-directory": "$KA_ROOT/android/package",
    "android-app-name": "KiCad",
    "android-min-sdk-version": "$KA_ANDROID_API",
    "android-target-sdk-version": "35",
@@ -99,6 +112,11 @@ LIBSXML="$OUT/res/values/libs.xml"
 grep -q "$ABI;kimalloc</item>" "$LIBSXML"
 perl -0pi -e "s|(<array name=\"qt_libs\">\s*)|\1<item>$ABI;kimalloc</item>\n        |" "$LIBSXML"
 grep -A2 '<array name="qt_libs">' "$LIBSXML" | grep -q "$ABI;kimalloc"
+
+# App icon (resources come from android/package/res; see android/icon for the sources)
+grep -q 'android:icon=' "$OUT/AndroidManifest.xml" || \
+    perl -0pi -e 's|(<application\b)|$1 android:icon="\@mipmap/ic_launcher"|' "$OUT/AndroidManifest.xml"
+grep -q 'android:icon="@mipmap/ic_launcher"' "$OUT/AndroidManifest.xml"
 
 PATCH_CLASSES="$KA_ROOT/build/qt-patches-classes"
 rm -rf "$PATCH_CLASSES" && mkdir -p "$PATCH_CLASSES"
