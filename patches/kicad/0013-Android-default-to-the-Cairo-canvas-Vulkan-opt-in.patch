@@ -1,7 +1,7 @@
 From 8ff810c28415d9107b58d6f1de60cce27bdf27a5 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 14:36:14 +0530
-Subject: [PATCH 13/17] Android: default to the Cairo canvas, Vulkan opt-in
+Subject: [PATCH 13/18] Android: default to the Cairo canvas, Vulkan opt-in
 
 Preview canvases crash on Mali when their Qt window surface is destroyed
 while the render thread still polls it.

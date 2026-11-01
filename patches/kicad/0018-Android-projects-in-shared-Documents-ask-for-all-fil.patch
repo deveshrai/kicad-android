@@ -1,0 +1,128 @@
+From 7939426002ccb2c990d754c03fb73bf60a1d06a9 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 16:47:48 +0530
+Subject: [PATCH 18/18] Android: projects in shared Documents; ask for
+ all-files access once
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ libs/kiplatform/os/android/environment.cpp | 80 +++++++++++++++++++++-
+ 1 file changed, 77 insertions(+), 3 deletions(-)
+
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index 0c97616f..d3d0b209 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -40,6 +40,7 @@
+ 
+ #include <android/asset_manager.h>
+ #include <android/log.h>
++#include <android/api-level.h>
+ #include <android/asset_manager_jni.h>
+ 
+ #include <cstdio>
+@@ -97,6 +98,57 @@ wxString homePath( const wxString& aSubdir )
+ }
+ 
+ 
++/// Whether the app holds MANAGE_EXTERNAL_STORAGE ("All files access", Android 11+); before
++/// Android 11 the legacy storage permissions granted at install give the same access
++bool hasAllFilesAccess()
++{
++    if( android_get_device_api_level() < 30 )
++        return true;
++
++    return QJniObject::callStaticMethod<jboolean>( "android/os/Environment",
++                                                   "isExternalStorageManager" );
++}
++
++
++/**
++ * Projects are folders of files that refer to each other by path, so KiCad needs real file
++ * system access to shared storage.  Ask once, on first launch, by opening the system's "All
++ * files access" page for this app; the user can change it there at any time.
++ */
++void requestAllFilesAccessOnce( const wxString& aHome )
++{
++    if( hasAllFilesAccess() )
++        return;
++
++    const wxString asked = aHome + wxT( "/.asked-all-files-access" );
++
++    if( wxFileExists( asked ) )
++        return;
++
++    wxFFile( asked, wxT( "w" ) ).Write( wxT( "1" ) );
++
++    QJniObject ctx = QNativeInterface::QAndroidApplication::context();
++
++    if( !ctx.isValid() )
++        return;
++
++    QJniObject package = ctx.callObjectMethod( "getPackageName", "()Ljava/lang/String;" );
++    QJniObject uri = QJniObject::callStaticObjectMethod(
++            "android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;",
++            QJniObject::fromString( QStringLiteral( "package:" ) + package.toString() ).object<jstring>() );
++    QJniObject intent( "android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V",
++                       QJniObject::fromString(
++                               QStringLiteral( "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION" ) )
++                               .object<jstring>(),
++                       uri.object() );
++    intent.callObjectMethod( "addFlags", "(I)Landroid/content/Intent;", jint( 0x10000000 ) );  // NEW_TASK
++    ctx.callMethod<void>( "startActivity", "(Landroid/content/Intent;)V", intent.object() );
++
++    QJniEnvironment env;
++    env.checkAndClearExceptions();
++}
++
++
+ wxString standardPath( QStandardPaths::StandardLocation aLocation, const wxString& aFallback )
+ {
+     if( !hasJavaVM() )
+@@ -299,6 +351,13 @@ void KIPLATFORM::ENV::Init()
+         }
+     }
+ 
++    {
++        wxString home;
++
++        if( hasJavaVM() && wxGetEnv( wxT( "HOME" ), &home ) )
++            requestAllFilesAccessOnce( home );
++    }
++
+     wxString stockData = extractStockData();
+ 
+     if( !stockData.IsEmpty() )
+@@ -335,9 +394,24 @@ bool KIPLATFORM::ENV::IsRemovablePath( const wxString& aPath )
+ 
+ wxString KIPLATFORM::ENV::GetDocumentsPath()
+ {
+-    // App-specific external storage: visible to the user over USB and in the Files app,
+-    // and needs no storage permission.  TODO(android): Storage Access Framework for
+-    // projects elsewhere.
++    // With "All files access" projects live in the shared Documents folder like on a desktop;
++    // without it, in app-specific storage (visible over USB and in the Files app)
++    if( hasJavaVM() && hasAllFilesAccess() )
++    {
++        QJniObject dir = QJniObject::callStaticObjectMethod(
++                "android/os/Environment", "getExternalStoragePublicDirectory",
++                "(Ljava/lang/String;)Ljava/io/File;",
++                QJniObject::fromString( QStringLiteral( "Documents" ) ).object<jstring>() );
++
++        if( dir.isValid() )
++        {
++            QString path = dir.callObjectMethod( "getAbsolutePath", "()Ljava/lang/String;" ).toString();
++
++            if( !path.isEmpty() && QDir().mkpath( path ) )
++                return wxString::FromUTF8( path.toUtf8().constData() );
++        }
++    }
++
+     return standardPath( QStandardPaths::DocumentsLocation, wxT( "Documents" ) );
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

@@ -101,7 +101,10 @@ cat > "$OUT/deployment-settings.json" <<EOF
    "android-target-sdk-version": "35",
    "android-legacy-packaging": false,
    "android-deploy-plugins": "$QPLUG/styles/libplugins_styles_qandroidstyle_${ABI}.so;$QPLUG/platforms/libplugins_platforms_qtforandroid_${ABI}.so;$QPLUG/imageformats/libplugins_imageformats_qgif_${ABI}.so;$QPLUG/imageformats/libplugins_imageformats_qico_${ABI}.so;$QPLUG/imageformats/libplugins_imageformats_qjpeg_${ABI}.so;$QPLUG/iconengines/libplugins_iconengines_qsvgicon_${ABI}.so;$QPLUG/imageformats/libplugins_imageformats_qsvg_${ABI}.so",
-   "permissions": [ { "name": "android.permission.INTERNET" } ],
+   "permissions": [ { "name": "android.permission.INTERNET" },
+                    { "name": "android.permission.MANAGE_EXTERNAL_STORAGE" },
+                    { "name": "android.permission.READ_EXTERNAL_STORAGE" },
+                    { "name": "android.permission.WRITE_EXTERNAL_STORAGE" } ],
    "application-binary": "kicad",
    "qml-skip-import-scanning": true,
    "rcc-binary": "$QT_HOST_PATH/libexec/rcc",
@@ -123,6 +126,9 @@ LIBSXML="$OUT/res/values/libs.xml"
 grep -q "$ABI;kimalloc</item>" "$LIBSXML"
 perl -0pi -e "s|(<array name=\"qt_libs\">\s*)|\1<item>$ABI;kimalloc</item>\n        |" "$LIBSXML"
 grep -A2 '<array name="qt_libs">' "$LIBSXML" | grep -q "$ABI;kimalloc"
+
+# Legacy storage permissions only apply below Android 11/13; newer ones use MANAGE_EXTERNAL_STORAGE
+perl -pi -e 's|(android:name="android.permission.READ_EXTERNAL_STORAGE")|$1 android:maxSdkVersion="32"|; s|(android:name="android.permission.WRITE_EXTERNAL_STORAGE")|$1 android:maxSdkVersion="29"|' "$OUT/AndroidManifest.xml"
 
 # App icon (resources come from android/package/res; see android/icon for the sources)
 grep -q 'android:icon=' "$OUT/AndroidManifest.xml" || \

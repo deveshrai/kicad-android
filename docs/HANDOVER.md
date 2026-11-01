@@ -21,7 +21,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
 ```
 - Versioning: build letter in `android/BUILD_LETTER`. `scripts/bump-build.sh` moves to the next
   letter (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter> and versionCode is
-  10990x. Bump for every build handed to the user. **Current: 10.99e** (installed on the tablet).
+  10990x. Bump for every build handed to the user. **Current: 10.99f** (installed on the tablet).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -59,12 +59,11 @@ Fixed and verified on the tablet:
 - Wheel zoom works in DeX (injected events).
 
 Open (next):
-1. Saving and opening in user storage: Android native picker (SAF) or MANAGE_EXTERNAL_STORAGE.
-   Biggest remaining item.
+1. (done, 10.99f) User storage: all-files access (asked once at first launch) + system picker; content:// URIs of local storage mapped to paths (wx patch 11). Default Documents = /sdcard/Documents. Notes: picker opens in Downloads and doesn't prefill the filename; Drive/cloud documents have no path and are ignored.
 2. "Edit schematic" when eeschema is already open behind the project manager doesn't raise it.
 3. Blue text-selection handles left on the canvas after the soft keyboard closes.
 4. Memory: about 3.3 GB PSS with the full library loaded (lazy loading?).
-5. Middle-button pan in DeX: needs a hands-on check by the user (adb can't inject buttons).
+5. (done) User confirmed on 10.99e: DeX/tablet switch fix works; middle- and right-button pan work in DeX and tablet mode, also after switching.
 6. Older items: menu label "Non+KiCad"; the default template isn't preselected in New Project;
    the Qt file dialog is tiny; the soft keyboard pops up over the canvas; mouse-wheel zoom in
    pcbnew is centre-based; there may be a residual eeschema redraw issue at startup.
@@ -74,3 +73,8 @@ Open (next):
 - Scripted version on the emulator: work/rp2350 (gen_sch.py, place_pcb.py with R=8 mm rounded
   corners; Freerouting jar in toolchain/freerouting; running it requires the user to start it).
   Findings in docs/experiment-rp2350-board.md.
+
+## Later phase (after the open list): touch
+- Two-finger pinch/drag: zoom and pan the canvas.
+- One finger: select, draw wires/tracks, etc. (as the left mouse button).
+- Three-finger tap: zoom to fit.

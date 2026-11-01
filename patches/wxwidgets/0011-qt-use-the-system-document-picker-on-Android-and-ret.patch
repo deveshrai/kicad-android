@@ -1,0 +1,168 @@
+From 7166ae6bb6d96c7c6fa5961b5e8e926df9f10e80 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 16:47:47 +0530
+Subject: [PATCH] qt: use the system document picker on Android and return
+ paths
+
+Map content:// URIs of the device's own storage (external storage and
+downloads providers) back to file system paths, which applications using
+wxFileDialog expect; needs all-files access. Remove the empty document
+the picker creates on save.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/filedlg.cpp | 109 ++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 103 insertions(+), 6 deletions(-)
+
+diff --git a/src/qt/filedlg.cpp b/src/qt/filedlg.cpp
+index 1bb28f7..70ca20b 100644
+--- a/src/qt/filedlg.cpp
++++ b/src/qt/filedlg.cpp
+@@ -20,6 +20,104 @@
+ 
+ #include <QtWidgets/QFileDialog>
+ 
++#ifdef __ANDROID__
++#include <QtCore/QFile>
++#include <QtCore/QFileInfo>
++#include <QtCore/QUrl>
++
++namespace
++{
++// The native dialog on Android is the system document picker, which returns content:// URIs.
++// Applications using wxFileDialog expect paths, so turn URIs of the device's own storage into
++// paths.  This needs read/write access to shared storage (MANAGE_EXTERNAL_STORAGE on Android
++// 11+); documents of other providers (cloud storage, ...) have no path and are skipped.
++QString wxQtAndroidUrlToPath(const QUrl& url)
++{
++    if ( url.isLocalFile() )
++        return url.toLocalFile();
++
++    if ( url.scheme() != QLatin1String("content") )
++        return QString();
++
++    // .../document/<id>, .../tree/<id> or .../tree/<id>/document/<id>: the last id names it
++    const QStringList parts = url.path(QUrl::FullyEncoded).split(QLatin1Char('/'), Qt::SkipEmptyParts);
++    QString id;
++
++    for ( int i = 0; i + 1 < parts.size(); ++i )
++    {
++        if ( parts[i] == QLatin1String("document") || parts[i] == QLatin1String("tree") )
++            id = QUrl::fromPercentEncoding(parts[i + 1].toUtf8());
++    }
++
++    if ( id.isEmpty() )
++        return QString();
++
++    const QString authority = url.host();
++
++    if ( authority == QLatin1String("com.android.externalstorage.documents") )
++    {
++        // "primary:Documents/x" or "<volume uuid>:x" (SD cards and USB drives)
++        const int colon = id.indexOf(QLatin1Char(':'));
++
++        if ( colon < 0 )
++            return QString();
++
++        const QString volume = id.left(colon);
++        const QString rel = id.mid(colon + 1);
++        const QString root = volume == QLatin1String("primary")
++                                 ? QStringLiteral("/storage/emulated/0")
++                                 : QStringLiteral("/storage/") + volume;
++
++        return rel.isEmpty() ? root : root + QLatin1Char('/') + rel;
++    }
++
++    if ( authority == QLatin1String("com.android.providers.downloads.documents") )
++    {
++        if ( id.startsWith(QLatin1String("raw:")) )
++            return id.mid(4);
++
++        if ( id == QLatin1String("downloads") )
++            return QStringLiteral("/storage/emulated/0/Download");
++    }
++
++    return QString();
++}
++
++QStringList wxQtAndroidSelectedPaths(const QFileDialog* dialog)
++{
++    QStringList paths;
++
++    foreach ( const QUrl& url, dialog->selectedUrls() )
++    {
++        const QString path = wxQtAndroidUrlToPath(url);
++
++        if ( !path.isEmpty() )
++            paths << path;
++    }
++
++    // The picker's "save" creates the document straight away; applications expect only a
++    // path, and some (making a folder for a new project, say) never write that file, so take
++    // back the empty file the picker made
++    if ( dialog->acceptMode() == QFileDialog::AcceptSave )
++    {
++        foreach ( const QString& path, paths )
++        {
++            QFileInfo info(path);
++
++            if ( info.isFile() && info.size() == 0 )
++                QFile::remove(path);
++        }
++    }
++
++    return paths;
++}
++} // namespace
++
++#define wxQT_SELECTED_FILES(dlg) wxQtAndroidSelectedPaths(dlg)
++#else
++#define wxQT_SELECTED_FILES(dlg) (dlg)->selectedFiles()
++#endif
++
+ class wxQtFileDialog : public wxQtEventSignalHandler< QFileDialog, wxDialog >
+ {
+ public:
+@@ -29,9 +127,8 @@ public:
+         : wxQtEventSignalHandler<QFileDialog,wxDialog>(parent, handler)
+     {
+ #ifdef __ANDROID__
+-        // The native dialog is the system document picker, which returns content:// URIs
+-        // rather than paths; Qt's own dialog browses the file system directly.
+-        setOption(QFileDialog::DontUseNativeDialog, true);
++        // The native dialog is the system document picker; its content:// URIs are turned
++        // into paths (wxQtAndroidSelectedPaths)
+ #endif
+         setLabelText(QFileDialog::LookIn, wxQtConvertString(message));
+         setDirectory(wxQtConvertString(defaultDir));
+@@ -123,7 +220,7 @@ wxString wxFileDialog::GetPath() const
+ 
+ void wxFileDialog::GetPaths(wxArrayString& paths) const
+ {
+-    QStringList selectedfiles = GetQFileDialog()->selectedFiles();
++    QStringList selectedfiles = wxQT_SELECTED_FILES(GetQFileDialog());
+     foreach (QString file, selectedfiles)
+         paths.Add(wxQtConvertString(file));
+ }
+@@ -142,7 +239,7 @@ wxString wxFileDialog::GetFilename() const
+ 
+ void wxFileDialog::GetFilenames(wxArrayString& files) const
+ {
+-    QStringList selectedfiles = GetQFileDialog()->selectedFiles();
++    QStringList selectedfiles = wxQT_SELECTED_FILES(GetQFileDialog());
+     foreach (QString file, selectedfiles )
+     {
+         wxFileName fn = wxQtConvertString(file);
+@@ -249,7 +346,7 @@ bool wxDirDialog::Create(wxWindow *parent,
+ 
+ wxString wxDirDialog::GetPath() const
+ {
+-    QStringList selectedfiles = GetQFileDialog()->selectedFiles();
++    QStringList selectedfiles = wxQT_SELECTED_FILES(GetQFileDialog());
+     if (selectedfiles.size() > 0)
+         return wxQtConvertString(selectedfiles.first());
+ 
+-- 
+2.54.0 (Apple Git-157)
+
