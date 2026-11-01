@@ -1,0 +1,44 @@
+From f93e779e558a162e2a56c8bc37f2fd0dc51fef4b Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 22:01:51 +0530
+Subject: [PATCH] qt: route QDialog::reject() (Escape) through
+ wxDialog::Close()
+
+QDialog hides itself on an unprocessed Escape key behind wx's back, so a
+dialog running its own event loop (KiCad's quasi-modal dialogs) stayed
+"shown" with its parent disabled and no window.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/dialog.cpp | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/qt/dialog.cpp b/src/qt/dialog.cpp
+index 5086139..2301c57 100644
+--- a/src/qt/dialog.cpp
++++ b/src/qt/dialog.cpp
+@@ -20,6 +20,20 @@ class wxQtDialog : public wxQtEventSignalHandler< QDialog, wxDialog >
+ 
+     public:
+         wxQtDialog( wxWindow *parent, wxDialog *handler );
++
++    protected:
++        // QDialog handles an unprocessed Escape key itself by calling reject(), which
++        // would hide the window behind wx's back: a modeless or application-modal dialog
++        // (e.g. one running its own event loop) would then stay "shown" for wx with no
++        // window.  Route it through wx instead, as wxMSW/wxGTK do: Close() sends
++        // wxEVT_CLOSE_WINDOW, which by default emulates the Cancel button.
++        virtual void reject() override
++        {
++            if ( wxDialog *dialog = GetHandler() )
++                dialog->Close();
++            else
++                QDialog::reject();
++        }
+ };
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+

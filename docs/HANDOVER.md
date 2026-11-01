@@ -21,7 +21,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
 ```
 - Versioning: build letter in `android/BUILD_LETTER`. `scripts/bump-build.sh` moves to the next
   letter (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter> and versionCode is
-  10990x. Bump for every build handed to the user. **Current: 10.99i** (installed on the tablet).
+  10990x. Bump for every build handed to the user. **Current: 10.99j** (installed on the tablet).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -32,6 +32,8 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   Mali-G1-Ultra (Vulkan), 2800x1752 @ 280 dpi (scale 1.75). The user has authorized using it
   for testing. DeX works; the user switches modes on request. In DeX the task can be resized
   over adb: `am task resize <taskId> l t r b`.
+- Wireless adb (paired with this Mac, 2026-11-01): `adb -s adb-R5GL8486SDD-5yIE9r._adb-tls-connect._tcp ...`
+  (mDNS name survives port changes; last seen at 192.168.1.2:45355). USB serial is R5GL8486SDD.
 - Emulator: AVD KiCad_Tablet35 (API 35, 8 GB, host GPU). The user starts it with
   `! /Users/devesh/projects/KiCadAndroid0/scripts/emulator.sh`.
 - Testing quirks: on the tablet, `input tap` works and Ctrl+E opens eeschema from the project
@@ -82,13 +84,13 @@ Open (next):
 ## Mac version (native wxOSX, Metal canvas), same KiCad tree
 - `scripts/build-wxosx.sh` (wx Cocoa -> build/install/wxosx), deps in `deps-mac/` (vcpkg arm64-osx;
   ngspice from deps/overlay-ports, spirv-cross host tool), `scripts/build-kicad-mac.sh`
-  (-> build/install/kicad-mac/KiCad.app, kept as **dist/mac/KiCad-10.99i.app**, ad-hoc signed).
+  (-> build/install/kicad-mac/KiCad.app, kept as **dist/mac/KiCad-10.99j.app**, ad-hoc signed).
 - dist app also carries the 10.0.8 symbol/footprint libs in Contents/SharedSupport; global
   sym-lib-table/fp-lib-table copied to ~/Library/Preferences/kicad/10.99.
-- kicad-cli: `dist/mac/KiCad-10.99i.app/Contents/MacOS/kicad-cli` (ERC/PDF/BOM verified).
+- kicad-cli: `dist/mac/KiCad-10.99j.app/Contents/MacOS/kicad-cli` (ERC/PDF/BOM verified).
 - RP2350 deliverables: work/rp2350/out (sch, PDF, netlist, BOM grouped by MPN, ERC 0).
 
 ## Keyboard driving the app over adb (work/rp2350/app_drive.py)
-- Arrow keys move the KiCad cursor one grid step; Return clicks (needs 10.99i: wx patch 15 +
+- Arrow keys move the KiCad cursor one grid step; Return clicks (needs 10.99j: wx patch 15 +
   kiplatform virtual pointer). Never tap during a run (taps move the pointer). Chooser: Ctrl+A,
-  name, Tab, Enter. Paused at 10.99i after UserLAnd came to the front.
+  name, Tab, Enter. Paused at 10.99j after UserLAnd came to the front.
