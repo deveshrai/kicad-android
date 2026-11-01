@@ -1,0 +1,49 @@
+From e2e2538f774890d2ee9d3ef4d4c7e382d664c8dc Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 16:02:30 +0530
+Subject: [PATCH] qt: create all status bar panes before adding them to the
+ layout
+
+Adding a pane lays the QStatusBar out and sends resize events
+synchronously; a handler asking for a field rect then indexed panes that
+did not exist yet and crashed (seen on Samsung DeX at startup).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/statusbar.cpp | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/qt/statusbar.cpp b/src/qt/statusbar.cpp
+index ac756b5..c070fcb 100644
+--- a/src/qt/statusbar.cpp
++++ b/src/qt/statusbar.cpp
+@@ -111,6 +111,9 @@ bool wxStatusBar::GetFieldRect(int i, wxRect& rect) const
+ 
+     const_cast<wxStatusBar *>(this)->CreateFieldsIfNeeded();
+ 
++    if ( (size_t)i >= m_qtPanes.size() )
++        return false;
++
+     rect = wxQtConvertRect(m_qtPanes[i]->geometry());
+     return true;
+ }
+@@ -209,8 +212,14 @@ void wxStatusBar::CreateFieldsIfNeeded()
+         }
+ 
+         m_qtPanes.push_back(pane);
++    }
+ 
+-        GetQStatusBar()->addWidget(pane, width < 0 ? -width : 0);
++    // Adding a widget lays the status bar out and sends resize events synchronously, and their
++    // handlers may ask for field rects: all panes must exist before the first is added.
++    for ( size_t i = 0; i < m_qtPanes.size(); ++i )
++    {
++        const int width = m_bSameWidthForAllPanes ? -1 : m_panes[i].GetWidth();
++        GetQStatusBar()->addWidget(m_qtPanes[i], width < 0 ? -width : 0);
+     }
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

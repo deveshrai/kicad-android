@@ -1,0 +1,189 @@
+From 1c83527e48c9eb04a632e2ac2e6b0167d934b539 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 16:02:30 +0530
+Subject: [PATCH 16/16] Android: maximized frames, dialogs fit the app window,
+ usable choosers
+
+- Frames are always maximized so they fill the activity window and follow
+  it (split screen, DeX).
+- Dialogs are sized to and centred in their top-level frame instead of the
+  screen work area, which includes the status bar and space outside a DeX
+  window.
+- Symbol/footprint choosers keep both splitter panes visible once laid out
+  (the default sash in dialog units could exceed the dialog).
+- The footprint selector combo gets a normal control height on wxQt.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/dialog_shim.cpp                     | 23 +++++++++++++++++++++
+ common/eda_base_frame.cpp                  | 10 ++++++++-
+ common/widgets/footprint_select_widget.cpp |  9 ++++++++
+ eeschema/widgets/panel_symbol_chooser.cpp  | 20 ++++++++++++++++++
+ pcbnew/widgets/panel_footprint_chooser.cpp | 24 ++++++++++++++++++++--
+ 5 files changed, 83 insertions(+), 3 deletions(-)
+
+diff --git a/common/dialog_shim.cpp b/common/dialog_shim.cpp
+index ef09b663..ff76d093 100644
+--- a/common/dialog_shim.cpp
++++ b/common/dialog_shim.cpp
+@@ -587,6 +587,29 @@ bool DIALOG_SHIM::Show( bool show )
+         // (re)established above, so the clamp is not overwritten.
+         clampToWorkArea();
+ 
++#ifdef __ANDROID__
++        // The screen's work area includes the status bar (edge-to-edge) and, in DeX or split
++        // screen, space outside the app's window.  The app's top-level frame is maximized into
++        // exactly the area it may use, so fit dialogs inside it and centre them there.
++        if( wxWindow* top = m_parent ? wxGetTopLevelParent( m_parent ) : nullptr )
++        {
++            wxRect area = top->GetScreenRect();
++
++            if( area.width > 0 && area.height > 0 )
++            {
++                wxSize minSize = GetMinSize();
++                wxSize cappedMin( std::min( minSize.x, area.width ), std::min( minSize.y, area.height ) );
++
++                if( cappedMin != minSize )
++                    SetMinSize( cappedMin );
++
++                wxSize size( std::min( GetSize().x, area.width ), std::min( GetSize().y, area.height ) );
++                SetSize( area.x + ( area.width - size.x ) / 2, area.y + ( area.height - size.y ) / 2,
++                         size.x, size.y, 0 );
++            }
++        }
++#endif
++
+         KIPLATFORM::UI::EnsureVisible( this );
+     }
+     else
+diff --git a/common/eda_base_frame.cpp b/common/eda_base_frame.cpp
+index 810a90f0..acf0bbb0 100644
+--- a/common/eda_base_frame.cpp
++++ b/common/eda_base_frame.cpp
+@@ -1152,8 +1152,16 @@ void EDA_BASE_FRAME::LoadWindowState( const WINDOW_STATE& aState )
+     m_normalFrameSize = m_frameSize;
+     m_normalFramePos  = m_framePos;
+ 
++    bool maximize = aState.maximized || ( wasDefault && m_maximizeByDefault );
++
++#ifdef __ANDROID__
++    // Frames live in the activity's window (the whole screen, a split-screen half or a DeX
++    // window); a maximized frame fills it and follows it when it is resized
++    maximize = true;
++#endif
++
+     // Maximize if we were maximized before
+-    if( aState.maximized || ( wasDefault && m_maximizeByDefault ) )
++    if( maximize )
+     {
+         wxLogTrace( traceDisplayLocation, wxS( "Maximizing window" ) );
+         Maximize();
+diff --git a/common/widgets/footprint_select_widget.cpp b/common/widgets/footprint_select_widget.cpp
+index a20de119..86296ffb 100644
+--- a/common/widgets/footprint_select_widget.cpp
++++ b/common/widgets/footprint_select_widget.cpp
+@@ -17,6 +17,7 @@
+  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+  */
+ 
++#include <algorithm>
+ #include <eda_draw_frame.h>
+ #include <footprint_library_query.h>
+ #include <kiway.h>
+@@ -37,6 +38,14 @@ FOOTPRINT_SELECT_WIDGET::FOOTPRINT_SELECT_WIDGET( EDA_DRAW_FRAME* aFrame, wxWind
+ {
+     m_sizer = new wxBoxSizer( wxVERTICAL );
+     m_fp_sel_ctrl = new FOOTPRINT_CHOICE( this, wxID_ANY );
++
++#ifdef __WXQT__
++    // The generic owner-drawn combo reports almost no height on wxQt and collapses to a sliver
++    // in a sizer; give it a normal control's height
++    m_fp_sel_ctrl->SetMinSize( wxSize( -1, std::max( m_fp_sel_ctrl->GetBestSize().y,
++                                                     GetCharHeight() + FromDIP( 14 ) ) ) );
++#endif
++
+     m_sizer->Add( m_fp_sel_ctrl, 1, wxEXPAND, 5 );
+ 
+     SetSizer( m_sizer );
+diff --git a/eeschema/widgets/panel_symbol_chooser.cpp b/eeschema/widgets/panel_symbol_chooser.cpp
+index f725f828..ff7ceac4 100644
+--- a/eeschema/widgets/panel_symbol_chooser.cpp
++++ b/eeschema/widgets/panel_symbol_chooser.cpp
+@@ -456,11 +456,31 @@ void PANEL_SYMBOL_CHOOSER::FinishSetup()
+         if( panelCfg.sash_pos_v < 0 )
+             panelCfg.sash_pos_v = horizPixelsFromDU( 230 );
+ 
++        // A sash past the splitter's far side collapses the preview pane to its minimum (dialog
++        // units derived from large fonts, or a setting saved on a bigger screen); keep each pane
++        // at least a quarter of the splitter
++        // (checked once the dialog has its final size; the splitters aren't laid out yet here)
+         m_hsplitter->SetSashPosition( panelCfg.sash_pos_h );
+ 
+         if( m_vsplitter )
+             m_vsplitter->SetSashPosition( panelCfg.sash_pos_v );
+ 
++        CallAfter( [this]()
++                   {
++                       auto clampSash = []( wxSplitterWindow* aSplitter, int aExtent )
++                       {
++                           int pos = aSplitter->GetSashPosition();
++
++                           if( aExtent > 0 && ( pos < aExtent / 4 || pos > aExtent - aExtent / 4 ) )
++                               aSplitter->SetSashPosition( aExtent / 2 );
++                       };
++
++                       clampSash( m_hsplitter, m_hsplitter->GetClientSize().x );
++
++                       if( m_vsplitter )
++                           clampSash( m_vsplitter, m_vsplitter->GetClientSize().y );
++                   } );
++
+         m_adapter->SetSortMode( (LIB_TREE_MODEL_ADAPTER::SORT_MODE) panelCfg.sort_mode );
+     }
+ 
+diff --git a/pcbnew/widgets/panel_footprint_chooser.cpp b/pcbnew/widgets/panel_footprint_chooser.cpp
+index 7a721918..b65968e3 100644
+--- a/pcbnew/widgets/panel_footprint_chooser.cpp
++++ b/pcbnew/widgets/panel_footprint_chooser.cpp
+@@ -285,14 +285,34 @@ void PANEL_FOOTPRINT_CHOOSER::FinishSetup()
+         if( cfg.sash_h < 0 )
+             cfg.sash_h = horizPixelsFromDU( 220 );
+ 
+-        m_hsplitter->SetSashPosition( cfg.sash_h );
+-
+         if( cfg.sash_v < 0 )
+             cfg.sash_v = horizPixelsFromDU( 230 );
+ 
++        // A sash past the splitter's far side collapses a pane to its minimum (dialog units
++        // derived from large fonts, or a setting saved on a bigger screen); keep each pane at
++        // least a quarter of the splitter
++        // (checked once the dialog has its final size; the splitters aren't laid out yet here)
++        m_hsplitter->SetSashPosition( cfg.sash_h );
++
+         if( m_vsplitter )
+             m_vsplitter->SetSashPosition( cfg.sash_v );
+ 
++        CallAfter( [this]()
++                   {
++                       auto clampSash = []( wxSplitterWindow* aSplitter, int aExtent )
++                       {
++                           int pos = aSplitter->GetSashPosition();
++
++                           if( aExtent > 0 && ( pos < aExtent / 4 || pos > aExtent - aExtent / 4 ) )
++                               aSplitter->SetSashPosition( aExtent / 2 );
++                       };
++
++                       clampSash( m_hsplitter, m_hsplitter->GetClientSize().x );
++
++                       if( m_vsplitter )
++                           clampSash( m_vsplitter, m_vsplitter->GetClientSize().y );
++                   } );
++
+         m_adapter->SetSortMode( (LIB_TREE_MODEL_ADAPTER::SORT_MODE) cfg.sort_mode );
+     }
+ }
+-- 
+2.54.0 (Apple Git-157)
+

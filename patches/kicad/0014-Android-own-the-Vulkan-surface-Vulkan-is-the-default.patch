@@ -1,0 +1,413 @@
+From 65a38a650a9c812a1d61c27c9a77fe5b5b248142 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 15:30:20 +0530
+Subject: [PATCH 14/16] Android: own the Vulkan surface; Vulkan is the default
+ canvas again
+
+Qt destroyed its VkSurfaceKHR from the Android UI thread whenever a
+window's surface went away, while the render thread still polled it
+(crash on Mali when the symbol chooser closed). The surface is now made
+by us on the window's android.view.Surface, which the loader keeps
+referenced, so a vanished window reports SURFACE_LOST/OUT_OF_DATE and the
+render thread rebuilds it. Windows register in a process-wide set so a
+surface is never made from a deleted window. Cairo is an opt-out.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/draw_panel_gal.cpp                  |  14 +-
+ common/rhi/rhi_vulkan_device.cpp           |  17 +-
+ libs/kiplatform/include/kiplatform/ui.h    |   8 +-
+ libs/kiplatform/os/android/environment.cpp |   8 +-
+ libs/kiplatform/port/wxqt/ui.cpp           | 182 ++++++++++++++++++++-
+ 5 files changed, 197 insertions(+), 32 deletions(-)
+
+diff --git a/common/draw_panel_gal.cpp b/common/draw_panel_gal.cpp
+index cf728001..e8971f95 100644
+--- a/common/draw_panel_gal.cpp
++++ b/common/draw_panel_gal.cpp
+@@ -1394,17 +1394,15 @@ bool EDA_DRAW_PANEL_GAL::SwitchBackend( GAL_TYPE aGalType )
+ {
+ #ifdef __ANDROID__
+     // Android has no desktop OpenGL.  Accelerated rendering means the Modern GAL (Vulkan through
+-    // KIPLATFORM::UI::CreateVulkanSurface()); once that has failed, use Cairo.  Until the Vulkan
+-    // surface lifetime is safe on all drivers (preview canvases crash on Mali when their window
+-    // goes away), Cairo is the default and Vulkan is opt-in through KICAD_ANDROID_VULKAN=1
+-    // (set from the debug.kicad.vulkan property or a "vulkan" file in the app's home).
++    // KIPLATFORM::UI::CreateVulkanSurface()); once that has failed, use Cairo.  KICAD_ANDROID_VULKAN=0
++    // (from the debug.kicad.vulkan property or a "novulkan" file in the app's home) forces Cairo.
+     if( aGalType == GAL_TYPE_OPENGL || aGalType == GAL_TYPE_MODERN )
+     {
+-        wxString optIn;
+-        bool     vulkan = wxGetEnv( wxS( "KICAD_ANDROID_VULKAN" ), &optIn ) && optIn == wxS( "1" );
++        wxString optOut;
++        bool     cairoOnly = wxGetEnv( wxS( "KICAD_ANDROID_VULKAN" ), &optOut ) && optOut == wxS( "0" );
+ 
+-        aGalType = ( vulkan && !EDA_DRAW_FRAME::CanvasFailed( GAL_TYPE_MODERN ) ) ? GAL_TYPE_MODERN
+-                                                                                  : GAL_TYPE_CAIRO;
++        aGalType = ( cairoOnly || EDA_DRAW_FRAME::CanvasFailed( GAL_TYPE_MODERN ) ) ? GAL_TYPE_CAIRO
++                                                                                    : GAL_TYPE_MODERN;
+     }
+ 
+     wxLogTrace( traceRhi, wxS( "DrawPanel: Android GAL backend %s" ),
+diff --git a/common/rhi/rhi_vulkan_device.cpp b/common/rhi/rhi_vulkan_device.cpp
+index 12d30a52..0f4ff09d 100644
+--- a/common/rhi/rhi_vulkan_device.cpp
++++ b/common/rhi/rhi_vulkan_device.cpp
+@@ -660,7 +660,6 @@ private:
+     struct SurfaceAllocation
+     {
+         VkSurfaceKHR       surface         = VK_NULL_HANDLE;
+-        bool               platformOwned   = false;   ///< Created and destroyed by Qt (Android)
+         bool               wayland         = false;
+ #ifdef VK_USE_PLATFORM_XLIB_KHR
+         X11_CONNECTION_OWNER x11Owner;
+@@ -879,7 +878,7 @@ bool RHI_VULKAN_DEVICE::CreateVkInstance( bool enableValidation )
+ #endif
+ 
+ #ifdef __ANDROID__
+-    // Surfaces are created by Qt on this instance (KIPLATFORM::UI::CreateVulkanSurface)
++    // Surfaces are made on Qt windows' Android surfaces (KIPLATFORM::UI::CreateVulkanSurface)
+     extensions.push_back( "VK_KHR_android_surface" );
+ #endif
+ 
+@@ -1895,8 +1894,7 @@ RHI_VULKAN_DEVICE::~RHI_VULKAN_DEVICE()
+ 
+         for( auto& [index, sa] : m_surfaces )
+         {
+-            if( !sa.platformOwned )
+-                m_vk.DestroySurfaceKHR( m_instance, sa.surface, nullptr );
++            m_vk.DestroySurfaceKHR( m_instance, sa.surface, nullptr );
+ 
+ #ifdef VK_USE_PLATFORM_XLIB_KHR
+             // As in DestroySurface, close the X11 connection this surface opened
+@@ -4749,14 +4747,12 @@ RHI_SurfaceHandle RHI_VULKAN_DEVICE::CreateSurface( const RHI_SURFACE_DESC& desc
+     }
+ #endif
+ 
+-    bool platformOwnedSurface = false;
+-
+ #ifdef __ANDROID__
+     if( vkSurface == VK_NULL_HANDLE && desc.window.displayType == RHI_DISPLAY_TYPE::ANDROID_QT )
+     {
++        // Our own surface on the window's ANativeWindow; destroyed here like any other
+         vkSurface = reinterpret_cast<VkSurfaceKHR>(
+                 KIPLATFORM::UI::CreateVulkanSurface( desc.window.nativeHandle, m_instance ) );
+-        platformOwnedSurface = vkSurface != VK_NULL_HANDLE;
+         wxLogTrace( traceRhi, wxS( "VulkanDevice: CreateAndroidSurface window=%p vkSurface=%p" ),
+                     desc.window.nativeHandle, static_cast<void*>( vkSurface ) );
+     }
+@@ -4780,7 +4776,7 @@ RHI_SurfaceHandle RHI_VULKAN_DEVICE::CreateSurface( const RHI_SURFACE_DESC& desc
+         wxLogTrace( traceRhi, wxS( "VulkanDevice: CreateSurface FAILED - no present queue family "
+                                     "supports this surface" ) );
+ 
+-        if( m_vk.DestroySurfaceKHR && !platformOwnedSurface )
++        if( m_vk.DestroySurfaceKHR )
+             m_vk.DestroySurfaceKHR( m_instance, vkSurface, nullptr );
+ 
+         closeOwnedDisplay();
+@@ -4794,7 +4790,7 @@ RHI_SurfaceHandle RHI_VULKAN_DEVICE::CreateSurface( const RHI_SURFACE_DESC& desc
+ 
+     if( !handle )
+     {
+-        if( m_vk.DestroySurfaceKHR && !platformOwnedSurface )
++        if( m_vk.DestroySurfaceKHR )
+             m_vk.DestroySurfaceKHR( m_instance, vkSurface, nullptr );
+ 
+         closeOwnedDisplay();
+@@ -4804,7 +4800,6 @@ RHI_SurfaceHandle RHI_VULKAN_DEVICE::CreateSurface( const RHI_SURFACE_DESC& desc
+     SurfaceAllocation& sa = m_surfaces[RhiHandleIndex( handle )];
+     sa.surface = vkSurface;
+     sa.wayland = waylandSurface;
+-    sa.platformOwned = platformOwnedSurface;
+ #ifdef VK_USE_PLATFORM_XLIB_KHR
+     sa.x11Owner = ownedX11;
+ #endif
+@@ -4826,7 +4821,7 @@ void RHI_VULKAN_DEVICE::DestroySurface( RHI_SurfaceHandle handle )
+     if( it == m_surfaces.end() )
+         return;
+ 
+-    if( it->second.surface && m_vk.DestroySurfaceKHR && !it->second.platformOwned )
++    if( it->second.surface && m_vk.DestroySurfaceKHR )
+         m_vk.DestroySurfaceKHR( m_instance, it->second.surface, nullptr );
+ 
+ #ifdef VK_USE_PLATFORM_XLIB_KHR
+diff --git a/libs/kiplatform/include/kiplatform/ui.h b/libs/kiplatform/include/kiplatform/ui.h
+index 34b40c7d..c4e03d6d 100644
+--- a/libs/kiplatform/include/kiplatform/ui.h
++++ b/libs/kiplatform/include/kiplatform/ui.h
+@@ -341,9 +341,11 @@ namespace KIPLATFORM
+         /**
+          * Create the Vulkan surface for a DISPLAY_ANDROID handle from GetNativeWindowHandles().
+          *
+-         * Qt for Android has no public way to get a window's ANativeWindow, so the surface is
+-         * made by Qt (QVulkanInstance adopting @p aVkInstance) and stays owned by Qt: callers
+-         * must not destroy it.  May be called from a render thread.
++         * The surface is made on the window's current android.view.Surface and holds its own
++         * reference to it, so it stays safe to use after Android takes the window away (calls then
++         * fail with VK_ERROR_SURFACE_LOST_KHR).  The caller owns it and destroys it with
++         * vkDestroySurfaceKHR.  Returns 0 for a window that no longer exists.  May be called from
++         * a render thread.
+          *
+          * @param aNativeHandle the handle from GetNativeWindowHandles()
+          * @param aVkInstance the VkInstance, which must have VK_KHR_android_surface enabled
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index 7816044e..0c97616f 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -287,15 +287,15 @@ void KIPLATFORM::ENV::Init()
+     if( !hasJavaVM() || wxGetEnv( wxT( "KICAD_STOCK_DATA_HOME" ), nullptr ) )
+         return;
+ 
+-    // Vulkan canvases are opt-in for now (see EDA_DRAW_PANEL_GAL::SwitchBackend)
++    // Vulkan canvases can be turned off (see EDA_DRAW_PANEL_GAL::SwitchBackend)
+     {
+         char     vkProp[PROP_VALUE_MAX] = {};
+         wxString vkHome;
+ 
+-        if( ( __system_property_get( "debug.kicad.vulkan", vkProp ) > 0 && vkProp[0] == '1' )
+-            || ( wxGetEnv( wxT( "HOME" ), &vkHome ) && wxFileExists( vkHome + wxT( "/vulkan" ) ) ) )
++        if( ( __system_property_get( "debug.kicad.vulkan", vkProp ) > 0 && vkProp[0] == '0' )
++            || ( wxGetEnv( wxT( "HOME" ), &vkHome ) && wxFileExists( vkHome + wxT( "/novulkan" ) ) ) )
+         {
+-            wxSetEnv( wxT( "KICAD_ANDROID_VULKAN" ), wxT( "1" ) );
++            wxSetEnv( wxT( "KICAD_ANDROID_VULKAN" ), wxT( "0" ) );
+         }
+     }
+ 
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index b6e95974..e78f9185 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -40,8 +40,16 @@
+ #include <QPointer>
+ #include <QResizeEvent>
+ #include <QExposeEvent>
++#include <QJniEnvironment>
++#include <QJniObject>
++#include <QSet>
++#define VK_USE_PLATFORM_ANDROID_KHR
+ #include <QVulkanInstance>
++#include <android/log.h>
++#include <android/native_window_jni.h>
+ #include <mutex>
++#include <chrono>
++#include <thread>
+ #endif
+ 
+ #include <QCursor>
+@@ -76,6 +84,43 @@ wxColour toWx( const QColor& aColor )
+  *  - The canvas is fully covered and gets no paint events of its own, yet KiCad renders a frame
+  *    in response to paint; exposure and resizes of this window are turned into canvas repaints.
+  */
++/**
++ * Vulkan canvas windows still alive.  The render thread may (re)create a surface for a window at
++ * any time; it checks here under the lock, and a window deregisters under the same lock, so it
++ * can't be deleted while a surface is being made from it.
++ *
++ * kiplatform is linked statically into several libraries, each with its own copy of this file's
++ * statics, so the one registry hangs off the application object (created on the GUI thread
++ * before any surface is asked for, and never replaced).
++ */
++struct LIVE_VULKAN_WINDOWS
++{
++    std::mutex           mutex;
++    QSet<const QWindow*> windows;
++};
++
++
++LIVE_VULKAN_WINDOWS* liveVulkanWindows( bool aCreate = false )
++{
++    static const char* const PROPERTY = "kicadLiveVulkanWindows";
++
++    if( !qApp )
++        return nullptr;
++
++    QVariant existing = qApp->property( PROPERTY );
++
++    if( existing.isValid() )
++        return static_cast<LIVE_VULKAN_WINDOWS*>( existing.value<void*>() );
++
++    if( !aCreate )
++        return nullptr;
++
++    LIVE_VULKAN_WINDOWS* registry = new LIVE_VULKAN_WINDOWS;    // lives as long as the process
++    qApp->setProperty( PROPERTY, QVariant::fromValue<void*>( registry ) );
++    return registry;
++}
++
++
+ class VULKAN_CANVAS_WINDOW : public QWindow
+ {
+ public:
+@@ -87,6 +132,19 @@ public:
+         // Composited as a TextureView (QT_ANDROID_SURFACE_CONTAINER_TYPE, set in
+         // KIPLATFORM::ENV::Init), so it stacks correctly with frames, dialogs and popups
+         setSurfaceType( QSurface::VulkanSurface );
++
++        LIVE_VULKAN_WINDOWS*        live = liveVulkanWindows( true );
++        std::lock_guard<std::mutex> lock( live->mutex );
++        live->windows.insert( this );
++    }
++
++    ~VULKAN_CANVAS_WINDOW() override
++    {
++        if( LIVE_VULKAN_WINDOWS* live = liveVulkanWindows() )
++        {
++            std::lock_guard<std::mutex> lock( live->mutex );
++            live->windows.remove( this );
++        }
+     }
+ 
+ protected:
+@@ -478,8 +536,27 @@ uint64_t KIPLATFORM::UI::CreateVulkanSurface( void* aNativeHandle, void* aVkInst
+     static std::mutex                        s_mutex;
+     static QHash<void*, QVulkanInstance*>    s_instances;
+ 
+-    if( !aNativeHandle || !aVkInstance )
++    auto failSurface = []( const char* aWhy ) -> uint64_t
++    {
++        __android_log_print( ANDROID_LOG_WARN, "KiCad", "Vulkan surface: %s", aWhy );
+         return 0;
++    };
++
++    if( !aNativeHandle || !aVkInstance )
++        return failSurface( "no window or instance" );
++
++    QWindow* window = static_cast<QWindow*>( aNativeHandle );
++
++    LIVE_VULKAN_WINDOWS* registry = liveVulkanWindows();
++
++    if( !registry )
++        return failSurface( "no Vulkan windows" );
++
++    // Held throughout: the window can't be deleted while its surface is made
++    std::lock_guard<std::mutex> live( registry->mutex );
++
++    if( !registry->windows.contains( window ) )
++        return failSurface( "window no longer exists" );
+ 
+     QVulkanInstance* qvk = nullptr;
+ 
+@@ -495,19 +572,112 @@ uint64_t KIPLATFORM::UI::CreateVulkanSurface( void* aNativeHandle, void* aVkInst
+             if( !qvk->create() )
+             {
+                 delete qvk;
+-                return 0;
++                return failSurface( "QVulkanInstance::create failed" );
+             }
+ 
+             s_instances.insert( aVkInstance, qvk );
+         }
+     }
+ 
+-    QWindow* window = static_cast<QWindow*>( aNativeHandle );
++    // Qt's own VkSurfaceKHR would be destroyed whenever Android takes the window's surface away
++    // (a dialog closing, a pane hiding, the app going to the background), from the Android UI
++    // thread and without telling us, so a render thread still using it reads freed memory.  And
++    // Android allows only one VkSurfaceKHR per window, so Qt must not make one at all
++    // (QVulkanInstance::surfaceForWindow is never called).  Instead the window's Java side is
++    // asked for its surface container directly, as QAndroidPlatformWindow::createSurface()
++    // would; Qt then ignores the surface callbacks for it.  The Vulkan loader keeps a reference
++    // to the ANativeWindow for the life of our VkSurfaceKHR, so when Android abandons it the
++    // device reports VK_ERROR_SURFACE_LOST_KHR / OUT_OF_DATE (and the render thread makes a new
++    // one) instead of crashing.  The caller owns and destroys it.
++    //
++    // winId() is the window's org.qtproject.qt.android.QtWindow; its surface container is a
++    // QtTextureView (patched QtWindow, see android/qt-patches) holding the current Surface.
++    QJniEnvironment env;
++    QJniObject      qtWindow( reinterpret_cast<jobject>( window->winId() ) );
++
++    if( !qtWindow.isValid() )
++        return failSurface( "no QtWindow" );
++
++    auto currentSurface = [&]() -> QJniObject
++    {
++        QJniObject container = qtWindow.getObjectField( "m_surfaceContainer", "Landroid/view/View;" );
++        env.checkAndClearExceptions();
++
++        if( !container.isValid() )
++            return {};
++
++        jclass textureView = env->FindClass( "android/view/TextureView" );
++        bool   isTextureView = textureView && env->IsInstanceOf( container.object(), textureView );
++
++        if( textureView )
++            env->DeleteLocalRef( textureView );
++
++        env.checkAndClearExceptions();
++
++        if( !isTextureView )
++            return {};
++
++        QJniObject surface = container.getObjectField( "m_surface", "Landroid/view/Surface;" );
++        env.checkAndClearExceptions();
++        return surface;
++    };
++
++    QJniObject surface = currentSurface();
++
++    if( !surface.isValid() )
++    {
++        QJniObject container = qtWindow.getObjectField( "m_surfaceContainer", "Landroid/view/View;" );
++        env.checkAndClearExceptions();
++
++        // createSurface(onTop, imageDepth, isOpaque, containerType): built on the UI thread
++        if( !container.isValid() )
++        {
++            qtWindow.callMethod<void>( "createSurface", "(ZIZI)V", jboolean( false ), jint( 32 ),
++                                       jboolean( true ), jint( 1 ) );
++            env.checkAndClearExceptions();
++        }
+ 
+-    if( window->vulkanInstance() != qvk )
+-        window->setVulkanInstance( qvk );
++        // The Surface arrives once the TextureView is attached and its texture available
++        for( int i = 0; i < 200 && !surface.isValid(); ++i )
++        {
++            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
++            surface = currentSurface();
++        }
++    }
++
++    if( !surface.isValid() )
++        return failSurface( "no android.view.Surface" );
++
++    ANativeWindow* nativeWindow = ANativeWindow_fromSurface( env.jniEnv(), surface.object() );
++
++    if( !nativeWindow )
++        return failSurface( "no ANativeWindow" );
++
++    auto createSurface = reinterpret_cast<PFN_vkCreateAndroidSurfaceKHR>(
++            qvk->getInstanceProcAddr( "vkCreateAndroidSurfaceKHR" ) );
++
++    VkSurfaceKHR vkSurface = VK_NULL_HANDLE;
++
++    if( createSurface )
++    {
++        VkAndroidSurfaceCreateInfoKHR info{};
++        info.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
++        info.window = nativeWindow;
++
++        VkResult result = createSurface( static_cast<VkInstance>( aVkInstance ), &info, nullptr,
++                                         &vkSurface );
++
++        if( result != VK_SUCCESS )
++        {
++            __android_log_print( ANDROID_LOG_WARN, "KiCad", "Vulkan surface: create failed (%d)",
++                                 static_cast<int>( result ) );
++            vkSurface = VK_NULL_HANDLE;
++        }
++    }
+ 
+-    return reinterpret_cast<uint64_t>( QVulkanInstance::surfaceForWindow( window ) );
++    // The VkSurfaceKHR holds its own reference
++    ANativeWindow_release( nativeWindow );
++    return reinterpret_cast<uint64_t>( vkSurface );
+ }
+ #endif
+ 
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,74 @@
+From 59d5404fe6cc1c18a18ccaef52870ceb9fda03c8 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 15:38:07 +0530
+Subject: [PATCH 15/16] RHI: don't wait for a surface extent that differs only
+ by rounding
+
+At fractional scales (1.75 on many Android tablets) the requested size
+rounds down while the window system rounds the same window up, so the
+swapchain waited forever for a 1px difference and the canvas never drew.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/rhi/rhi_vulkan_device.cpp | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/common/rhi/rhi_vulkan_device.cpp b/common/rhi/rhi_vulkan_device.cpp
+index 0f4ff09d..0b661941 100644
+--- a/common/rhi/rhi_vulkan_device.cpp
++++ b/common/rhi/rhi_vulkan_device.cpp
+@@ -4474,6 +4474,20 @@ VkPresentModeKHR RHI_VULKAN_DEVICE::ChoosePresentMode( const SurfaceAllocation&
+ }
+ 
+ 
++
++namespace
++{
++/// The swapchain size waits for the window system when the surface reports a different extent.
++/// Requested sizes are logical sizes times a fractional scale (1.75 on many Android tablets),
++/// rounded down, while the windowing system rounds the same window up, so a mismatch of a pixel
++/// is rounding, not a resize in flight; waiting for it would never end.
++bool surfaceExtentDiffers( const VkExtent2D& aSurface, uint32_t aWidth, uint32_t aHeight )
++{
++    auto off = []( uint32_t a, uint32_t b ) { return a > b ? a - b : b - a; };
++    return off( aSurface.width, aWidth ) > 1 || off( aSurface.height, aHeight ) > 1;
++}
++} // namespace
++
+ bool RHI_VULKAN_DEVICE::CreateSwapchainResources( SwapchainAllocation& swa )
+ {
+     if( !m_vk.GetSwapchainImagesKHR || !m_vk.CreateImageView )
+@@ -5105,7 +5119,7 @@ RHI_SwapchainHandle RHI_VULKAN_DEVICE::CreateSwapchain( const RHI_SWAPCHAIN_DESC
+     swa.extent    = extent;
+     swa.requestedExtent = { desc.width, desc.height };
+     swa.waitingForSurfaceExtent = surfCaps.currentExtent.width != UINT32_MAX
+-                                  && ( extent.width != desc.width || extent.height != desc.height );
++                                  && surfaceExtentDiffers( extent, desc.width, desc.height );
+     swa.dpiScale  = desc.dpiScale;
+ 
+     // The attempt that succeeded may have fallen back to FIFO
+@@ -5232,7 +5246,7 @@ bool RHI_VULKAN_DEVICE::ResizeSwapchain( RHI_SwapchainHandle handle, uint32_t wi
+     {
+         swa.needsResize = false;
+         swa.waitingForSurfaceExtent = surfCaps.currentExtent.width != UINT32_MAX
+-                                      && ( extent.width != width || extent.height != height );
++                                      && surfaceExtentDiffers( extent, width, height );
+     }
+ 
+     if( swa.waitingForSurfaceExtent )
+@@ -5274,8 +5288,8 @@ RHI_SURFACE_EXTENT_POLL_RESULT RHI_VULKAN_DEVICE::PollSurfaceExtent( RHI_Swapcha
+         return RHI_SURFACE_EXTENT_POLL_RESULT::FAILED;
+ 
+     if( caps.currentExtent.width != UINT32_MAX
+-        && ( caps.currentExtent.width != swa.requestedExtent.width
+-             || caps.currentExtent.height != swa.requestedExtent.height ) )
++        && surfaceExtentDiffers( caps.currentExtent, swa.requestedExtent.width,
++                                 swa.requestedExtent.height ) )
+     {
+         return RHI_SURFACE_EXTENT_POLL_RESULT::WAITING;
+     }
+-- 
+2.54.0 (Apple Git-157)
+
