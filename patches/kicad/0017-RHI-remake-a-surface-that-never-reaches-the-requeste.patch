@@ -1,0 +1,91 @@
+From 3ae39650e736b73ed37d718180f1b13c93e6d479 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sun, 1 Nov 2026 16:28:04 +0530
+Subject: [PATCH 17/17] RHI: remake a surface that never reaches the requested
+ size
+
+Android TextureViews replace their Surface when resized; a VkSurfaceKHR on
+the old one keeps reporting the old size, so the swapchain waited forever
+and the canvas froze after a DeX window resize or a DeX/tablet switch.
+After 300 ms of waiting the surface is rebuilt from the window.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/rhi/render_thread.cpp             | 25 ++++++++++++++++++++++--
+ include/rhi/render_thread_window_state.h |  4 ++++
+ 2 files changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/common/rhi/render_thread.cpp b/common/rhi/render_thread.cpp
+index b5f86db8..9c7a3b0a 100644
+--- a/common/rhi/render_thread.cpp
++++ b/common/rhi/render_thread.cpp
+@@ -1064,12 +1064,31 @@ void RENDER_THREAD::ProcessActiveWindows( bool aIgnorePacing )
+             {
+             case RHI_SURFACE_EXTENT_POLL_RESULT::WAITING:
+             {
+-                auto due = WINDOW_STATE::Clock::now() + std::chrono::milliseconds( 50 );
+-                deferFrameUntil( due );
++                auto now = WINDOW_STATE::Clock::now();
++
++                if( ws.surfaceExtentWaitSince == WINDOW_STATE::Clock::time_point() )
++                    ws.surfaceExtentWaitSince = now;
++
++                // A window system resize lands within a few frames.  A surface still at its old
++                // size after that never follows (Android TextureViews replace their Surface on
++                // resize), so remake it from the window as it is now.
++                if( now - ws.surfaceExtentWaitSince > std::chrono::milliseconds( 300 ) )
++                {
++                    wxLogTrace( traceRhi, wxS( "RenderThread: surface never reached the requested "
++                                                "size, recreating windowId=%u" ),
++                                ws.windowId );
++                    ws.surfaceExtentWaitSince = {};
++                    recreateSwapchainAfterOutOfDate( ws, true );
++                    ws.active = ws.frameResultPending || ws.presentSuccessCount > 0;
++                }
++
++                deferFrameUntil( now + std::chrono::milliseconds( 50 ) );
+                 continue;
+             }
+ 
+             case RHI_SURFACE_EXTENT_POLL_RESULT::RESIZED:
++                ws.surfaceExtentWaitSince = {};
++
+                 if( ws.frameResultPending || ws.presentSuccessCount > 0 )
+                 {
+                     ws.active = true;
+@@ -1078,6 +1097,7 @@ void RENDER_THREAD::ProcessActiveWindows( bool aIgnorePacing )
+                 break;
+ 
+             case RHI_SURFACE_EXTENT_POLL_RESULT::FAILED:
++                ws.surfaceExtentWaitSince = {};
+                 recreateSwapchainAfterOutOfDate( ws );
+                 ws.active = ws.frameResultPending || ws.presentSuccessCount > 0;
+ 
+@@ -1090,6 +1110,7 @@ void RENDER_THREAD::ProcessActiveWindows( bool aIgnorePacing )
+                 continue;
+ 
+             case RHI_SURFACE_EXTENT_POLL_RESULT::IDLE:
++                ws.surfaceExtentWaitSince = {};
+                 break;
+             }
+         }
+diff --git a/include/rhi/render_thread_window_state.h b/include/rhi/render_thread_window_state.h
+index eb83ce37..22e2ce5e 100644
+--- a/include/rhi/render_thread_window_state.h
++++ b/include/rhi/render_thread_window_state.h
+@@ -226,6 +226,10 @@ struct WINDOW_STATE
+     Clock::time_point lastPresentAttemptTime;
+     Clock::time_point lastPresentSuccessTime;
+     Clock::time_point lastPresentFailureTime;
++
++    /// When the swapchain started waiting for the surface to reach the requested size; a surface
++    /// whose size never follows (Android hands out a new Surface on resize) is rebuilt
++    Clock::time_point surfaceExtentWaitSince;
+     Clock::time_point nextPresentRetryAt;
+     Clock::time_point lastSwapchainCreateAttemptTime;
+     Clock::time_point lastLagLogTime;
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,7 +1,7 @@
 From 632d2ec8cc74ed628f923148a46edda99ef92c84 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 21:11:56 +0530
-Subject: [PATCH 07/16] Android: use the Cairo GAL directly instead of failing
+Subject: [PATCH 07/17] Android: use the Cairo GAL directly instead of failing
  through Modern and OpenGL
 
 Assisted-by: Claude Code
