@@ -1,7 +1,7 @@
 From aee6615a15ac402003ef45361dda5bd79a00ab47 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 22:55:43 +0530
-Subject: [PATCH 09/20] Android: size the Vulkan window to the canvas viewport;
+Subject: [PATCH 09/23] Android: size the Vulkan window to the canvas viewport;
  logcat trace hook
 
 wxQt canvases are QScrollAreas whose client area (GetClientSize, which sizes the

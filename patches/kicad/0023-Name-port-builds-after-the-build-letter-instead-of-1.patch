@@ -1,0 +1,51 @@
+From 5784ad55f260b0972d85a5033e17a1d36490096a Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 2 Nov 2026 14:54:21 +0530
+Subject: [PATCH 23/23] Name port builds after the build letter instead of
+ 10.99.0-unknown
+
+The port builds from a shallow clone without tags, so git describe fails
+and the version falls back to KICAD_SEMANTIC_VERSION (10.99.0-unknown).
+When KICAD_VERSION_EXTRA holds the build letter, report <major>.<minor>
+<letter> (e.g. 10.99k) as both KICAD_VERSION and KICAD_VERSION_FULL.
+The major/minor/patch values (settings paths etc.) are unchanged.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ cmake/KiCadFullVersion.cmake | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/cmake/KiCadFullVersion.cmake b/cmake/KiCadFullVersion.cmake
+index 4716f78f..64e49292 100644
+--- a/cmake/KiCadFullVersion.cmake
++++ b/cmake/KiCadFullVersion.cmake
+@@ -27,10 +27,19 @@
+ include( ${KICAD_CMAKE_MODULE_PATH}/CreateGitVersionHeader.cmake )
+ create_git_version_header( ${SRC_PATH} )
+ 
+-# $KICAD_VERSION is set in KiCadVersion.cmake or by git (if it is available).
+-set( KICAD_VERSION_FULL "${KICAD_VERSION}" )
++# Port builds come from a shallow clone without tags, so git describe fails and the version
++# would read "10.99.0-unknown".  When a build letter is given, name the build after it instead:
++# <major>.<minor><letter>, e.g. 10.99k.
++if( KICAD_VERSION MATCHES "-unknown$" AND KICAD_VERSION_EXTRA )
++    string( REGEX REPLACE "^([0-9]+\\.[0-9]+).*$" "\\1" _kfv_major_minor "${KICAD_SEMANTIC_VERSION}" )
++    set( KICAD_VERSION "${_kfv_major_minor}${KICAD_VERSION_EXTRA}" )
++    set( KICAD_VERSION_FULL "${KICAD_VERSION}" )
++else()
++    # $KICAD_VERSION is set in KiCadVersion.cmake or by git (if it is available).
++    set( KICAD_VERSION_FULL "${KICAD_VERSION}" )
+ 
+-# Optional user version information defined at configuration.
+-if( KICAD_VERSION_EXTRA )
+-    set( KICAD_VERSION_FULL "${KICAD_VERSION_FULL}-${KICAD_VERSION_EXTRA}" )
++    # Optional user version information defined at configuration.
++    if( KICAD_VERSION_EXTRA )
++        set( KICAD_VERSION_FULL "${KICAD_VERSION_FULL}-${KICAD_VERSION_EXTRA}" )
++    endif()
+ endif()
+-- 
+2.54.0 (Apple Git-157)
+

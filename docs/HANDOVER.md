@@ -22,7 +22,8 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
 - Versioning: `scripts/bump-build.sh` advances android/BUILD_LETTER a..z, then aa, ab .. zz
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
-  user. **Current: 10.99k** (installed on the tablet, plus the USB-C footprint filter fix; the next is l).
+  user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99k** (installed on the tablet, plus the USB-C footprint filter fix; the next is l).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.

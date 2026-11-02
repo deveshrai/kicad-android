@@ -1,7 +1,7 @@
 From 1c83527e48c9eb04a632e2ac2e6b0167d934b539 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 16:02:30 +0530
-Subject: [PATCH 16/20] Android: maximized frames, dialogs fit the app window,
+Subject: [PATCH 16/23] Android: maximized frames, dialogs fit the app window,
  usable choosers
 
 - Frames are always maximized so they fill the activity window and follow
