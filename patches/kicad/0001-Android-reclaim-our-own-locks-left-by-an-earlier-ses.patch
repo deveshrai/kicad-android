@@ -1,0 +1,103 @@
+From a4d349ae1eda5def0aaaf27b9a8dc60a82bebe7f Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 2 Nov 2026 12:12:44 +0530
+Subject: [PATCH] Android: reclaim our own locks left by an earlier session
+
+Removable storage often cannot lock, so a crash left 'already open by you'
+behind.  Locks now record a per-process session token; Android runs one
+KiCad process per user, so a lock of ours from another session is stale.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ include/lockfile.h | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/include/lockfile.h b/include/lockfile.h
+index 3438c6da..ed2c1b75 100644
+--- a/include/lockfile.h
++++ b/include/lockfile.h
+@@ -101,6 +101,21 @@ public:
+             return;
+         }
+ 
++#ifdef __ANDROID__
++        // Android runs a single KiCad process per user, so a lock of ours written by an earlier
++        // session belongs to a process that has since died (a crash, or killed in the
++        // background).  Removable storage often cannot lock at all, which would otherwise leave
++        // the user facing "already open by you" after every such restart.
++        if( state != KIPLATFORM::IO::FILE_LOCK::STATE::BUSY && IsLockedByMe()
++            && m_session != processSession() )
++        {
++            claim();
++            wxLogTrace( traceLockFile, "Reclaimed the lock left by an earlier session on %s",
++                        filename );
++            return;
++        }
++#endif
++
+         wxLogTrace( traceLockFile, "Existing Lock for %s", filename );
+     }
+ 
+@@ -145,6 +160,7 @@ public:
+             m_username( std::move( other.m_username ) ),
+             m_hostname( std::move( other.m_hostname ) ),
+             m_token( std::move( other.m_token ) ),
++            m_session( std::move( other.m_session ) ),
+             m_lock( std::move( other.m_lock ) ),
+             m_owned( other.m_owned ),
+             m_status( other.m_status ),
+@@ -231,6 +247,7 @@ private:
+     wxString m_username;
+     wxString m_hostname;
+     wxString m_token;
++    wxString m_session;     ///< processSession() of the lock's writer
+     KIPLATFORM::IO::FILE_LOCK m_lock;
+     bool m_owned = false;
+     bool m_status = false;
+@@ -252,16 +269,25 @@ private:
+                                  static_cast<unsigned long long>( low ) );
+     }
+ 
++    /// @return a token identifying this process for its lifetime.
++    static const wxString& processSession()
++    {
++        static const wxString session = newToken();
++        return session;
++    }
++
+     void claim()
+     {
+         m_username = wxGetUserId();
+         m_hostname = wxGetHostName();
+         m_token = newToken();
++        m_session = processSession();
+ 
+         nlohmann::json j;
+         j["username"] = std::string( m_username.mb_str() );
+         j["hostname"] = std::string( m_hostname.mb_str() );
+         j["token"] = std::string( m_token.mb_str() );
++        j["session"] = std::string( m_session.mb_str() );
+ 
+         if( m_lock.Rewrite( j.dump() ) )
+         {
+@@ -302,6 +328,7 @@ private:
+         m_username = wxEmptyString;
+         m_hostname = wxEmptyString;
+         m_token = wxEmptyString;
++        m_session = wxEmptyString;
+ 
+         try
+         {
+@@ -312,6 +339,7 @@ private:
+                 m_username = wxString( record.value( "username", std::string() ) );
+                 m_hostname = wxString( record.value( "hostname", std::string() ) );
+                 m_token = wxString( record.value( "token", std::string() ) );
++                m_session = wxString( record.value( "session", std::string() ) );
+             }
+         }
+         catch(...)
+-- 
+2.54.0 (Apple Git-157)
+

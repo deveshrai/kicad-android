@@ -1,0 +1,98 @@
+From 01fff3904bd88e0da24c49f268c9edeeb81e4eb6 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 2 Nov 2026 12:07:25 +0530
+Subject: [PATCH] android: serve pending input-method calls instead of aborting
+ on a surface deadlock protector conflict
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ .../android/qandroidplatformopenglwindow.cpp      |  2 +-
+ .../android/qandroidplatformvulkanwindow.cpp      |  2 +-
+ .../platforms/android/qandroidplatformwindow.cpp  | 15 +++++++++++++++
+ .../platforms/android/qandroidplatformwindow.h    |  6 ++++++
+ 4 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/src/plugins/platforms/android/qandroidplatformopenglwindow.cpp b/src/plugins/platforms/android/qandroidplatformopenglwindow.cpp
+index c205727b..800e545d 100644
+--- a/src/plugins/platforms/android/qandroidplatformopenglwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformopenglwindow.cpp
+@@ -64,7 +64,7 @@ EGLSurface QAndroidPlatformOpenGLWindow::eglSurface(EGLConfig config)
+     if (!m_androidSurfaceCreated) {
+         static constexpr char funcName[] = "QAndroidPlatformOpenGLWindow::eglSurface()";
+         QtAndroidPrivate::AndroidDeadlockProtector protector(funcName);
+-        if (!protector.acquire()) {
++        if (!acquireSurfaceProtector(protector)) {
+             qFatal("Failed to acquire deadlock protector for %s.", funcName);
+             return m_eglSurface;
+         }
+diff --git a/src/plugins/platforms/android/qandroidplatformvulkanwindow.cpp b/src/plugins/platforms/android/qandroidplatformvulkanwindow.cpp
+index e96038a4..cc65c4ff 100644
+--- a/src/plugins/platforms/android/qandroidplatformvulkanwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformvulkanwindow.cpp
+@@ -98,7 +98,7 @@ VkSurfaceKHR *QAndroidPlatformVulkanWindow::vkSurface()
+         if (!m_androidSurfaceCreated) {
+             QtAndroidPrivate::AndroidDeadlockProtector protector(
+                 u"QAndroidPlatformVulkanWindow::vkSurface()"_s);
+-            if (!protector.acquire())
++            if (!acquireSurfaceProtector(protector))
+                 return &m_vkSurface;
+             createSurface();
+             m_surfaceWaitCondition.wait(&m_surfaceMutex);
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.cpp b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+index 7ba82ef7..819b80a0 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+@@ -8,6 +8,8 @@
+ #include "qandroidplatformscreen.h"
+ 
+ #include "androidjnimain.h"
++#include "qandroidinputcontext.h"
++#include <QtCore/qthread.h>
+ 
+ #include <qguiapplication.h>
+ #include <qpa/qwindowsysteminterface.h>
+@@ -507,3 +509,16 @@ bool QAndroidPlatformWindow::registerNatives(QJniEnvironment &env)
+ }
+ 
+ QT_END_NAMESPACE
++
++bool QAndroidPlatformWindow::acquireSurfaceProtector(
++        QtAndroidPrivate::AndroidDeadlockProtector &protector)
++{
++    for (int i = 0; i < 1000; ++i) {
++        if (protector.acquire())
++            return true;
++        if (QAndroidInputContext *ic = QAndroidInputContext::androidInputContext())
++            QCoreApplication::sendPostedEvents(ic, QEvent::MetaCall);
++        QThread::msleep(2);
++    }
++    return protector.acquire();
++}
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.h b/src/plugins/platforms/android/qandroidplatformwindow.h
+index a5c0af76..5d8975e3 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.h
++++ b/src/plugins/platforms/android/qandroidplatformwindow.h
+@@ -8,6 +8,7 @@
+ #include <qobject.h>
+ #include <qrect.h>
+ #include <qpa/qplatformwindow.h>
++#include <private/qjnihelpers_p.h>
+ #include <QtCore/qjnienvironment.h>
+ #include <QtCore/qjniobject.h>
+ #include <QtCore/qjnitypes.h>
+@@ -36,6 +37,11 @@ public:
+     explicit QAndroidPlatformWindow(QWindow *window);
+     void initialize() override;
+ 
++    // Acquire the deadlock protector before blocking on the Android UI thread for a
++    // Surface.  If the UI thread holds it while waiting for us (an input method query
++    // in QAndroidInputContext::runOnQtThread()), serve that call and retry.
++    static bool acquireSurfaceProtector(QtAndroidPrivate::AndroidDeadlockProtector &protector);
++
+     ~QAndroidPlatformWindow();
+     void lower() override;
+     void raise() override;
+-- 
+2.54.0 (Apple Git-157)
+
