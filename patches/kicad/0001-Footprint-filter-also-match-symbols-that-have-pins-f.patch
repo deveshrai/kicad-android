@@ -1,0 +1,43 @@
+From 6c9b61a6e6b02ea7cddac1df76bb3576b94174fd Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 2 Nov 2026 13:26:48 +0530
+Subject: [PATCH] Footprint filter: also match symbols that have pins for
+ digit-less pad numbers
+
+GetNumberedPadCount() skips pads such as USB-C 'SH', but the chooser counts
+every symbol pin, so USB_C_Receptacle_USB2.0_16P (17 pins) matched no
+footprint (16 numbered pads).  Accept a match on the distinct pad numbers too.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ pcbnew/pcbnew.cpp | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/pcbnew/pcbnew.cpp b/pcbnew/pcbnew.cpp
+index 2fa29937..a00b084e 100644
+--- a/pcbnew/pcbnew.cpp
++++ b/pcbnew/pcbnew.cpp
+@@ -199,12 +199,13 @@ static wxString filterFootprints( const wxString& aFilterJson )
+                     continue;
+ 
+                 // Pin count filter
+-                if( pinCount > 0 )
++                // GetNumberedPadCount() leaves out pads whose number has no digits, but a symbol
++                // can still carry a pin for them (USB-C "SH" for the shield: 17 pins against 16
++                // numbered pads), so also accept a match on all the distinct pad numbers.
++                if( pinCount > 0 && fp->GetNumberedPadCount() != pinCount
++                    && fp->GetUniquePadNumbers().size() != pinCount )
+                 {
+-                    unsigned fpPadCount = fp->GetNumberedPadCount();
+-
+-                    if( fpPadCount != pinCount )
+-                        continue;
++                    continue;
+                 }
+ 
+                 // Footprint filter patterns with case-insensitive matching
+-- 
+2.54.0 (Apple Git-157)
+
