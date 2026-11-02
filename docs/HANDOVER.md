@@ -19,9 +19,10 @@ cmake --build build/kicad-android > build/logs/kicad-build.log 2>&1
 scripts/build-kicad-apk.sh > build/logs/kicad-apk.log 2>&1   # -> build/KiCad-debug.apk
 adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator is `adb -e`
 ```
-- Versioning: build letter in `android/BUILD_LETTER`. `scripts/bump-build.sh` moves to the next
-  letter (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter> and versionCode is
-  10990x. Bump for every build handed to the user. **Current: 10.99k** (installed on the tablet).
+- Versioning: `scripts/bump-build.sh` advances android/BUILD_LETTER a..z, then aa, ab .. zz
+  (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
+  1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
+  user. **Current: 10.99k** (installed on the tablet, plus the USB-C footprint filter fix; the next is l).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.

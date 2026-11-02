@@ -69,7 +69,10 @@ KVER_MAJOR="$(sed -n 's/.*KICAD_MAJOR_VERSION *"\([0-9]*\)".*/\1/p' "$BUILD/kica
 KVER_MINOR="$(sed -n 's/.*KICAD_MINOR_VERSION *"\([0-9]*\)".*/\1/p' "$BUILD/kicad_build_version.h")"
 VERSION_NAME="${KVER_MAJOR}.${KVER_MINOR}${LETTER}"
 # letters count up (a=1, b=2, ...); the upstream version scales it so a new upstream base sorts later
-VERSION_CODE=$(( (KVER_MAJOR * 100 + KVER_MINOR) * 100 + $(printf '%d' "'$LETTER") - 96 ))
+# Letter index: a..z = 1..26, aa..zz = 27..702 (three digits, so codes keep rising past z)
+L1=$(( $(printf '%d' "'${LETTER:0:1}") - 96 ))
+if [ ${#LETTER} -eq 1 ]; then LIDX=$L1; else LIDX=$(( L1 * 26 + $(printf '%d' "'${LETTER:1:1}") - 96 )); fi
+VERSION_CODE=$(( (KVER_MAJOR * 100 + KVER_MINOR) * 1000 + LIDX ))
 echo "APK version $VERSION_NAME ($VERSION_CODE)"
 
 cat > "$OUT/deployment-settings.json" <<EOF
