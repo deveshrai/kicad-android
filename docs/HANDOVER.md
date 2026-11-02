@@ -69,6 +69,14 @@ Open (next):
 6. Older items: menu label "Non+KiCad"; the default template isn't preselected in New Project;
    the Qt file dialog is tiny; the soft keyboard pops up over the canvas; mouse-wheel zoom in
    pcbnew is centre-based; there may be a residual eeschema redraw issue at startup.
+7. 3D viewer: not yet tried on Android. It uses OpenGL (wxGLCanvas / QOpenGLWidget) next to our
+   Vulkan GAL, so expect work: GL context on the Android surface, and raytracing performance.
+8. Gerber/drill export (pcbnew Fabrication outputs, and kicad-cli on the device): untested. It
+   may just work. TBD when the board gets there. Check output paths on SD card storage too.
+9. Fixed in 10.99g–k during the user's copy of the board: net label dialog dead (j: Esc orphaned
+   quasi-modal dialogs), chooser crash (k: Qt IME/surface deadlock-protector abort, patched
+   qtforandroid), stale "already open" locks (k). The user keeps reporting crashes/issues as
+   they go; log them in build/sessions/20261101-140854/notes.md.
 
 ## RP2350 board experiment
 - Project on the tablet: files/RP2350A-DevBoard (the user is building it by hand).
