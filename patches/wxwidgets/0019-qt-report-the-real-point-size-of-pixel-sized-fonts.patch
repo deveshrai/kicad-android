@@ -1,0 +1,39 @@
+From 7fb48c3331d09cb7a83f98ef925bf476e2b46b4a Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 3 Nov 2026 13:12:07 +0530
+Subject: [PATCH] qt: report the real point size of pixel-sized fonts
+
+QFont::pointSizeF() is -1 for fonts sized in pixels, which Qt's default
+application font is on Android.  wxSTC took that as its default size and
+Scintilla clamped it to 2pt, so its text was unreadably small.  Fall back
+to QFontInfo::pointSizeF().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/font.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/qt/font.cpp b/src/qt/font.cpp
+index 322c761..b41725d 100644
+--- a/src/qt/font.cpp
++++ b/src/qt/font.cpp
+@@ -419,7 +419,14 @@ wxNativeFontInfo& wxNativeFontInfo::operator=(const wxNativeFontInfo& that)
+ 
+ double wxNativeFontInfo::GetFractionalPointSize() const
+ {
+-    return m_qtFont.pointSizeF();
++    // A font sized in pixels (Qt's default application font on Android is one) reports -1 here:
++    // return the point size of the font actually used instead, since callers such as wxSTC
++    // (Scintilla clamps it to a 2pt font) and font arithmetic expect a real size.
++    const double pointSize = m_qtFont.pointSizeF();
++    if ( pointSize > 0 )
++        return pointSize;
++
++    return QFontInfo(m_qtFont).pointSizeF();
+ }
+ 
+ wxSize wxNativeFontInfo::GetPixelSize() const
+-- 
+2.54.0 (Apple Git-157)
+
