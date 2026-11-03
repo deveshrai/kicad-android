@@ -1,7 +1,7 @@
 From 584df3303979117dfeadc9e92f56b5514050be4c Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 19:03:24 +0530
-Subject: [PATCH 19/23] Android: virtual pointer so keyboard cursor moves
+Subject: [PATCH 19/24] Android: virtual pointer so keyboard cursor moves
  survive re-reading the pointer
 
 Android doesn't let apps warp the pointer, so after a dialog closed tools re-read the last

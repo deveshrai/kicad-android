@@ -1,0 +1,112 @@
+From 2f672b49d671d768c3f68e1b6a6c0dec969a500b Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 3 Nov 2026 12:35:14 +0530
+Subject: [PATCH 18/18] qt: open files through a FileProvider content URI on
+ Android
+
+wxLaunchDefaultApplication() used QDesktopServices with a file:// URI,
+which Android won't pass to other apps, so nothing opened.  Share the file
+through Qt's <package>.qtprovider FileProvider with its MIME type and a
+read grant, and report failure when no app can view it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/utils.cpp | 72 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 72 insertions(+)
+
+diff --git a/src/qt/utils.cpp b/src/qt/utils.cpp
+index c3c6a39..6585950 100644
+--- a/src/qt/utils.cpp
++++ b/src/qt/utils.cpp
+@@ -14,6 +14,13 @@
+ #include <QtGui/QDesktopServices>
+ #include <QtCore/QUrl>
+ 
++#ifdef __ANDROID__
++#include <QtCore/QFileInfo>
++#include <QtCore/QJniEnvironment>
++#include <QtCore/QJniObject>
++#include <QtCore/QCoreApplication>
++#endif
++
+ #ifndef WX_PRECOMP
+     #include "wx/cursor.h"
+     #include "wx/log.h"
+@@ -134,8 +141,73 @@ wxWindow *wxGetActiveWindow()
+     return nullptr;
+ }
+ 
++#ifdef __ANDROID__
++namespace
++{
++// QDesktopServices hands a file:// URI to ACTION_VIEW, which Android refuses to pass to other
++// apps (FileUriExposedException), so nothing opens.  Share the file through the FileProvider
++// that Qt's manifest declares (authority <package>.qtprovider) instead, with its MIME type and
++// a read grant.  Returns false (and clears the Java exception) when no app can open it.
++bool wxQtAndroidOpenFile(const QString& path)
++{
++    QJniObject ctx = QNativeInterface::QAndroidApplication::context();
++    if ( !ctx.isValid() )
++        return false;
++
++    QJniEnvironment env;
++    QJniObject file("java/io/File", "(Ljava/lang/String;)V",
++                    QJniObject::fromString(path).object<jstring>());
++    QJniObject pkg = ctx.callObjectMethod("getPackageName", "()Ljava/lang/String;");
++    QJniObject authority = QJniObject::fromString(pkg.toString() + QStringLiteral(".qtprovider"));
++    QJniObject uri = QJniObject::callStaticObjectMethod(
++            "androidx/core/content/FileProvider", "getUriForFile",
++            "(Landroid/content/Context;Ljava/lang/String;Ljava/io/File;)Landroid/net/Uri;",
++            ctx.object(), authority.object<jstring>(), file.object());
++    if ( env.checkAndClearExceptions() || !uri.isValid() )
++    {
++        wxLogDebug("No content URI for %s", wxQtConvertString(path));
++        return false;
++    }
++
++    QString mime;
++    const int dot = path.lastIndexOf('.');
++    if ( dot >= 0 )
++    {
++        QJniObject map = QJniObject::callStaticObjectMethod(
++                "android/webkit/MimeTypeMap", "getSingleton", "()Landroid/webkit/MimeTypeMap;");
++        QJniObject type = map.callObjectMethod(
++                "getMimeTypeFromExtension", "(Ljava/lang/String;)Ljava/lang/String;",
++                QJniObject::fromString(path.mid(dot + 1).toLower()).object<jstring>());
++        if ( type.isValid() )
++            mime = type.toString();
++    }
++    if ( mime.isEmpty() )
++        mime = QStringLiteral("*/*");
++
++    QJniObject intent("android/content/Intent", "(Ljava/lang/String;)V",
++                      QJniObject::fromString(QStringLiteral("android.intent.action.VIEW")).object<jstring>());
++    intent.callObjectMethod("setDataAndType",
++                            "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
++                            uri.object(), QJniObject::fromString(mime).object<jstring>());
++    // FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK
++    intent.callObjectMethod("addFlags", "(I)Landroid/content/Intent;", jint(0x00000001 | 0x10000000));
++    ctx.callMethod<void>("startActivity", "(Landroid/content/Intent;)V", intent.object());
++    if ( env.checkAndClearExceptions() )   // ActivityNotFoundException: no viewer installed
++        return false;
++
++    return true;
++}
++} // anonymous namespace
++#endif // __ANDROID__
++
+ bool wxLaunchDefaultApplication(const wxString& path, int WXUNUSED( flags ) )
+ {
++#ifdef __ANDROID__
++    const QString qpath = wxQtConvertString( path );
++    if ( QFileInfo( qpath ).isFile() )
++        return wxQtAndroidOpenFile( qpath );
++#endif
++
+     return QDesktopServices::openUrl( QUrl::fromLocalFile( wxQtConvertString( path ) ) );
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

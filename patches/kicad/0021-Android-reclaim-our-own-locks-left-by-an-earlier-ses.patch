@@ -1,7 +1,7 @@
 From a4d349ae1eda5def0aaaf27b9a8dc60a82bebe7f Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 2 Nov 2026 12:12:44 +0530
-Subject: [PATCH 21/23] Android: reclaim our own locks left by an earlier
+Subject: [PATCH 21/24] Android: reclaim our own locks left by an earlier
  session
 
 Removable storage often cannot lock, so a crash left 'already open by you'

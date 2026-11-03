@@ -1,0 +1,43 @@
+From a0478eec420fb4ea152626fde16dd165eb526a62 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 3 Nov 2026 12:35:13 +0530
+Subject: [PATCH 17/18] qt: don't crash moving focus in a wxQtScrollArea
+ without a widget
+
+QScrollArea::focusNextPrevChild() calls ensureWidgetVisible(), which
+dereferences widget().  wxQtScrollArea only uses the viewport, so hiding a
+focused child (a wxGrid cell editor when a row is added) crashed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/window.cpp | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index d403ac2..5791d7e 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -113,6 +113,19 @@ public:
+ 
+     void OnActionTriggered(int action);
+     void OnSliderReleased();
++
++protected:
++    // QScrollArea::focusNextPrevChild() calls ensureWidgetVisible(), which
++    // dereferences the scroll area's widget().  We only use the viewport and
++    // never set a widget, so hiding a focused child (e.g. a wxGrid cell
++    // editor), which moves the focus on, would crash: skip that step then.
++    bool focusNextPrevChild(bool next) override
++    {
++        if ( !widget() )
++            return QAbstractScrollArea::focusNextPrevChild(next);
++
++        return QScrollArea::focusNextPrevChild(next);
++    }
+ };
+ 
+ wxQtScrollArea::wxQtScrollArea( wxWindowQt *parent, wxWindowQt *handler )
+-- 
+2.54.0 (Apple Git-157)
+

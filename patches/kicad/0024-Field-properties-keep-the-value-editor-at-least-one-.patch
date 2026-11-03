@@ -1,0 +1,61 @@
+From e448e7c0770a300d771ef3e0a92bc7a744e1e65c Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 3 Nov 2026 12:41:17 +0530
+Subject: [PATCH 24/24] Field properties: keep the value editor at least one
+ text line high on wxQt
+
+wxQt's Scintilla can report a line height of a few pixels before it has
+painted, so SetMaxSize(TextHeight(0)) collapsed the value editor to a
+sliver.  Clamp to the control's character height plus padding, and log
+both values on Android.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ eeschema/dialogs/dialog_field_properties.cpp | 22 ++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/eeschema/dialogs/dialog_field_properties.cpp b/eeschema/dialogs/dialog_field_properties.cpp
+index a1dd7284..6d7193bc 100644
+--- a/eeschema/dialogs/dialog_field_properties.cpp
++++ b/eeschema/dialogs/dialog_field_properties.cpp
+@@ -42,6 +42,10 @@
+ #include <scintilla_tricks.h>
+ #include <wildcards_and_files_ext.h>
+ 
++#ifdef __ANDROID__
++#include <android/log.h>
++#endif
++
+ 
+ DIALOG_FIELD_PROPERTIES::DIALOG_FIELD_PROPERTIES( SCH_BASE_FRAME* aParent, const wxString& aTitle,
+                                                   const SCH_FIELD* aField ) :
+@@ -363,6 +367,24 @@ void DIALOG_FIELD_PROPERTIES::init()
+         wxSize maxSize;
+         maxSize.x = -1;     // Do not fix the max width
+         maxSize.y = m_StyledTextCtrl->TextHeight( 0 );
++
++#ifdef __WXQT__
++        // wxQt's Scintilla can report a line height of a few pixels before the control has
++        // painted once, which collapses the editor to a sliver: never go below a text line.
++        int lineHeight = m_StyledTextCtrl->GetCharHeight() + 6;
++
++#ifdef __ANDROID__
++        __android_log_print( ANDROID_LOG_INFO, "KiCad", "field value editor: TextHeight %d, "
++                             "char height %d", maxSize.y, m_StyledTextCtrl->GetCharHeight() );
++#endif
++
++        if( maxSize.y < lineHeight )
++        {
++            maxSize.y = lineHeight;
++            m_StyledTextCtrl->SetMinSize( wxSize( -1, lineHeight ) );
++        }
++#endif
++
+         m_StyledTextCtrl->SetMaxSize( maxSize );
+         m_StyledTextCtrl->SetUseVerticalScrollBar( false );
+         m_StyledTextCtrl->SetUseHorizontalScrollBar( false );
+-- 
+2.54.0 (Apple Git-157)
+

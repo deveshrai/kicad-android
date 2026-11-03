@@ -148,6 +148,14 @@ rm -rf "$PATCH_CLASSES" && mkdir -p "$PATCH_CLASSES"
        org/qtproject/qt/android/QtWindow.class org/qtproject/qt/android/QtWindow.class )
 ( cd "$PATCH_CLASSES" && zip -q -d "$OUT/libs/Qt6Android.jar" 'org/qtproject/qt/android/QtThread$*' || true
   zip -q "$OUT/libs/Qt6Android.jar" org/qtproject/qt/android/QtThread*.class org/qtproject/qt/android/QtWindow.class )
+# FileProvider paths (wx patch 18 opens files in other apps through it): androiddeployqt drops app
+# resources that Qt's own java dir also has, so build from a copy of that dir with ours swapped in
+QT_JAVA="$KA_ROOT/build/qt-android-java"
+rm -rf "$QT_JAVA" && cp -R "$QT_ANDROID_PATH/src/android/java" "$QT_JAVA"
+cp "$KA_ROOT/android/package/res/xml/qtprovider_paths.xml" "$QT_JAVA/res/xml/qtprovider_paths.xml"
+perl -pi -e "s|^qtAndroidDir=.*|qtAndroidDir=$QT_JAVA|" "$OUT/gradle.properties"
+grep -q "^qtAndroidDir=$QT_JAVA\$" "$OUT/gradle.properties"
+
 GRADLE_TASK=assembleDebug
 [ "${KICAD_APK_MODE:-debug}" = release ] && GRADLE_TASK=assembleRelease
 ( cd "$OUT" && ./gradlew -q "$GRADLE_TASK" )
