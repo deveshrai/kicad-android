@@ -1,0 +1,62 @@
+From f979f4bf68df5775a1186cbaea2cb3363fd4cd6b Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 3 Nov 2026 13:28:13 +0530
+Subject: [PATCH] qt: implement wxDoLaunchDefaultBrowser with QDesktopServices
+
+The generic implementation looks for a command to run, which doesn't exist
+on Android.  Open local files with wxLaunchDefaultApplication() (a content
+URI on Android) and other URLs with QDesktopServices::openUrl().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/common/utilscmn.cpp |  2 +-
+ src/qt/utils.cpp        | 12 ++++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/common/utilscmn.cpp b/src/common/utilscmn.cpp
+index 376b9c9..327be5e 100644
+--- a/src/common/utilscmn.cpp
++++ b/src/common/utilscmn.cpp
+@@ -1068,7 +1068,7 @@ bool wxSetDetectableAutoRepeat( bool WXUNUSED(flag) )
+ 
+ #if defined(__WINDOWS__) && !defined(__WXQT__) || \
+     defined(__WXX11__) || defined(__WXGTK__) || \
+-    defined(__WXOSX__)
++    defined(__WXOSX__) || defined(__WXQT__)
+ 
+ // implemented in a port-specific utils source file:
+ bool wxDoLaunchDefaultBrowser(const wxLaunchBrowserParams& params);
+diff --git a/src/qt/utils.cpp b/src/qt/utils.cpp
+index 6585950..b294643 100644
+--- a/src/qt/utils.cpp
++++ b/src/qt/utils.cpp
+@@ -31,6 +31,7 @@
+ #include "wx/utils.h"
+ #include "wx/qt/private/utils.h"
+ #include "wx/qt/private/converter.h"
++#include "wx/private/launchbrowser.h"
+ 
+ 
+ void wxMissingImplementation( const char fileName[], unsigned lineNumber,
+@@ -211,6 +212,17 @@ bool wxLaunchDefaultApplication(const wxString& path, int WXUNUSED( flags ) )
+     return QDesktopServices::openUrl( QUrl::fromLocalFile( wxQtConvertString( path ) ) );
+ }
+ 
++// Used by wxLaunchDefaultBrowser(): the generic implementation looks for a command to run, which
++// doesn't exist on Android.  Local files go through wxLaunchDefaultApplication() (a content URI
++// on Android), anything else to Qt, i.e. the system's handler for the URL scheme.
++bool wxDoLaunchDefaultBrowser(const wxLaunchBrowserParams& params)
++{
++    if ( params.scheme == "file" && !params.path.empty() )
++        return wxLaunchDefaultApplication(params.path);
++
++    return QDesktopServices::openUrl( QUrl( wxQtConvertString( params.url ) ) );
++}
++
+ wxString wxGUIAppTraits::GetPlatformDescription() const
+ {
+     return wxString::Format("Compile-time QT version is %s.\n",
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,57 @@
+From b1d2d06b7ad490717c5e413d63301023bf4a670d Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 3 Nov 2026 13:28:13 +0530
+Subject: [PATCH 25/25] Symbol properties: embed picked datasheets into the
+ symbol, not a throwaway copy
+
+The URL editor embeds into the first files of the stack, which was the
+dialog's private LIB_SYMBOL copy (m_part).  It is discarded on OK, so the
+PDF was lost and the field kept a dangling kicad-embed:// link.  Put the
+embedded files panel's files first: those are applied to the symbol.
+
+Also report a kicad-embed:// link whose file is missing instead of doing
+nothing.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/eda_doc.cpp                            | 4 ++++
+ eeschema/dialogs/dialog_symbol_properties.cpp | 6 +++++-
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/common/eda_doc.cpp b/common/eda_doc.cpp
+index cbbe0181..74c2764e 100644
+--- a/common/eda_doc.cpp
++++ b/common/eda_doc.cpp
+@@ -110,6 +110,10 @@ bool GetAssociatedDocument( wxWindow* aParent, const wxString& aDocName, PROJECT
+                 {
+                     wxLogTrace( wxT( "KICAD_EMBED" ),
+                                 wxT( "Failed to get temp file '%s' for kicad_embed URI" ), docname );
++
++                    // Say so instead of silently doing nothing: the link can outlive its file
++                    msg.Printf( _( "Embedded file '%s' not found." ), docname );
++                    DisplayErrorMessage( aParent, msg );
+                     return false;
+                 }
+ 
+diff --git a/eeschema/dialogs/dialog_symbol_properties.cpp b/eeschema/dialogs/dialog_symbol_properties.cpp
+index 67757394..b8144c11 100644
+--- a/eeschema/dialogs/dialog_symbol_properties.cpp
++++ b/eeschema/dialogs/dialog_symbol_properties.cpp
+@@ -340,7 +340,11 @@ DIALOG_SYMBOL_PROPERTIES::DIALOG_SYMBOL_PROPERTIES( SCH_EDIT_FRAME* aParent, SCH
+     {
+         m_embeddedFiles = new PANEL_EMBEDDED_FILES( m_notebook1, m_symbol->GetEmbeddedFiles(), 0, embeddedFilesStack );
+         m_notebook1->AddPage( m_embeddedFiles, _( "Embedded Files" ) );
+-        embeddedFilesStack.push_back( m_embeddedFiles->GetLocalFiles() );
++
++        // The URL editor embeds picked files into the first entry.  That has to be the panel's
++        // files, which are applied to the symbol on OK: m_part is a private copy that is thrown
++        // away, so a datasheet embedded there was lost and left a dangling kicad-embed:// link.
++        embeddedFilesStack.insert( embeddedFilesStack.begin(), m_embeddedFiles->GetLocalFiles() );
+     }
+ 
+     m_fields = new FIELDS_GRID_TABLE( this, aParent, m_fieldsGrid, m_symbol, m_part.get(), embeddedFilesStack );
+-- 
+2.54.0 (Apple Git-157)
+
