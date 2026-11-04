@@ -36,6 +36,9 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   over adb: `am task resize <taskId> l t r b`.
 - Wireless adb (paired with this Mac, 2026-11-01): `adb -s adb-R5GL8486SDD-5yIE9r._adb-tls-connect._tcp ...`
   (mDNS name survives port changes; last seen at 192.168.1.2:45355). USB serial is R5GL8486SDD.
+- Phone: Samsung Galaxy Z Fold 8 SM-F971B (USB serial RZGL62ZE1AZ), Android 17 / API 37, 11 GB,
+  Adreno 840 (Qualcomm Vulkan; the tablet is Mali), inner 2448x1848 + cover 1248x1972 @ 420 dpi
+  (scale 2.625). Attached 2026-11-04 for the priority list below.
 - Emulator: AVD KiCad_Tablet35 (API 35, 8 GB, host GPU). The user starts it with
   `! /Users/devesh/projects/KiCadAndroid0/scripts/emulator.sh`.
 - Testing quirks: on the tablet, `input tap` works and Ctrl+E opens eeschema from the project
@@ -79,6 +82,16 @@ Open (next):
    quasi-modal dialogs), chooser crash (k: Qt IME/surface deadlock-protector abort, patched
    qtforandroid), stale "already open" locks (k). The user keeps reporting crashes/issues as
    they go; log them in build/sessions/20261101-140854/notes.md.
+
+## User priorities (2026-11-04, in this order)
+1. pcbnew is slow while drawing traces etc.: profile and fix.
+2. 3D viewer.
+3. Zoom at the pointer location (pcbnew zooms on the centre).
+4. Touch: two-finger pinch/drag zoom+pan, one finger select/draw, three-finger tap zoom to fit.
+5. Gerber export: test on an existing board, verify against the Mac build.
+6. Blue text-selection handles left on the canvas.
+7. Import/export third-party symbols, footprints and 3D models (test: SnapEDA ESP32-S31-WROOM-1-N16R16V).
+8. UI sweep: fields too big/small or not scaling (check on the Fold's 2.625 scale too).
 
 ## RP2350 board experiment
 - Project on the tablet: files/RP2350A-DevBoard (the user is building it by hand).
