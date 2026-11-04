@@ -123,3 +123,8 @@ Qt's prebuilt qtforandroid aborts when a new window needs a Surface while an IME
 deadlock protector. toolchain/qtbase-src (sparse qtbase v6.12.0, branch kicad-android, patch in
 patches/qtbase) is rebuilt by scripts/build-qtforandroid.sh (android/qtforandroid/CMakeLists.txt),
 which swaps it into the Qt install (stock kept as *.orig) before build-kicad-apk.sh.
+10.99r adds QAndroidPlatformRhiBackingStore (pixels offered as a QPlatformGraphicsBuffer) and
+scripts/patch-qtgui.sh NOPs the compositor's QImage::detach() in the prebuilt libQt6Gui
+(byte-checked at 0x3ea158; run by build-kicad-apk.sh). Together they remove the full-window
+image copy per widget repaint (was 15-21% of the main thread while routing on the Fold).
+10.99o: EDA_DRAW_PANEL_GAL coalesces pointer motion on Android (Qt does no move compression).

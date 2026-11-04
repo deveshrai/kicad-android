@@ -1,0 +1,161 @@
+From 8d677bacf0218a0b8c5ac07f2dcdcba2926e4075 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 00:49:50 +0530
+Subject: [PATCH 2/2] android: backing store that hands its pixels to the
+ compositor as a graphics buffer
+
+With the stock QRhiBackingStore the compositor uploads from a shared copy of the
+backing store QImage, which the upload batch keeps until the frame's resources
+are released, so the next QPainter::begin() deep-copies the whole window image
+(15-20 MB per repaint on phone and tablet screens).  Offer the image as a
+QPlatformGraphicsBuffer instead: the compositor then wraps the raw pixels
+without taking a reference.  Used together with the KiCad port's binary patch
+that drops the compositor's own detach of the uploaded image.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ .../android/qandroidplatformintegration.cpp   |  3 +-
+ .../qandroidplatformrhibackingstore.cpp       | 65 +++++++++++++++++++
+ .../android/qandroidplatformrhibackingstore.h | 36 ++++++++++
+ 3 files changed, 103 insertions(+), 1 deletion(-)
+ create mode 100644 src/plugins/platforms/android/qandroidplatformrhibackingstore.cpp
+ create mode 100644 src/plugins/platforms/android/qandroidplatformrhibackingstore.h
+
+diff --git a/src/plugins/platforms/android/qandroidplatformintegration.cpp b/src/plugins/platforms/android/qandroidplatformintegration.cpp
+index dc59c953..3ec86512 100644
+--- a/src/plugins/platforms/android/qandroidplatformintegration.cpp
++++ b/src/plugins/platforms/android/qandroidplatformintegration.cpp
+@@ -4,6 +4,7 @@
+ // Qt-Security score:significant reason:default
+ 
+ #include "qandroidplatformintegration.h"
++#include "qandroidplatformrhibackingstore.h"
+ 
+ #if QT_CONFIG(accessibility)
+ #include "androidjniaccessibility.h"
+@@ -359,7 +360,7 @@ QPlatformBackingStore *QAndroidPlatformIntegration::createPlatformBackingStore(Q
+     if (!QtAndroidPrivate::activity().isValid())
+         return nullptr;
+ 
+-    return new QRhiBackingStore(window);
++    return new QAndroidPlatformRhiBackingStore(window);
+ }
+ 
+ #if QT_CONFIG(egl)
+diff --git a/src/plugins/platforms/android/qandroidplatformrhibackingstore.cpp b/src/plugins/platforms/android/qandroidplatformrhibackingstore.cpp
+new file mode 100644
+index 00000000..fe255d53
+--- /dev/null
++++ b/src/plugins/platforms/android/qandroidplatformrhibackingstore.cpp
+@@ -0,0 +1,65 @@
++// Copyright (C) 2026 The KiCad Android port
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qandroidplatformrhibackingstore.h"
++
++#include <qpa/qplatformgraphicsbuffer.h>
++
++QT_BEGIN_NAMESPACE
++
++// The backing store's own pixels, without taking a reference to its QImage
++class QAndroidBackingStoreImageBuffer : public QPlatformGraphicsBuffer
++{
++public:
++    explicit QAndroidBackingStoreImageBuffer(const QImage &image)
++        : QPlatformGraphicsBuffer(image.size(), QImage::toPixelFormat(image.format())),
++          m_bits(const_cast<uchar *>(image.constBits())),
++          m_bytesPerLine(image.bytesPerLine()),
++          m_cacheKey(image.cacheKey())
++    {
++    }
++
++    bool matches(const QImage &image) const
++    {
++        return image.cacheKey() == m_cacheKey && image.constBits() == m_bits
++               && image.size() == size() && image.bytesPerLine() == m_bytesPerLine
++               && QImage::toPixelFormat(image.format()) == format();
++    }
++
++    const uchar *data() const override { return m_bits; }
++    uchar *data() override { return m_bits; }
++    int bytesPerLine() const override { return m_bytesPerLine; }
++    Origin origin() const override { return OriginTopLeft; }
++
++protected:
++    bool doLock(AccessTypes, const QRect &) override { return true; }
++    void doUnlock() override {}
++
++private:
++    uchar  *m_bits;
++    int     m_bytesPerLine;
++    qint64  m_cacheKey;
++};
++
++
++QAndroidPlatformRhiBackingStore::QAndroidPlatformRhiBackingStore(QWindow *window)
++    : QRhiBackingStore(window)
++{
++}
++
++QAndroidPlatformRhiBackingStore::~QAndroidPlatformRhiBackingStore() = default;
++
++QPlatformGraphicsBuffer *QAndroidPlatformRhiBackingStore::graphicsBuffer() const
++{
++    // m_image, not toImage(): a copy of the QImage would be the shared reference we avoid
++    if (m_image.isNull())
++        return nullptr;
++
++    // The image is reallocated on resize (and the bits move): describe the current one
++    if (!m_buffer || !m_buffer->matches(m_image))
++        m_buffer = std::make_unique<QAndroidBackingStoreImageBuffer>(m_image);
++
++    return m_buffer.get();
++}
++
++QT_END_NAMESPACE
+diff --git a/src/plugins/platforms/android/qandroidplatformrhibackingstore.h b/src/plugins/platforms/android/qandroidplatformrhibackingstore.h
+new file mode 100644
+index 00000000..aa503c92
+--- /dev/null
++++ b/src/plugins/platforms/android/qandroidplatformrhibackingstore.h
+@@ -0,0 +1,36 @@
++// Copyright (C) 2026 The KiCad Android port
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QANDROIDPLATFORMRHIBACKINGSTORE_H
++#define QANDROIDPLATFORMRHIBACKINGSTORE_H
++
++#include <QtGui/private/qrhibackingstore_p.h>
++
++#include <memory>
++
++QT_BEGIN_NAMESPACE
++
++class QAndroidBackingStoreImageBuffer;
++
++// QRhiBackingStore that offers its image as a QPlatformGraphicsBuffer.  The default compositor
++// then uploads the dirty area from a wrapper around the raw pixels, which doesn't share the
++// image's reference count.  With the stock path the upload batch holds a shared copy of the
++// image until the frame's resources are released, so the next QPainter::begin() on the backing
++// store detaches (deep-copies) the whole window image: 15-20 MB per repaint on a phone or tablet
++// screen, e.g. for each status bar update while the pointer moves.
++// Needs scripts/patch-qtgui.sh, which drops the compositor's own detach of the uploaded image.
++class QAndroidPlatformRhiBackingStore : public QRhiBackingStore
++{
++public:
++    explicit QAndroidPlatformRhiBackingStore(QWindow *window);
++    ~QAndroidPlatformRhiBackingStore() override;
++
++    QPlatformGraphicsBuffer *graphicsBuffer() const override;
++
++private:
++    mutable std::unique_ptr<QAndroidBackingStoreImageBuffer> m_buffer;
++};
++
++QT_END_NAMESPACE
++
++#endif // QANDROIDPLATFORMRHIBACKINGSTORE_H
+-- 
+2.54.0 (Apple Git-157)
+
