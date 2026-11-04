@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99u** (on the Fold; the tablet has 10.99n; the next is v).
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99x** (on the Fold; the tablet has 10.99n; the next is y).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -87,7 +87,10 @@ Open (next):
 1. pcbnew is slow while drawing traces etc.: profile and fix.
 2. 3D viewer.
 3. Zoom at the pointer location (pcbnew zooms on the centre). DONE in 10.99u (patch 0028: no cursor warping on Android), verified on the Fold with injected wheel events.
-4. Touch: two-finger pinch/drag zoom+pan, one finger select/draw, three-finger tap zoom to fit.
+4. Touch: two-finger pinch/drag zoom+pan, one finger select/draw, three-finger tap zoom to fit. 10.99x: implemented on the
+   GAL canvas (kicad 0029, wx 0021), verified on the Fold with tools/touchinject (pinch, pan,
+   3-finger tap, 1-finger drag/tap). Waiting for the user's hands-on test. Not covered yet: 3D
+   viewer canvas, long-press = right click, stylus.
 5. Gerber export: test on an existing board, verify against the Mac build.
 6. Blue text-selection handles left on the canvas.
 7. Import/export third-party symbols, footprints and 3D models (test: SnapEDA ESP32-S31-WROOM-1-N16R16V).
@@ -164,3 +167,9 @@ scripts/patch-qtgui.sh NOPs the compositor's QImage::detach() in the prebuilt li
 (byte-checked at 0x3ea158; run by build-kicad-apk.sh). Together they remove the full-window
 image copy per widget repaint (was 15-21% of the main thread while routing on the Fold).
 10.99o: EDA_DRAW_PANEL_GAL coalesces pointer motion on Android (Qt does no move compression).
+
+## Multi-touch injector (tools/touchinject)
+adb `input` is single-touch only.  tools/touchinject/build.sh builds Touch.java into a dex and
+pushes it; run `adb shell CLASSPATH=/data/local/tmp/touch.dex app_process / Touch <cmd>` with
+pinch CX CY FROM TO | pan X Y DX DY | tap3 X Y | drag X Y DX DY (display pixels).  It injects
+through InputManager(Global).injectInputEvent with the shell's permission, like scrcpy.

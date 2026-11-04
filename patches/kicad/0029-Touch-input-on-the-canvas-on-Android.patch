@@ -1,0 +1,473 @@
+From d6672f573d84572886bb1207aa853d1499a32286 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 04:00:14 +0530
+Subject: [PATCH] Touch input on the canvas on Android
+
+One finger is the left mouse button: its press waits until the finger
+moves past a small slop, lifts (a click) or rests 120 ms, so that a second
+finger can still turn the touch into a gesture.  Two fingers pan and pinch-
+zoom about their midpoint.  A quick three-finger tap zooms to fit.
+
+The mouse events are injected through QWindowSystemInterface (kiplatform
+InjectTouchMouse), so capture, button state and the reported pointer
+position follow them as for a real mouse.  Qt's pan and pinch recognisers
+are not used on Android: once Qt has made the first finger a mouse drag, a
+second finger never reaches the canvas.  The Vulkan canvas window now
+forwards touch to the canvas widget, which accepts touch, instead of its
+viewport.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/view/wx_view_controls.cpp        | 189 +++++++++++++++++++++++-
+ include/view/wx_view_controls.h         |  40 +++++
+ libs/kiplatform/CMakeLists.txt          |   6 +
+ libs/kiplatform/include/kiplatform/ui.h |  17 +++
+ libs/kiplatform/port/wxqt/ui.cpp        |  84 ++++++++++-
+ 5 files changed, 332 insertions(+), 4 deletions(-)
+
+diff --git a/common/view/wx_view_controls.cpp b/common/view/wx_view_controls.cpp
+index d765c8a2..3f40bf45 100644
+--- a/common/view/wx_view_controls.cpp
++++ b/common/view/wx_view_controls.cpp
+@@ -38,7 +38,13 @@
+ #include <eda_draw_frame.h>
+ #include <kiway.h>
+ #include <kiplatform/ui.h>
++#include <tool/actions.h>
++#include <tool/tool_manager.h>
+ #include <wx/log.h>
++#include <wx/time.h>
++
++#include <algorithm>
++
+ 
+ #include <cmath>
+ 
+@@ -139,7 +145,24 @@ WX_VIEW_CONTROLS::WX_VIEW_CONTROLS( VIEW* aView, EDA_DRAW_PANEL_GAL* aParentPane
+                             wxMouseEventHandler( WX_VIEW_CONTROLS::onCaptureLost ), nullptr, this );
+ #endif
+ 
+-#ifndef __WXOSX__
++#if defined( __ANDROID__ )
++    // Raw touch, interpreted in onTouch().  Qt's pan and pinch recognisers aren't used: once
++    // Qt has turned the first finger into a mouse drag, a second finger never reaches us.
++    if( m_parentPanel->EnableTouchEvents( wxTOUCH_RAW_EVENTS ) )
++    {
++        m_parentPanel->Bind( wxEVT_TOUCH_BEGIN, &WX_VIEW_CONTROLS::onTouch, this );
++        m_parentPanel->Bind( wxEVT_TOUCH_MOVE, &WX_VIEW_CONTROLS::onTouch, this );
++        m_parentPanel->Bind( wxEVT_TOUCH_END, &WX_VIEW_CONTROLS::onTouch, this );
++        m_parentPanel->Bind( wxEVT_TOUCH_CANCEL, &WX_VIEW_CONTROLS::onTouch, this );
++    }
++
++    m_touchTimer.Bind( wxEVT_TIMER,
++            [this]( wxTimerEvent& )
++            {
++                if( m_touchMode == TOUCH_MODE::PENDING && m_touches.size() == 1 )
++                    touchStartMouse();
++            } );
++#elif !defined( __WXOSX__ )
+     if( m_parentPanel->EnableTouchEvents( wxTOUCH_ZOOM_GESTURE | wxTOUCH_PAN_GESTURES ) )
+     {
+         m_parentPanel->Connect( wxEVT_GESTURE_ZOOM,
+@@ -792,6 +815,170 @@ void WX_VIEW_CONTROLS::onPanGesture( wxPanGestureEvent& aEvent )
+ }
+ 
+ 
++#ifdef __ANDROID__
++namespace
++{
++/// Finger travel (dp, which is what Qt's logical pixels are on Android) before a touch counts
++/// as a drag rather than a tap
++constexpr double TOUCH_SLOP = 8.0;
++
++/// How long a single finger rests before it becomes a mouse press without moving (ms)
++constexpr int TOUCH_HOLD_MS = 120;
++
++/// A three-finger touch shorter than this, with little travel, is a tap (ms)
++constexpr long long TOUCH_TAP_MS = 400;
++}
++
++
++void WX_VIEW_CONTROLS::touchStartMouse()
++{
++    m_touchTimer.Stop();
++
++    if( m_touches.empty() )
++        return;
++
++    const TOUCH_POINT& tp = m_touches.front();
++    const wxPoint      start( KiROUND( tp.start.x ), KiROUND( tp.start.y ) );
++    const wxPoint      pos( KiROUND( tp.pos.x ), KiROUND( tp.pos.y ) );
++
++    m_touchMode = TOUCH_MODE::MOUSE;
++    m_touchMouseId = tp.id;
++
++    // Move there first: a floating item follows the pointer and is dropped where it is
++    KIPLATFORM::UI::InjectTouchMouse( m_parentPanel, KIPLATFORM::UI::TOUCH_MOUSE::HOVER, start );
++    KIPLATFORM::UI::InjectTouchMouse( m_parentPanel, KIPLATFORM::UI::TOUCH_MOUSE::PRESS, start );
++
++    if( pos != start )
++        KIPLATFORM::UI::InjectTouchMouse( m_parentPanel, KIPLATFORM::UI::TOUCH_MOUSE::DRAG, pos );
++}
++
++
++void WX_VIEW_CONTROLS::touchResetGesture()
++{
++    if( m_touches.size() < 2 )
++        return;
++
++    const VECTOR2D a = m_touches[0].pos;
++    const VECTOR2D b = m_touches[1].pos;
++
++    m_touchLastCentroid = ( a + b ) / 2.0;
++    m_touchLastSpan = ( b - a ).EuclideanNorm();
++}
++
++
++void WX_VIEW_CONTROLS::onTouch( wxMultiTouchEvent& aEvent )
++{
++    using KIPLATFORM::UI::TOUCH_MOUSE;
++
++    void*            id = aEvent.GetSequenceId().GetID();
++    const VECTOR2D   pos( aEvent.GetPosition().m_x, aEvent.GetPosition().m_y );
++    const wxPoint    ipos( KiROUND( pos.x ), KiROUND( pos.y ) );
++    const wxEventType type = aEvent.GetEventType();
++    const long long  now = wxGetLocalTimeMillis().GetValue();
++
++    auto it = std::find_if( m_touches.begin(), m_touches.end(),
++                            [id]( const TOUCH_POINT& tp ) { return tp.id == id; } );
++
++    if( type == wxEVT_TOUCH_BEGIN )
++    {
++        if( m_touches.empty() )
++        {
++            m_touchMode = TOUCH_MODE::PENDING;
++            m_touchMaxFingers = 0;
++            m_touchStartMs = now;
++            m_touchTravel = 0.0;
++        }
++
++        if( it == m_touches.end() )
++            m_touches.push_back( { id, pos, pos } );
++
++        m_touchMaxFingers = std::max( m_touchMaxFingers, m_touches.size() );
++
++        if( m_touches.size() == 1 )
++        {
++            m_touchTimer.StartOnce( TOUCH_HOLD_MS );
++        }
++        else if( m_touchMode == TOUCH_MODE::PENDING || m_touchMode == TOUCH_MODE::GESTURE )
++        {
++            m_touchTimer.Stop();
++            m_touchMode = TOUCH_MODE::GESTURE;
++            touchResetGesture();
++        }
++
++        return;
++    }
++
++    if( it == m_touches.end() )
++        return;
++
++    it->pos = pos;
++    m_touchTravel = std::max( m_touchTravel, ( pos - it->start ).EuclideanNorm() );
++
++    if( type == wxEVT_TOUCH_MOVE )
++    {
++        if( m_touchMode == TOUCH_MODE::PENDING && m_touchTravel > TOUCH_SLOP )
++            touchStartMouse();
++        else if( m_touchMode == TOUCH_MODE::MOUSE && id == m_touchMouseId )
++            KIPLATFORM::UI::InjectTouchMouse( m_parentPanel, TOUCH_MOUSE::DRAG, ipos );
++        else if( m_touchMode == TOUCH_MODE::GESTURE && m_touches.size() == 2 )
++        {
++            const VECTOR2D a = m_touches[0].pos;
++            const VECTOR2D b = m_touches[1].pos;
++            const VECTOR2D centroid = ( a + b ) / 2.0;
++            const double   span = ( b - a ).EuclideanNorm();
++            const double   zoom = ( m_touchLastSpan > 1.0 && span > 1.0 ) ? span / m_touchLastSpan
++                                                                          : 1.0;
++
++            ApplyPanAndZoomGesture( centroid - m_touchLastCentroid, zoom, centroid );
++            repaintRetained();
++
++            m_touchLastCentroid = centroid;
++            m_touchLastSpan = span;
++        }
++
++        return;
++    }
++
++    // wxEVT_TOUCH_END or wxEVT_TOUCH_CANCEL
++    if( m_touchMode == TOUCH_MODE::PENDING )
++    {
++        // A tap: click where the finger was
++        touchStartMouse();
++        KIPLATFORM::UI::InjectTouchMouse( m_parentPanel, TOUCH_MOUSE::RELEASE, ipos );
++        m_touchMode = TOUCH_MODE::IGNORE_REST;
++    }
++    else if( m_touchMode == TOUCH_MODE::MOUSE && id == m_touchMouseId )
++    {
++        KIPLATFORM::UI::InjectTouchMouse( m_parentPanel, TOUCH_MOUSE::RELEASE, ipos );
++        m_touchMode = TOUCH_MODE::IGNORE_REST;
++    }
++
++    m_touches.erase( it );
++
++    if( m_touchMode == TOUCH_MODE::GESTURE )
++        touchResetGesture();
++
++    if( m_touches.empty() )
++    {
++        m_touchTimer.Stop();
++
++        if( m_touchMaxFingers == 3 && now - m_touchStartMs < TOUCH_TAP_MS
++            && m_touchTravel < 2 * TOUCH_SLOP && type == wxEVT_TOUCH_END )
++        {
++            if( EDA_DRAW_FRAME* frame = m_parentPanel->GetParentEDAFrame() )
++            {
++                if( TOOL_MANAGER* toolMgr = frame->GetToolManager() )
++                    toolMgr->RunAction( ACTIONS::zoomFitScreen );
++            }
++        }
++
++        m_touchMode = TOUCH_MODE::NONE;
++        m_touchMouseId = nullptr;
++    }
++}
++#endif
++
++
+ void WX_VIEW_CONTROLS::ApplyPanAndZoomGesture( const VECTOR2D& aPanDelta, double aZoomFactor,
+                                                const VECTOR2D& aZoomAnchor )
+ {
+diff --git a/include/view/wx_view_controls.h b/include/view/wx_view_controls.h
+index 7ebce539..21c58ecd 100644
+--- a/include/view/wx_view_controls.h
++++ b/include/view/wx_view_controls.h
+@@ -32,6 +32,7 @@
+ #include <view/view_controls.h>
+ #include <wx/timer.h>
+ #include <memory>
++#include <vector>
+ 
+ class EDA_DRAW_PANEL_GAL;
+ class PROF_COUNTER;
+@@ -60,6 +61,9 @@ public:
+     void onTimer( wxTimerEvent& WXUNUSED( aEvent ) );
+     void onZoomGesture( wxZoomGestureEvent& aEvent );
+     void onPanGesture( wxPanGestureEvent& aEvent );
++#ifdef __ANDROID__
++    void onTouch( wxMultiTouchEvent& aEvent );
++#endif
+     void onScroll( wxScrollWinEvent& aEvent );
+     void onCaptureLost( wxMouseEvent& WXUNUSED( aEvent ) );
+ 
+@@ -223,6 +227,42 @@ private:
+     /// Used to track gesture events.
+     double   m_gestureLastZoomFactor;
+     VECTOR2D m_gestureLastPos;
++
++#ifdef __ANDROID__
++    /**
++     * Touch input (Android).  One finger is the left mouse button; its press waits until the
++     * finger moves, lifts or is held briefly, so that a second finger can still make it a
++     * gesture.  Two fingers pan and zoom.  A three-finger tap zooms to fit.
++     */
++    enum class TOUCH_MODE
++    {
++        NONE,      ///< no finger down
++        PENDING,   ///< one finger down, not yet decided
++        MOUSE,     ///< one finger drives the left mouse button
++        GESTURE,   ///< two or more fingers: pan and zoom
++        IGNORE_REST ///< the mouse finger lifted while others are still down
++    };
++
++    struct TOUCH_POINT
++    {
++        void*    id;
++        VECTOR2D start;
++        VECTOR2D pos;
++    };
++
++    void touchStartMouse();
++    void touchResetGesture();
++
++    TOUCH_MODE               m_touchMode = TOUCH_MODE::NONE;
++    std::vector<TOUCH_POINT> m_touches;
++    void*                    m_touchMouseId = nullptr;
++    size_t                   m_touchMaxFingers = 0;
++    long long                m_touchStartMs = 0;
++    double                   m_touchTravel = 0.0;
++    VECTOR2D                 m_touchLastCentroid;
++    double                   m_touchLastSpan = 0.0;
++    wxTimer                  m_touchTimer;
++#endif
+ };
+ } // namespace KIGFX
+ 
+diff --git a/libs/kiplatform/CMakeLists.txt b/libs/kiplatform/CMakeLists.txt
+index 5d869878..46e71fe5 100644
+--- a/libs/kiplatform/CMakeLists.txt
++++ b/libs/kiplatform/CMakeLists.txt
+@@ -51,6 +51,12 @@ elseif( KICAD_WX_PORT STREQUAL qt )
+         Qt6::Gui
+         Qt6::Widgets
+         )
++
++    if( ANDROID )
++        # QWindowSystemInterface, to inject mouse events made from touch input
++        find_package( Qt6 REQUIRED COMPONENTS GuiPrivate )
++        list( APPEND PLATFORM_LIBS Qt6::GuiPrivate )
++    endif()
+ endif()
+ 
+ 
+diff --git a/libs/kiplatform/include/kiplatform/ui.h b/libs/kiplatform/include/kiplatform/ui.h
+index c4e03d6d..e2c1413f 100644
+--- a/libs/kiplatform/include/kiplatform/ui.h
++++ b/libs/kiplatform/include/kiplatform/ui.h
+@@ -352,6 +352,23 @@ namespace KIPLATFORM
+          * @return the VkSurfaceKHR, or 0 on failure
+          */
+         uint64_t CreateVulkanSurface( void* aNativeHandle, void* aVkInstance );
++
++        /// What InjectTouchMouse() delivers
++        enum class TOUCH_MOUSE
++        {
++            HOVER,     ///< pointer move, no button
++            PRESS,     ///< left button down
++            DRAG,      ///< pointer move, left button held
++            RELEASE    ///< left button up
++        };
++
++        /**
++         * Deliver a left-button mouse event made from touch input to a canvas, at aPos in its
++         * client coordinates.  It goes through Qt's input path like a real mouse event, so
++         * capture, button state and GetMousePosition() follow it.  Queued: it is delivered
++         * after the current event.
++         */
++        void InjectTouchMouse( wxWindow* aWindow, TOUCH_MOUSE aAction, const wxPoint& aPos );
+ #endif
+     }
+ }
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index bb1e9164..a7123eba 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -60,6 +60,12 @@
+ #include <QWidget>
+ #include <QWindow>
+ 
++#ifdef __ANDROID__
++#include <QGuiApplication>
++#include <qpa/qwindowsysteminterface.h>
++#include <QtGui/private/qhighdpiscaling_p.h>
++#endif
++
+ 
+ namespace
+ {
+@@ -171,9 +177,6 @@ protected:
+         case QEvent::MouseButtonDblClick:
+         case QEvent::MouseMove:
+         case QEvent::Wheel:
+-        case QEvent::TouchBegin:
+-        case QEvent::TouchUpdate:
+-        case QEvent::TouchEnd:
+         case QEvent::TabletPress:
+         case QEvent::TabletMove:
+         case QEvent::TabletRelease:
+@@ -183,6 +186,22 @@ protected:
+ 
+             break;
+ 
++        case QEvent::TouchBegin:
++        case QEvent::TouchUpdate:
++        case QEvent::TouchEnd:
++        case QEvent::TouchCancel:
++            // Touch goes to the canvas itself: Qt only delivers it to widgets that accept touch
++            // (the wx window, not its scroll area viewport).  If nothing takes it, Qt makes
++            // mouse events from it, which come back here as pointer events.
++            if( m_canvas )
++            {
++                aEvent->setAccepted( false );
++                QCoreApplication::sendEvent( m_canvas, aEvent );
++                return aEvent->isAccepted();
++            }
++
++            break;
++
+         case QEvent::KeyPress:
+         case QEvent::KeyRelease:
+             if( m_canvas )
+@@ -457,6 +476,65 @@ wxPoint KIPLATFORM::UI::GetMousePosition()
+ }
+ 
+ 
++#ifdef __ANDROID__
++void KIPLATFORM::UI::InjectTouchMouse( wxWindow* aWindow, TOUCH_MOUSE aAction, const wxPoint& aPos )
++{
++    QWidget* canvas = qtWidget( aWindow );
++
++    if( !canvas )
++        return;
++
++    // wx client coordinates are the scroll area viewport's
++    QWidget* viewport = canvas;
++
++    if( QAbstractScrollArea* area = qobject_cast<QAbstractScrollArea*>( canvas ) )
++        viewport = area->viewport();
++
++    const QPointF local( aPos.x, aPos.y );
++    const QPointF global = viewport->mapToGlobal( local );
++    QWindow*      target = nullptr;
++    QPointF       targetLocal;
++
++    // The Vulkan window covers the viewport at (0,0) and forwards input to it, as for the
++    // real pointer; without one, go through the top-level window
++    if( QObject* vk = canvas->property( "kicadVulkanWindow" ).value<QObject*>() )
++    {
++        target = static_cast<QWindow*>( vk );
++        targetLocal = local;
++    }
++    else if( QWidget* top = viewport->window() )
++    {
++        target = top->windowHandle();
++        targetLocal = viewport->mapTo( top, local );
++    }
++
++    if( !target )
++        return;
++
++    QEvent::Type     type = QEvent::MouseMove;
++    Qt::MouseButton  button = Qt::NoButton;
++    Qt::MouseButtons state = Qt::NoButton;
++
++    switch( aAction )
++    {
++    case TOUCH_MOUSE::HOVER:                                                              break;
++    case TOUCH_MOUSE::DRAG:    state = Qt::LeftButton;                                    break;
++    case TOUCH_MOUSE::PRESS:   type = QEvent::MouseButtonPress;   button = Qt::LeftButton;
++                               state = Qt::LeftButton;                                    break;
++    case TOUCH_MOUSE::RELEASE: type = QEvent::MouseButtonRelease; button = Qt::LeftButton; break;
++    }
++
++    // QWindowSystemInterface takes native (device) pixels, like a platform plugin delivers
++    QWindowSystemInterface::handleMouseEvent( target,
++                                              QHighDpi::toNativeLocalPosition( targetLocal, target ),
++                                              QHighDpi::toNativeGlobalPosition( global, target ),
++                                              state, button, type,
++                                              QGuiApplication::keyboardModifiers(),
++                                              Qt::MouseEventSynthesizedByApplication );
++}
++#endif
++
++
+ bool KIPLATFORM::UI::WarpPointer( wxWindow* aWindow, int aX, int aY )
+ {
+ #ifdef __ANDROID__
+-- 
+2.54.0 (Apple Git-157)
+

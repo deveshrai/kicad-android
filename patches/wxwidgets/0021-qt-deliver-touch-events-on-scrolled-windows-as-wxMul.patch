@@ -1,0 +1,54 @@
+From a7c8ae3841b4d9df9e4506a27016d23aaf622641 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 04:00:14 +0530
+Subject: [PATCH] qt: deliver touch events on scrolled windows as
+ wxMultiTouchEvents
+
+QAbstractScrollArea leaves touch events to its viewport, so a wxWindow
+backed by a scroll area (wxScrolledCanvas etc.) never received
+wxEVT_TOUCH_* even with wxTOUCH_RAW_EVENTS enabled.  Handle them in
+wxQtScrollArea::event().  Touch nobody handles stays ignored, so Qt still
+synthesizes mouse events from it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/window.cpp | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 5791d7e..c79a7e8 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -149,6 +149,28 @@ wxQtScrollArea::wxQtScrollArea( wxWindowQt *parent, wxWindowQt *handler )
+ 
+ bool wxQtScrollArea::event(QEvent *e)
+ {
++    switch ( e->type() )
++    {
++        case QEvent::TouchBegin:
++        case QEvent::TouchUpdate:
++        case QEvent::TouchEnd:
++        case QEvent::TouchCancel:
++            // QAbstractScrollArea leaves touch to the viewport, where the wx window never
++            // sees it; deliver it as wxMultiTouchEvents.  Unhandled touch is left ignored, so
++            // Qt synthesizes mouse events from it as before.
++            if ( touchEvent(static_cast<QTouchEvent *>(e)) )
++            {
++                e->accept();
++                return true;
++            }
++
++            e->ignore();
++            return false;
++
++        default:
++            break;
++    }
++
+     wxWindowQt* handler = GetHandler();
+     if ( handler && handler->HasCapture() )
+     {
+-- 
+2.54.0 (Apple Git-157)
+
