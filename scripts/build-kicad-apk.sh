@@ -61,6 +61,8 @@ if [ "${KICAD_BUNDLE_LIBS:-1}" != 0 ]; then
          "$OUT/assets/kicad-libs/template" -type f -exec sh -c 'for f; do mv "$f" "$f.kad"; done' _ {} +
     cp "$LIBS_SRC/VERSION" "$OUT/assets/kicad-libs/VERSION"
 fi
+# Qt binary patch: no full backing-store image copy per widget flush (scripts/patch-qtgui.sh)
+"$KA_ROOT/scripts/patch-qtgui.sh"
 QPLUG="$QT_ANDROID_PATH/plugins"
 
 # Build lettering on top of the upstream version: 10.99a, 10.99b, ... (android/BUILD_LETTER)
