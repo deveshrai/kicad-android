@@ -1,0 +1,100 @@
+From adc3075edb2d6a7acc588ec0c1548c8d28dc39a3 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Wed, 4 Nov 2026 23:47:45 +0530
+Subject: [PATCH 26/26] Coalesce pointer motion in the GAL canvas on Android
+
+Android delivers every pointer move (one per display frame) and Qt does not
+drop moves that went stale while the application was busy, as X11, Windows
+and macOS do.  The interactive router's walkaround takes longer than a frame
+per step on a busy board, so the track fell further and further behind the
+pointer.  Keep only the latest motion event and dispatch it once the queued
+input has been read; any other event flushes it first to keep the order.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/draw_panel_gal.cpp      | 45 ++++++++++++++++++++++++++++++++--
+ include/class_draw_panel_gal.h |  8 ++++++
+ 2 files changed, 51 insertions(+), 2 deletions(-)
+
+diff --git a/common/draw_panel_gal.cpp b/common/draw_panel_gal.cpp
+index e8971f95..ff6bdb64 100644
+--- a/common/draw_panel_gal.cpp
++++ b/common/draw_panel_gal.cpp
+@@ -1729,10 +1729,51 @@ void EDA_DRAW_PANEL_GAL::OnEvent( wxEvent& aEvent )
+         SetFocus();
+ 
+     if( !m_eventDispatcher )
++    {
+         aEvent.Skip();
+-    else
+-        m_eventDispatcher->DispatchWxEvent( aEvent );
++        Refresh();
++        return;
++    }
++
++#ifdef __ANDROID__
++    // Android delivers every pointer move (one per display frame, 120 Hz on many devices) and
++    // Qt doesn't drop moves that went stale while the application was busy, as X11, Windows
++    // and macOS do.  A tool that takes longer than a frame per move (the interactive router's
++    // walkaround on a busy board) then falls further and further behind the pointer.  Keep only
++    // the latest move and dispatch it once the queued input has been read; any other event
++    // first flushes the pending move so the order of events is unchanged.
++    if( aEvent.GetEventType() == wxEVT_MOTION )
++    {
++        m_pendingMotion.reset( aEvent.Clone() );
++
++        if( !m_motionFlushQueued )
++        {
++            m_motionFlushQueued = true;
++            CallAfter( [this]() { flushPendingMotion(); } );
++        }
++
++        return;
++    }
++
++    flushPendingMotion();
++#endif
++
++    m_eventDispatcher->DispatchWxEvent( aEvent );
++
++    Refresh();
++}
++
++
++void EDA_DRAW_PANEL_GAL::flushPendingMotion()
++{
++    m_motionFlushQueued = false;
++
++    std::unique_ptr<wxEvent> motion = std::move( m_pendingMotion );
++
++    if( !motion || !m_eventDispatcher )
++        return;
+ 
++    m_eventDispatcher->DispatchWxEvent( *motion );
+     Refresh();
+ }
+ 
+diff --git a/include/class_draw_panel_gal.h b/include/class_draw_panel_gal.h
+index a4dbe59d..8f872f82 100644
+--- a/include/class_draw_panel_gal.h
++++ b/include/class_draw_panel_gal.h
+@@ -509,6 +509,14 @@ protected:
+     /// Set when a size change could not be applied because the GL context was unavailable
+     bool                     m_pendingResize;
+ 
++    /// Mouse motion not yet handed to the tool dispatcher (see OnEvent): only the latest one
++    /// of a burst is dispatched, as desktop platforms coalesce pointer motion themselves
++    std::unique_ptr<wxEvent> m_pendingMotion;
++    bool                     m_motionFlushQueued = false;
++
++    /// Hand the pending motion event, if any, to the tool dispatcher
++    void flushPendingMotion();
++
+     /// Rows at the top of the panel left to the infobars where the backend window would hide them
+     int                      m_overlayInsetTop = 0;
+ 
+-- 
+2.54.0 (Apple Git-157)
+
