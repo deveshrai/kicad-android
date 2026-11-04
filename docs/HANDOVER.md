@@ -91,10 +91,18 @@ Open (next):
    GAL canvas (kicad 0029, wx 0021), verified on the Fold with tools/touchinject (pinch, pan,
    3-finger tap, 1-finger drag/tap). Waiting for the user's hands-on test. Not covered yet: 3D
    viewer canvas, long-press = right click, stylus.
-5. Gerber export: test on an existing board, verify against the Mac build.
+5. Gerber export: test on an existing board, verify against the Mac build. DONE 2026-11-05 on 10.99x: pcbnew
+   Fabrication Outputs > Gerbers + Generate Drill Files on the Fold (rp2350-routed) vs Mac
+   kicad-cli 10.99i (--board-plot-params; drill --excellon-separate-th --excellon-oval-format
+   route): all 9 Gerbers, the job file and PTH/NPTH drill files identical except the version/date
+   header comments; also identical after refilling zones on both (GUI Refill vs --check-zones).
+   Files in build/gerber-cmp. The Fold's in-memory board is refilled (unsaved) after this test.
 6. Blue text-selection handles left on the canvas.
 7. Import/export third-party symbols, footprints and 3D models (test: SnapEDA ESP32-S31-WROOM-1-N16R16V).
 8. UI sweep: fields too big/small or not scaling (check on the Fold's 2.625 scale too).
+   Seen so far (Fold): Plot dialog's top edge sits under the status bar and its bottom buttons
+   are clipped; the drill files dialog draws without a background/frame; Properties + Appearance
+   panels cover the whole canvas on the inner screen at startup.
 9. Desktop GL elsewhere (user, 2026-11-05): find every other place that uses desktop OpenGL and
    make it work on Android. Candidates: 3D model preview in footprint properties / footprint
    wizard (EDA_3D_MODEL_VIEWER, same gl4es path, untested), raytracing renderer (display pass),
