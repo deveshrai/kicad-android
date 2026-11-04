@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99k** (installed on the tablet, plus the USB-C footprint filter fix; the next is l).
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99r** (on the Fold; the tablet has 10.99n; the next is s).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -98,6 +98,31 @@ Open (next):
 - Scripted version on the emulator: work/rp2350 (gen_sch.py, place_pcb.py with R=8 mm rounded
   corners; Freerouting jar in toolchain/freerouting; running it requires the user to start it).
   Findings in docs/experiment-rp2350-board.md.
+
+
+## State at 2026-11-05 (P1 done, P2 in progress)
+- P1 router lag: done in 10.99o/q/r (motion coalescing, QtGui detach NOP, plugin graphics-buffer
+  backing store). Fold profile: router 78% of main thread, repaint 3.5%. Waiting for the user's
+  verdict on feel; next options if still slow: -O3/LTO for the router, other router modes.
+- P2 3D viewer: opens, canvas fails "Failed to load OpenGL via loader" (gladLoaderLoadGL needs
+  libGL.so; renderer is fixed-function GL 2.1). Plan: gl4es (toolchain/gl4es, bc4314d, unmodified;
+  its AGENTS.md forbids AI-written gl4es code) built by scripts/build-gl4es.sh (user granted
+  permission) -> build/install/android/lib/libGL.so (done). Next: add libGL.so to the APK's
+  android-extra-libs (build-kicad-apk.sh), check the glad loader's library names, check wxQt
+  wxGLCanvas (QOpenGLWidget) gives a GLES context on Android, watch for code binding FBO 0
+  (QOpenGLWidget renders into its own FBO), then test on the Fold (pcbnew Alt+3).
+- Fold test setup: project /sdcard/Documents/rp2350-routed (work/rp2350/routed1), set as
+  open_projects in files/settings/kicad/10.99/kicad.json; Ctrl+P opens pcbnew; close the
+  Properties panel (tap 762,367) to see the canvas. Screens: scripts/fold-shot.sh OUT.png [cover].
+  Profiling: /data/local/tmp/simpleperf record --app org.kicad.kicad -g; symbols via the NDK's
+  binary_cache_builder.py -lib build/kicad-android, host simpleperf report --symfs binary_cache.
+- Emulator: the user starts it (`! scripts/emulator.sh`, needs hvf outside the sandbox); kill it
+  with `adb -e emu kill` before every build. API 35, 2560x1600 @320 dpi (scale 2.0).
+- UI sweep notes so far (P8): pcbnew docks fill the Fold's inner screen (no canvas until
+  Properties is closed); project tree icon covers the start of the project name; dock titles
+  tiny everywhere; emulator: frame doesn't fill the screen (bands above/below).
+- Open notes from the board copy: datasheet via Properties panel (file://) and https untested;
+  value field fixed in 10.99m (2pt font root cause) but not yet confirmed by the user.
 
 ## Later phase (after the open list): touch
 - Two-finger pinch/drag: zoom and pan the canvas.
