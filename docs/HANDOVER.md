@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99t** (on the Fold; the tablet has 10.99n; the next is u).
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99u** (on the Fold; the tablet has 10.99n; the next is v).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -86,12 +86,18 @@ Open (next):
 ## User priorities (2026-11-04, in this order)
 1. pcbnew is slow while drawing traces etc.: profile and fix.
 2. 3D viewer.
-3. Zoom at the pointer location (pcbnew zooms on the centre).
+3. Zoom at the pointer location (pcbnew zooms on the centre). DONE in 10.99u (patch 0028: no cursor warping on Android), verified on the Fold with injected wheel events.
 4. Touch: two-finger pinch/drag zoom+pan, one finger select/draw, three-finger tap zoom to fit.
 5. Gerber export: test on an existing board, verify against the Mac build.
 6. Blue text-selection handles left on the canvas.
 7. Import/export third-party symbols, footprints and 3D models (test: SnapEDA ESP32-S31-WROOM-1-N16R16V).
 8. UI sweep: fields too big/small or not scaling (check on the Fold's 2.625 scale too).
+9. Desktop GL elsewhere (user, 2026-11-05): find every other place that uses desktop OpenGL and
+   make it work on Android. Candidates: 3D model preview in footprint properties / footprint
+   wizard (EDA_3D_MODEL_VIEWER, same gl4es path, untested), raytracing renderer (display pass),
+   OpenGL GAL fallback (opengl_gal.cpp, shaders are desktop GLSL; the "Accelerated" GAL is
+   Vulkan here, check what Preferences > Graphics offers), anything using HIDPI_GL_CANVAS,
+   3D viewer screenshot/copy (glReadPixels, FBO save/restore at eda_3d_canvas.cpp:730).
 
 ## RP2350 board experiment
 - Project on the tablet: files/RP2350A-DevBoard (the user is building it by hand).

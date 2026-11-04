@@ -1,0 +1,58 @@
+From aed7fa09fca5c0bc42bba7ab0afe5b706d1d100c Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 03:07:05 +0530
+Subject: [PATCH] Zoom about the pointer on Android
+
+"Center and warp cursor on zoom" (on by default) recentres the view on the
+cursor and then warps the pointer to the centre.  Android apps can't move
+the pointer, so the content jumped away from under it and wheel zoom looked
+centre-based.  Report cursor warping as disabled on Android and hide the
+option in the mouse preferences.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ common/dialogs/panel_mouse_settings.cpp | 6 ++++++
+ include/view/view_controls.h            | 7 +++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/common/dialogs/panel_mouse_settings.cpp b/common/dialogs/panel_mouse_settings.cpp
+index 399e8145..d67be36e 100644
+--- a/common/dialogs/panel_mouse_settings.cpp
++++ b/common/dialogs/panel_mouse_settings.cpp
+@@ -53,6 +53,12 @@ PANEL_MOUSE_SETTINGS::PANEL_MOUSE_SETTINGS( wxWindow* aParent ) :
+     m_scrollWarning->SetBitmap( KiBitmapBundle( BITMAPS::small_warning ) );
+     m_scrollWarning->Hide();
+ 
++#ifdef __ANDROID__
++    // The pointer can't be warped on Android; zoom is always about the pointer
++    // (VIEW_CONTROLS::IsCursorWarpingEnabled).
++    m_checkZoomCenter->Hide();
++#endif
++
+     if( !m_nativeTouchpadGestureAvailable )
+     {
+         m_touchpadModeLabel->Hide();
+diff --git a/include/view/view_controls.h b/include/view/view_controls.h
+index bfd17026..9bfe38b8 100644
+--- a/include/view/view_controls.h
++++ b/include/view/view_controls.h
+@@ -357,7 +357,14 @@ public:
+      */
+     bool IsCursorWarpingEnabled() const
+     {
++#ifdef __ANDROID__
++        // Android apps can't move the pointer.  "Center and warp cursor on zoom" would
++        // recentre the view while the pointer stays put, so the content jumps away from
++        // under it.  Always zoom about the pointer instead.
++        return false;
++#else
+         return m_settings.m_warpCursor;
++#endif
+     }
+ 
+     /**
+-- 
+2.54.0 (Apple Git-157)
+
