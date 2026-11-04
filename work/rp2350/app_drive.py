@@ -10,7 +10,7 @@ The cursor position is tracked in cursor.json between runs.
 import json, os, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SERIAL = 'R5GL8486SDD'
+SERIAL = os.environ.get('KA_SERIAL', 'R5GL8486SDD')
 GRID = 50                  # mils
 STATE = os.path.join(HERE, 'cursor.json')
 SHOTS = os.path.join(HERE, 'drive-shots')

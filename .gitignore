@@ -6,3 +6,4 @@ target/
 .DS_Store
 dist/
 deps-mac/vcpkg_installed/
+toolchain/qtbase-src/

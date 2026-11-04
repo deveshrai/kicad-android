@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99r** (on the Fold; the tablet has 10.99n; the next is s).
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99t** (on the Fold; the tablet has 10.99n; the next is u).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -74,7 +74,7 @@ Open (next):
 6. Older items: menu label "Non+KiCad"; the default template isn't preselected in New Project;
    the Qt file dialog is tiny; the soft keyboard pops up over the canvas; mouse-wheel zoom in
    pcbnew is centre-based; there may be a residual eeschema redraw issue at startup.
-7. 3D viewer: not yet tried on Android. It uses OpenGL (wxGLCanvas / QOpenGLWidget) next to our
+7. 3D viewer: works since 10.99t (gl4es), see State below. Originally: It uses OpenGL (wxGLCanvas / QOpenGLWidget) next to our
    Vulkan GAL, so expect work: GL context on the Android surface, and raytracing performance.
 8. Gerber/drill export (pcbnew Fabrication outputs, and kicad-cli on the device): untested. It
    may just work. TBD when the board gets there. Check output paths on SD card storage too.
@@ -100,17 +100,22 @@ Open (next):
   Findings in docs/experiment-rp2350-board.md.
 
 
-## State at 2026-11-05 (P1 done, P2 in progress)
+## State at 2026-11-05 (P1 done, P2 done)
 - P1 router lag: done in 10.99o/q/r (motion coalescing, QtGui detach NOP, plugin graphics-buffer
   backing store). Fold profile: router 78% of main thread, repaint 3.5%. Waiting for the user's
   verdict on feel; next options if still slow: -O3/LTO for the router, other router modes.
-- P2 3D viewer: opens, canvas fails "Failed to load OpenGL via loader" (gladLoaderLoadGL needs
-  libGL.so; renderer is fixed-function GL 2.1). Plan: gl4es (toolchain/gl4es, bc4314d, unmodified;
-  its AGENTS.md forbids AI-written gl4es code) built by scripts/build-gl4es.sh (user granted
-  permission) -> build/install/android/lib/libGL.so (done). Next: add libGL.so to the APK's
-  android-extra-libs (build-kicad-apk.sh), check the glad loader's library names, check wxQt
-  wxGLCanvas (QOpenGLWidget) gives a GLES context on Android, watch for code binding FBO 0
-  (QOpenGLWidget renders into its own FBO), then test on the Fold (pcbnew Alt+3).
+- P2 3D viewer: WORKS in 10.99t on the Fold (OpenGL renderer: board, copper, mask, silk,
+  holes, STEP component bodies; rotation; 1-8 ms frames). gl4es (toolchain/gl4es, bc4314d,
+  unmodified; its AGENTS.md forbids AI-written gl4es code; scripts/build-gl4es.sh) ships as
+  libGL.so in android-extra-libs; Qt's loader loads it at startup, gl4es picks up the
+  QOpenGLWidget GLES context by itself. KiCad patch 0027: RTLD_NODELETE pin in
+  GL_UTILS::DetectGLBackend (glad dlclose()s libGL.so), and S3D_PLUGIN_MANAGER names the
+  3 plugins on Android (native libs stay in the APK, no dir to scan).
+  3D MODELS ARE NOT SHIPPED (several GB). For the test, the board's 11 models were pushed to
+  files/kicad-data/kicad/3dmodels (build/3dmodels-rp2350; USB_C HRO TYPE-C-31-M-12 and
+  QFN-60 7x7 don't exist in kicad-packages3D). Open idea: download a board's missing models
+  on demand from gitlab kicad-packages3D. Untested: raytracing renderer, 3D model preview in
+  footprint properties, rendering after app suspend/resume.
 - Fold test setup: project /sdcard/Documents/rp2350-routed (work/rp2350/routed1), set as
   open_projects in files/settings/kicad/10.99/kicad.json; Ctrl+P opens pcbnew; close the
   Properties panel (tap 762,367) to see the canvas. Screens: scripts/fold-shot.sh OUT.png [cover].

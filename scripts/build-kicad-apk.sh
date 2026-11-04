@@ -34,6 +34,10 @@ for f in "$KA_ROOT"/build/install/android/lib/libwx_*.so "$KA_ROOT"/deps/vcpkg_i
     stage "$f"; EXTRA+=("$LIBSTAGE/$(basename "$f")")
 done
 
+# gl4es (scripts/build-gl4es.sh): desktop GL 2.1 for the 3D viewer, dlopen()ed by glad
+[ -f "$KA_ROOT/build/install/android/lib/libGL.so" ] || "$KA_ROOT/scripts/build-gl4es.sh"
+stage "$KA_ROOT/build/install/android/lib/libGL.so"; EXTRA+=("$LIBSTAGE/libGL.so")
+
 EXTRA_CSV="$(IFS=,; echo "${EXTRA[*]}")"
 
 # KiCad stock data as APK assets; kiplatform extracts it on first launch (see

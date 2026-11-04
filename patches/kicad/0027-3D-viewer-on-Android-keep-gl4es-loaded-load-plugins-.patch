@@ -1,0 +1,80 @@
+From 350fb3f3a9942bc3701cd1c88cf95b11aabd18bc Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 02:45:14 +0530
+Subject: [PATCH] 3D viewer on Android: keep gl4es loaded, load plugins from
+ the APK
+
+Android has no desktop GL.  The APK ships gl4es as libGL.so, which provides
+GL 2.1 over the GLES context of wxQt's QOpenGLWidget.  glad's loader
+dlclose()s libGL.so right after resolving the entry points, so pin it with
+RTLD_NODELETE.
+
+APK native libraries stay inside the APK, so there is no plugin directory to
+scan.  Name the three 3D plugins and let dlopen() resolve them from the APK.
+
+Assisted-by: Claude Opus 5.5
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ 3d-viewer/3d_cache/3d_plugin_manager.cpp | 12 ++++++++++++
+ common/kicad_gl/gl_utils.cpp             | 14 ++++++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/3d-viewer/3d_cache/3d_plugin_manager.cpp b/3d-viewer/3d_cache/3d_plugin_manager.cpp
+index 1fdacf1a..ca8ce6e6 100644
+--- a/3d-viewer/3d_cache/3d_plugin_manager.cpp
++++ b/3d-viewer/3d_cache/3d_plugin_manager.cpp
+@@ -194,6 +194,18 @@ void S3D_PLUGIN_MANAGER::loadPlugins( void )
+     }
+ #endif
+ 
++#ifdef __ANDROID__
++    // The plugins are packaged as APK native libraries, which stay inside the APK (no
++    // directory to scan).  dlopen() resolves a bare soname from the APK, so name them.
++    searchpaths.clear();
++
++    for( const wxString& name : { wxS( "libs3d_plugin_oce.so" ), wxS( "libs3d_plugin_vrml.so" ),
++                                  wxS( "libs3d_plugin_idf.so" ) } )
++    {
++        pluginlist.push_back( name );
++    }
++#endif
++
+     std::list< wxString >::iterator sPL = searchpaths.begin();
+     std::list< wxString >::iterator ePL = searchpaths.end();
+ 
+diff --git a/common/kicad_gl/gl_utils.cpp b/common/kicad_gl/gl_utils.cpp
+index 6fbbc10c..6ea0d90e 100644
+--- a/common/kicad_gl/gl_utils.cpp
++++ b/common/kicad_gl/gl_utils.cpp
+@@ -20,6 +20,10 @@
+ #include <wx/platform.h>
+ #include <wx/version.h>
+ 
++#ifdef __ANDROID__
++#include <dlfcn.h>
++#endif
++
+ #if ( defined( __unix__ ) and not defined( __APPLE__ ) and not defined( __ANDROID__ ) )
+     #if wxHAS_EGL or wxHAS_GLX
+         #if wxHAS_EGL
+@@ -71,6 +75,16 @@ wxString GL_UTILS::DetectGLBackend( wxGLCanvas* aCanvas )
+     #endif // !wxCHECK_VERSION( 3, 3, 2 )
+ #endif // __WXGTK__
+ 
++#ifdef __ANDROID__
++    // Android has no desktop GL.  The APK ships gl4es as libGL.so (GL 2.1 over the GLES
++    // context of wxQt's QOpenGLWidget).  glad's loader dlopen()s it and dlclose()s it again
++    // right after resolving the entry points, which on bionic would unmap gl4es under the
++    // resolved pointers.  Pin it for the life of the process.
++    static void* gl4es = dlopen( "libGL.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE );
++
++    backend = gl4es ? wxString( "gl4es/GLES" ) : wxString( "none (libGL.so missing)" );
++#endif
++
+     return backend;
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+
