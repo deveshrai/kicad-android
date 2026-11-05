@@ -146,7 +146,7 @@ Open (next):
   Properties panel (tap 762,367) to see the canvas. Screens: scripts/fold-shot.sh OUT.png [cover].
   Profiling: /data/local/tmp/simpleperf record --app org.kicad.kicad -g; symbols via the NDK's
   binary_cache_builder.py -lib build/kicad-android, host simpleperf report --symfs binary_cache.
-- Emulator: the user starts it (`! scripts/emulator.sh`, needs hvf outside the sandbox); kill it
+- Emulator: `scripts/emulator.sh` (now boots from the agent shell too; earlier it needed `!`); kill it
   with `adb -e emu kill` before every build. API 35, 2560x1600 @320 dpi (scale 2.0).
 - UI sweep notes so far (P8): pcbnew docks fill the Fold's inner screen (no canvas until
   Properties is closed); project tree icon covers the start of the project name; dock titles
