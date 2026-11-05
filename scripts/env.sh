@@ -34,7 +34,7 @@ export QT_ANDROID_PATH="$KA_TOOLCHAIN/qt/$QT_VERSION/android_arm64_v8a"
 export VCPKG_ROOT="$KA_TOOLCHAIN/vcpkg"
 export VCPKG_DISABLE_METRICS=1
 
-export PATH="$KA_TOOLCHAIN/autotools/bin:$KA_TOOLCHAIN/venv/bin:$HOME/.cargo/bin:$ANDROID_HOME/platform-tools:$VCPKG_ROOT:$PATH"
+export PATH="$KA_TOOLCHAIN/gh-dl/gh_2.62.0_macOS_arm64/bin:$KA_TOOLCHAIN/autotools/bin:$KA_TOOLCHAIN/venv/bin:$HOME/.cargo/bin:$ANDROID_HOME/platform-tools:$VCPKG_ROOT:$PATH"
 
 # vcpkg autotools-based ports need a host pkg-config (built by scripts/install-autotools.sh)
 export PKG_CONFIG="$KA_TOOLCHAIN/autotools/bin/pkgconf"
