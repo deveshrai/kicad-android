@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99y** (emulator; the Fold has 10.99x, the tablet 10.99n; the next is z).
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99z** = first public release (io.github.deveshrai.kicadandroid, release-signed with ~/.android/kicad-android-release.jks; GitHub deveshrai/kicad-android). Dev builds keep org.kicad.kicad (the Fold has 10.99x, the tablet 10.99n). Next letter: aa.
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -189,3 +189,9 @@ adb `input` is single-touch only.  tools/touchinject/build.sh builds Touch.java 
 pushes it; run `adb shell CLASSPATH=/data/local/tmp/touch.dex app_process / Touch <cmd>` with
 pinch CX CY FROM TO | pan X Y DX DY | tap3 X Y | drag X Y DX DY (display pixels).  It injects
 through InputManager(Global).injectInputEvent with the shell's permission, like scrcpy.
+
+## Publishing a release
+KA_APP_ID=io.github.deveshrai.kicadandroid KA_APP_LABEL="KiCad Android (unofficial)" \
+KA_RELEASE_KEYSTORE=~/.android/kicad-android-release.jks KICAD_APK_MODE=release scripts/build-kicad-apk.sh
+gives build/KiCad-Android-unofficial-<version>.apk.  Keep the keystore and its .pass file backed up:
+updates must be signed with the same key.  Then tag android-<version> and `gh release create`.

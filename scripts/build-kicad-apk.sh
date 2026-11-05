@@ -169,11 +169,12 @@ GRADLE_TASK=assembleDebug
 APK="$(find "$OUT/build/outputs/apk" -name "*.apk" | head -1)"
 if [ -n "${KA_RELEASE_KEYSTORE:-}" ]; then
     # Published builds: a release key kept outside the repository.  The password is read from
-    # the file next to it (KA_RELEASE_KEYSTORE.pass), never from the command line.
+    # the file next to it (KA_RELEASE_KEYSTORE.pass, one line ending in a newline; the key uses
+    # the same password), never from the command line.
     SIGNED="$KA_ROOT/build/${KA_APP_LABEL// /-}-$VERSION_NAME.apk"
     SIGNED="${SIGNED//[()]/}"
     "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$KA_RELEASE_KEYSTORE" \
-        --ks-pass "file:$KA_RELEASE_KEYSTORE.pass" --key-pass "file:$KA_RELEASE_KEYSTORE.pass" \
+        --ks-pass "file:$KA_RELEASE_KEYSTORE.pass" \
         --out "$SIGNED" "$APK"
 else
     SIGNED="$KA_ROOT/build/KiCad-debug.apk"
