@@ -1,0 +1,48 @@
+From 71b0f1361b3ca8e0aa9c20f683f671cf4e1324b6 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 20:31:00 +0530
+Subject: [PATCH] qt: don't use the painter when QPainter::begin() failed in
+ paint events
+
+QtHandlePaintEvent() set the antialiasing render hint before checking
+whether begin() succeeded.  begin() fails e.g. for a paint event sent before
+the window has a backing store, and setting render hints on the inactive
+painter crashed in QRasterPaintEngine::renderHintsChanged().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/window.cpp | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index c79a7e8..6364bc7 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1568,14 +1568,17 @@ bool wxWindowQt::QtHandlePaintEvent ( QWidget *handler, QPaintEvent *event )
+     // itself otherwise.
+     const bool ok = m_qtPainter->begin( widget );
+ 
+-    if (m_qtPainter->device()->depth() > 1)
+-    {
+-        m_qtPainter->setRenderHints(QPainter::Antialiasing,
+-                                    true);
+-    }
+-
++    // Only touch the painter once begin() succeeded: it fails e.g. for a paint
++    // event sent before the window has a backing store, and setting render
++    // hints on an inactive painter dereferences its missing engine state.
+     if ( ok )
+     {
++        if (m_qtPainter->device()->depth() > 1)
++        {
++            m_qtPainter->setRenderHints(QPainter::Antialiasing,
++                                        true);
++        }
++
+         bool handled;
+ 
+         auto qtRegion = event->region();
+-- 
+2.54.0 (Apple Git-157)
+

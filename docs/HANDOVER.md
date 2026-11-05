@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99x** (on the Fold; the tablet has 10.99n; the next is y).
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99y** (emulator; the Fold has 10.99x, the tablet 10.99n; the next is z).
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -40,7 +40,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   Adreno 840 (Qualcomm Vulkan; the tablet is Mali), inner 2448x1848 + cover 1248x1972 @ 420 dpi
   (scale 2.625). Attached 2026-11-04 for the priority list below.
 - Emulator: AVD KiCad_Tablet35 (API 35, 8 GB, host GPU). The user starts it with
-  `! /Users/devesh/projects/KiCadAndroid0/scripts/emulator.sh`.
+  `! scripts/emulator.sh` (since 2026-11-05 it also boots from the agent's own shell).
 - Testing quirks: on the tablet, `input tap` works and Ctrl+E opens eeschema from the project
   manager. `input text` needs the chooser search field to have focus (reopen the chooser with A).
   Avoid tapping the bottom-left or bottom-right corners and avoid KEYCODE_BACK when no keyboard
@@ -97,7 +97,15 @@ Open (next):
    route): all 9 Gerbers, the job file and PTH/NPTH drill files identical except the version/date
    header comments; also identical after refilling zones on both (GUI Refill vs --check-zones).
    Files in build/gerber-cmp. The Fold's in-memory board is refilled (unsaved) after this test.
-6. Blue text-selection handles left on the canvas.
+6. Blue text-selection handles left on the canvas. 10.99y: qtbase patch 0003 hides them when the
+   focus object or focus window goes away (tapping the Vulkan canvas window, closing a dialog);
+   reproduced once on the emulator before the fix, could not make the handle appear afterwards.
+   Needs a hands-on check. Also found and fixed: intermittent SIGSEGV opening an editor
+   (wx patch 0022, painter used after a failed QPainter::begin in QtHandlePaintEvent).
+   New bugs seen on the emulator: New Project via the Android save picker creates
+   ".kicad_pro.kicad_pro" (typed name lost); adb `input text abcdef` into a wx text field gave
+   "bcdefbcdefe" (emulator IME? the Fold typed correctly); the soft keyboard covers the focused
+   field (the window doesn't pan).
 7. Import/export third-party symbols, footprints and 3D models (test: SnapEDA ESP32-S31-WROOM-1-N16R16V).
 8. UI sweep: fields too big/small or not scaling (check on the Fold's 2.625 scale too).
    Seen so far (Fold): Plot dialog's top edge sits under the status bar and its bottom buttons

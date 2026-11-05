@@ -1,0 +1,51 @@
+From 1f1b64577e85e8f19209800bf3d65642e5c7ac85 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 5 Nov 2026 20:31:00 +0530
+Subject: [PATCH] android: hide the text handles when focus leaves for no focus
+ object
+
+updateSelectionHandles() returned early, leaving the cursor/selection
+handles on screen, when there was no focus object or no focus window any
+more: e.g. after tapping a QWindow-based view that holds no widgets, or
+when the dialog with the editor closed.  Hide them in those cases.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ .../platforms/android/qandroidinputcontext.cpp   | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/plugins/platforms/android/qandroidinputcontext.cpp b/src/plugins/platforms/android/qandroidinputcontext.cpp
+index a08c3e49..ba9fcf31 100644
+--- a/src/plugins/platforms/android/qandroidinputcontext.cpp
++++ b/src/plugins/platforms/android/qandroidinputcontext.cpp
+@@ -625,12 +625,24 @@ void QAndroidInputContext::updateSelectionHandles()
+         return;
+     }
+     static bool noHandles = qEnvironmentVariableIntValue("QT_QPA_NO_TEXT_HANDLES");
+-    if (noHandles || !m_focusObject)
++    if (noHandles)
+         return;
+ 
++    // Focus moved to something without a focus object (e.g. a QWindow with no
++    // widgets): the handles of the editor that had it would stay on screen.
++    if (!m_focusObject) {
++        m_handleMode = Hidden;
++        QtAndroidInput::updateHandles(Hidden);
++        return;
++    }
++
+     QPlatformWindow *qPlatformWindow = focusWindowHandle();
+-    if (!qPlatformWindow)
++    if (!qPlatformWindow) {
++        // No window holds the focus object any more (e.g. its dialog closed)
++        m_handleMode = Hidden;
++        QtAndroidInput::updateHandles(Hidden);
+         return;
++    }
+ 
+     if (isImhNoTextHandlesSet()) {
+         QtAndroidInput::updateHandles(Hidden);
+-- 
+2.54.0 (Apple Git-157)
+
