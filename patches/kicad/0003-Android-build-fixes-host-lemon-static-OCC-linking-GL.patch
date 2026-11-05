@@ -1,7 +1,7 @@
 From 3239e7e90ee8557b9717833692375ec23d2007bf Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 19:28:29 +0530
-Subject: [PATCH 03/26] Android build fixes: host lemon, static OCC linking, GL
+Subject: [PATCH 03/29] Android build fixes: host lemon, static OCC linking, GL
  loader, FreeType include, thread affinity
 
 Assisted-by: Claude Code

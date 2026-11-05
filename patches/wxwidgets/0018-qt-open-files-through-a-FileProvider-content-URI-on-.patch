@@ -1,7 +1,7 @@
-From 2f672b49d671d768c3f68e1b6a6c0dec969a500b Mon Sep 17 00:00:00 2001
+From d2bac22bea6153a97e0a8d33874817a52564fd66 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 3 Nov 2026 12:35:14 +0530
-Subject: [PATCH 18/18] qt: open files through a FileProvider content URI on
+Subject: [PATCH 18/22] qt: open files through a FileProvider content URI on
  Android
 
 wxLaunchDefaultApplication() used QDesktopServices with a file:// URI,

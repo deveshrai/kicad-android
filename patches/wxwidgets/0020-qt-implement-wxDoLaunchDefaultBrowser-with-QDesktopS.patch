@@ -1,7 +1,8 @@
-From f979f4bf68df5775a1186cbaea2cb3363fd4cd6b Mon Sep 17 00:00:00 2001
+From 3171281a4ac338b627c1f863c584d58ae72149c4 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 3 Nov 2026 13:28:13 +0530
-Subject: [PATCH] qt: implement wxDoLaunchDefaultBrowser with QDesktopServices
+Subject: [PATCH 20/22] qt: implement wxDoLaunchDefaultBrowser with
+ QDesktopServices
 
 The generic implementation looks for a command to run, which doesn't exist
 on Android.  Open local files with wxLaunchDefaultApplication() (a content

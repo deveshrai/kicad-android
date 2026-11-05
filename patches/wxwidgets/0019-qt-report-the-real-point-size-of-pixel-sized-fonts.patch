@@ -1,7 +1,7 @@
-From 7fb48c3331d09cb7a83f98ef925bf476e2b46b4a Mon Sep 17 00:00:00 2001
+From c2361977777ac934af6cccbfc3e9d4e44eb94be7 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 3 Nov 2026 13:12:07 +0530
-Subject: [PATCH] qt: report the real point size of pixel-sized fonts
+Subject: [PATCH 19/22] qt: report the real point size of pixel-sized fonts
 
 QFont::pointSizeF() is -1 for fonts sized in pixels, which Qt's default
 application font is on Android.  wxSTC took that as its default size and

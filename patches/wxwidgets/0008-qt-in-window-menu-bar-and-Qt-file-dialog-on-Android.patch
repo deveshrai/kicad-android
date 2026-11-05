@@ -1,7 +1,7 @@
 From 2bbda0cd1024cfa38fa491ba3c37c2e14fdffb36 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 20:52:19 +0530
-Subject: [PATCH 8/8] qt: in-window menu bar and Qt file dialog on Android
+Subject: [PATCH 08/22] qt: in-window menu bar and Qt file dialog on Android
 
 Android's native menu bar is the action bar overflow menu, which hides
 application menus; use a regular in-window QMenuBar. The native file dialog

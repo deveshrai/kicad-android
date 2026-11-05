@@ -1,8 +1,8 @@
-From 71b0f1361b3ca8e0aa9c20f683f671cf4e1324b6 Mon Sep 17 00:00:00 2001
+From d80d6cafbdda362a9303fa0d78663d8445604284 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 5 Nov 2026 20:31:00 +0530
-Subject: [PATCH] qt: don't use the painter when QPainter::begin() failed in
- paint events
+Subject: [PATCH 22/22] qt: don't use the painter when QPainter::begin() failed
+ in paint events
 
 QtHandlePaintEvent() set the antialiasing render hint before checking
 whether begin() succeeded.  begin() fails e.g. for a paint event sent before

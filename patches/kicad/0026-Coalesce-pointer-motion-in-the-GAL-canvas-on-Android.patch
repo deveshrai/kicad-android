@@ -1,7 +1,7 @@
-From adc3075edb2d6a7acc588ec0c1548c8d28dc39a3 Mon Sep 17 00:00:00 2001
+From 8a9d2431fb1870f1e429e8f7142323412ec48a34 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Wed, 4 Nov 2026 23:47:45 +0530
-Subject: [PATCH 26/26] Coalesce pointer motion in the GAL canvas on Android
+Subject: [PATCH 26/29] Coalesce pointer motion in the GAL canvas on Android
 
 Android delivers every pointer move (one per display frame) and Qt does not
 drop moves that went stale while the application was busy, as X11, Windows

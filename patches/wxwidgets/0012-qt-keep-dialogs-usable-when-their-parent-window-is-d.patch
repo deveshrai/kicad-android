@@ -1,7 +1,8 @@
-From c04277df79578fae6d7af0ce8c4b7a3590fc3172 Mon Sep 17 00:00:00 2001
+From 59f02b6db1b8128ed7a75bd000eedc476f994f22 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 17:23:22 +0530
-Subject: [PATCH] qt: keep dialogs usable when their parent window is disabled
+Subject: [PATCH 12/22] qt: keep dialogs usable when their parent window is
+ disabled
 
 Qt disables every descendant widget, separate windows included, when a
 widget is disabled. Dialogs whose parent frame was disabled (e.g. a

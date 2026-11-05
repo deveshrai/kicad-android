@@ -1,7 +1,7 @@
 From ab1cbb4c45505dd198c20895c8e4d0b5e84532dd Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 18:16:49 +0530
-Subject: [PATCH 2/8] qt: build the backend-independent wxWebView library for
+Subject: [PATCH 02/22] qt: build the backend-independent wxWebView library for
  wxQt
 
 wxQt has no built-in web engine, but applications can register one with

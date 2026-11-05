@@ -1,7 +1,7 @@
-From f93e779e558a162e2a56c8bc37f2fd0dc51fef4b Mon Sep 17 00:00:00 2001
+From 78e1b77524c81c52f99337d83540367af4d92d6d Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 22:01:51 +0530
-Subject: [PATCH] qt: route QDialog::reject() (Escape) through
+Subject: [PATCH 16/22] qt: route QDialog::reject() (Escape) through
  wxDialog::Close()
 
 QDialog hides itself on an unprocessed Escape key behind wx's back, so a

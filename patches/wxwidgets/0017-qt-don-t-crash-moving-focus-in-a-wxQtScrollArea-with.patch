@@ -1,7 +1,7 @@
-From a0478eec420fb4ea152626fde16dd165eb526a62 Mon Sep 17 00:00:00 2001
+From 9810d53025ddb5de70646513a5ff6970cdce9da6 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 3 Nov 2026 12:35:13 +0530
-Subject: [PATCH 17/18] qt: don't crash moving focus in a wxQtScrollArea
+Subject: [PATCH 17/22] qt: don't crash moving focus in a wxQtScrollArea
  without a widget
 
 QScrollArea::focusNextPrevChild() calls ensureWidgetVisible(), which

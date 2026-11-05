@@ -1,7 +1,7 @@
-From 06f710c9ab963968d67676e69e6a691a65cbf679 Mon Sep 17 00:00:00 2001
+From ac41f5020013f93195d939dc869dcb00ab71c126 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 19:03:24 +0530
-Subject: [PATCH] qt: keep WXK_RETURN etc. in char events on Android
+Subject: [PATCH 15/22] qt: keep WXK_RETURN etc. in char events on Android
 
 Android reports Return with "\n" as its text, so the char event got key
 code 10 (Ctrl-J) instead of WXK_RETURN and Return-bound actions never

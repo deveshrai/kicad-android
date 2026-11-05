@@ -1,8 +1,8 @@
-From e2e2538f774890d2ee9d3ef4d4c7e382d664c8dc Mon Sep 17 00:00:00 2001
+From b6a61633ff1cd614b637ab480352de6236b64f18 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 16:02:30 +0530
-Subject: [PATCH] qt: create all status bar panes before adding them to the
- layout
+Subject: [PATCH 10/22] qt: create all status bar panes before adding them to
+ the layout
 
 Adding a pane lays the QStatusBar out and sends resize events
 synchronously; a handler asking for a field rect then indexed panes that

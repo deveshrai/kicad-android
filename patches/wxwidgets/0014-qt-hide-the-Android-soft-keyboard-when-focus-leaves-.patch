@@ -1,8 +1,8 @@
-From 95fb1a8cdfd817232ac8ada34be2c5ce3f617cf0 Mon Sep 17 00:00:00 2001
+From 0cf2a6b20684286627a59a494f45bae3c02a89ad Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 17:51:12 +0530
-Subject: [PATCH] qt: hide the Android soft keyboard when focus leaves text
- input
+Subject: [PATCH 14/22] qt: hide the Android soft keyboard when focus leaves
+ text input
 
 Qt leaves the soft keyboard up when focus moves from a text field to a
 widget that takes no text input, e.g. back to a canvas after a dialog

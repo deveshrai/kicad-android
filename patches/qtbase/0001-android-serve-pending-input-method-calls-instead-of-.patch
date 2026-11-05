@@ -1,7 +1,7 @@
-From 01fff3904bd88e0da24c49f268c9edeeb81e4eb6 Mon Sep 17 00:00:00 2001
+From bf012dfecd9a12d3ee5fe3a39f40f3a1b3551971 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 2 Nov 2026 12:07:25 +0530
-Subject: [PATCH 1/2] android: serve pending input-method calls instead of
+Subject: [PATCH 1/3] android: serve pending input-method calls instead of
  aborting on a surface deadlock protector conflict
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

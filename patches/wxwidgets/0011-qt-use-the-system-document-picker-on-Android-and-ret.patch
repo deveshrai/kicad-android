@@ -1,8 +1,8 @@
-From 7166ae6bb6d96c7c6fa5961b5e8e926df9f10e80 Mon Sep 17 00:00:00 2001
+From b507954478a2953c1521aef3612e61a6d0e9a542 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 16:47:47 +0530
-Subject: [PATCH] qt: use the system document picker on Android and return
- paths
+Subject: [PATCH 11/22] qt: use the system document picker on Android and
+ return paths
 
 Map content:// URIs of the device's own storage (external storage and
 downloads providers) back to file system paths, which applications using
