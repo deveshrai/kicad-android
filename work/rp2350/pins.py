@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from sexpr import parse, find, find1
-LIB = os.path.expanduser('/Users/devesh/projects/KiCadAndroid0/build/kicad-libs-10.0.8/stage-10.0.8/symbols')
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../build/kicad-libs-10.0.8/stage-10.0.8/symbols')
 def load(lib, name):
     tree = parse(open(f'{LIB}/{lib}.kicad_symdir/{name}.kicad_sym').read())
     return find1(tree, 'symbol')

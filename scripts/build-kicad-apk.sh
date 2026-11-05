@@ -101,11 +101,11 @@ cat > "$OUT/deployment-settings.json" <<EOF
    "abi": "$ABI",
    "architectures": { "$ABI": "aarch64-linux-android" },
    "android-extra-libs": "$EXTRA_CSV",
-   "android-package-name": "org.kicad.kicad",
+   "android-package-name": "$KA_APP_ID",
    "android-version-name": "$VERSION_NAME",
    "android-version-code": "$VERSION_CODE",
    "android-package-source-directory": "$KA_ROOT/android/package",
-   "android-app-name": "KiCad",
+   "android-app-name": "$KA_APP_LABEL",
    "android-min-sdk-version": "$KA_ANDROID_API",
    "android-target-sdk-version": "35",
    "android-legacy-packaging": false,
@@ -167,6 +167,17 @@ GRADLE_TASK=assembleDebug
 ( cd "$OUT" && ./gradlew -q "$GRADLE_TASK" )
 
 APK="$(find "$OUT/build/outputs/apk" -name "*.apk" | head -1)"
-"$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$HOME/.android/debug.keystore" \
-    --ks-pass pass:android --key-pass pass:android --out "$KA_ROOT/build/KiCad-debug.apk" "$APK" 2>/dev/null
-ls -la "$KA_ROOT/build/KiCad-debug.apk"
+if [ -n "${KA_RELEASE_KEYSTORE:-}" ]; then
+    # Published builds: a release key kept outside the repository.  The password is read from
+    # the file next to it (KA_RELEASE_KEYSTORE.pass), never from the command line.
+    SIGNED="$KA_ROOT/build/${KA_APP_LABEL// /-}-$VERSION_NAME.apk"
+    SIGNED="${SIGNED//[()]/}"
+    "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$KA_RELEASE_KEYSTORE" \
+        --ks-pass "file:$KA_RELEASE_KEYSTORE.pass" --key-pass "file:$KA_RELEASE_KEYSTORE.pass" \
+        --out "$SIGNED" "$APK"
+else
+    SIGNED="$KA_ROOT/build/KiCad-debug.apk"
+    "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks "$HOME/.android/debug.keystore" \
+        --ks-pass pass:android --key-pass pass:android --out "$SIGNED" "$APK" 2>/dev/null
+fi
+ls -la "$SIGNED"

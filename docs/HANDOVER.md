@@ -3,7 +3,7 @@
 Read this first after a context compaction. PLAN.md has the long-form history.
 
 ## Repos and layout
-- Top level `/Users/devesh/projects/KiCadAndroid0` (git). Tags: `android-10.99b`, `android-10.99d`.
+- Top level: this repository (git). Tags: `android-10.99b`, `android-10.99d`.
 - `kicad/` is a separate git repo on branch `android`. Export patches after each commit:
   `cd kicad && rm -f ../patches/kicad/*.patch && git format-patch -q 113c71d5 -o ../patches/kicad/`
 - `toolchain/wxWidgets` is a git repo on branch `kicad-android`. Export patches with

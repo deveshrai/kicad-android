@@ -1,7 +1,7 @@
 (export
 	(version "E")
 	(design
-		(source "/Users/devesh/projects/KiCadAndroid0/work/rp2350/out/rp2350_ili9341.kicad_sch")
+		(source "rp2350_ili9341.kicad_sch")
 		(date "2026-11-01T20:26:07")
 		(tool "Eeschema 10.99.0-unknown-i")
 		(sheet

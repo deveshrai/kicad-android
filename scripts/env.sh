@@ -16,6 +16,17 @@ export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
 export KA_ANDROID_API=29
 export KA_ANDROID_ABI=arm64-v8a
 
+# Application identity.  Published builds are unofficial and must not use the KiCad project's
+# own namespace; development builds on the test devices still use org.kicad.kicad.
+export KA_APP_ID="${KA_APP_ID:-org.kicad.kicad}"
+export KA_APP_LABEL="${KA_APP_LABEL:-KiCad}"
+
+# NDK linkers for the Rust platform crate (platform/), instead of absolute paths in .cargo/config
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android${KA_ANDROID_API}-clang"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android${KA_ANDROID_API}-clang"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_AR="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+
 export QT_VERSION="6.12.0"
 export QT_HOST_PATH="$KA_TOOLCHAIN/qt/$QT_VERSION/macos"
 export QT_ANDROID_PATH="$KA_TOOLCHAIN/qt/$QT_VERSION/android_arm64_v8a"

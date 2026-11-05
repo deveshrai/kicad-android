@@ -7,3 +7,17 @@ target/
 dist/
 deps-mac/vcpkg_installed/
 toolchain/qtbase-src/
+# RP2350 experiment scratch output (the published board is work/rp2350/routed1.kicad_pcb + out/)
+work/rp2350/__pycache__/
+work/rp2350/drive-shots/
+work/rp2350/*.rpt
+work/rp2350/*.log
+work/rp2350/*.dsn
+work/rp2350/*.ses
+work/rp2350/net.xml
+work/rp2350/cursor.json
+work/rp2350/app_plan.json
+work/rp2350/app-created.kicad_sch
+work/rp2350/from-app.kicad_pcb
+work/rp2350/placed.kicad_pcb
+work/rp2350/rot*.kicad_pcb

@@ -31,7 +31,7 @@ LOG_PID=$!
 # Memory of the KiCad process every 10 s
 (
     while true; do
-        P=$("${ADB[@]}" shell pidof org.kicad.kicad 2>/dev/null | tr -d '\r')
+        P=$("${ADB[@]}" shell pidof "$KA_APP_ID" 2>/dev/null | tr -d '\r')
         if [ -n "$P" ]; then
             echo "$(date +%T) pid=$P $("${ADB[@]}" shell dumpsys meminfo "$P" 2>/dev/null | grep -E 'TOTAL PSS|TOTAL RSS' | tr -s ' ' | tr '\n' ' ')"
         else

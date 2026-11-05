@@ -9,7 +9,7 @@ import sys, os, uuid, copy
 sys.path.insert(0, os.path.dirname(__file__))
 from sexpr import parse, dump, find, find1, Str
 
-LIB = '/Users/devesh/projects/KiCadAndroid0/build/kicad-libs-10.0.8/stage-10.0.8/symbols'
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../build/kicad-libs-10.0.8/stage-10.0.8/symbols')
 PROJECT = 'rp2350_ili9341'
 ROOT = str(uuid.uuid4())
 POWER_NETS = {'GND': 'power:GND', '+3V3': 'power:+3V3', 'VBUS': 'power:VBUS', '+1V1': 'power:+1V1'}
