@@ -1,0 +1,332 @@
+From ff0c95a363d7cdb9c3e0d438dc9acf95d87bc921 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 6 Nov 2026 21:48:24 +0530
+Subject: [PATCH] Build the router core for Android
+
+Android has no java.awt, log4j-core, virtual threads or JMX, and the app must not
+send usage data.  For the Android build:
+- board statistics use a small Rectangle2D.Float of their own
+- ConductionArea keeps its java.awt fill cache in an Object field and has a fixed
+  serialVersionUID, because board hashing serializes the board, and serialization
+  reflects on field and method types
+- FRLogger logs to standard output (logcat) through a two-class stand-in for Log4j
+- post-load board processing runs on a plain daemon thread
+- the analytics client is never created
+- javadoc-only imports of GUI classes are dropped, so the core builds without the GUI
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../freerouting/analytics/FRAnalytics.java    |  3 +-
+ .../board/model/items/ConductionArea.java     | 12 +++-
+ .../core/scoring/BoardStatistics.java         |  3 +-
+ .../core/scoring/BoardStatisticsBoard.java    |  2 +-
+ .../geometry/planar/Rectangle2D.java          | 48 ++++++++++++++++
+ .../java/app/freerouting/logger/FRLogger.java |  4 +-
+ .../app/freerouting/logger/LogManager.java    | 11 ++++
+ .../java/app/freerouting/logger/Logger.java   | 56 +++++++++++++++++++
+ .../freerouting/management/BoardManager.java  |  2 -
+ .../management/HeadlessBoardManager.java      | 14 +++--
+ .../settings/sources/GuiSettingsSource.java   |  1 -
+ 11 files changed, 139 insertions(+), 17 deletions(-)
+ create mode 100644 src/main/java/app/freerouting/geometry/planar/Rectangle2D.java
+ create mode 100644 src/main/java/app/freerouting/logger/LogManager.java
+ create mode 100644 src/main/java/app/freerouting/logger/Logger.java
+
+diff --git a/src/main/java/app/freerouting/analytics/FRAnalytics.java b/src/main/java/app/freerouting/analytics/FRAnalytics.java
+index af61787..bf5b07a 100644
+--- a/src/main/java/app/freerouting/analytics/FRAnalytics.java
++++ b/src/main/java/app/freerouting/analytics/FRAnalytics.java
+@@ -193,7 +193,8 @@ public final class FRAnalytics {
+   public static void setAccessKey(String libraryVersion, String key) {
+     // analytics = new SegmentClient(libraryVersion, key);
+     // analytics = new BigQueryClient(libraryVersion, key);
+-    analytics = new FreeroutingAnalyticsClient(libraryVersion, key);
++    // Android: never send usage data from the app.
++    analytics = null;
+   }
+ 
+   /**
+diff --git a/src/main/java/app/freerouting/board/model/items/ConductionArea.java b/src/main/java/app/freerouting/board/model/items/ConductionArea.java
+index 0dfb3d5..1de28c6 100644
+--- a/src/main/java/app/freerouting/board/model/items/ConductionArea.java
++++ b/src/main/java/app/freerouting/board/model/items/ConductionArea.java
+@@ -39,8 +39,14 @@ public class ConductionArea extends ObstacleArea implements Connectable {
+     this.clearDerivedData();
+   }
+ 
++  // Fixed, so serialization does not compute one from the methods, whose java.awt types do not
++  // exist on Android.
++  private static final long serialVersionUID = 1L;
++
+   private transient int cachedBoardRevision = -1;
+-  private transient java.awt.geom.Area cachedBoardFillArea;
++  // Object, not java.awt.geom.Area: serialization reflects on field types, and Android has no
++  // java.awt.
++  private transient Object cachedBoardFillArea;
+ 
+   /** Creates a new instance of ConductionArea. */
+   public ConductionArea(
+@@ -104,7 +110,7 @@ public class ConductionArea extends ObstacleArea implements Connectable {
+    */
+   public java.awt.geom.Area getDetailedFillArea() {
+     warmDetailedFillCache();
+-    return cachedBoardFillArea;
++    return (java.awt.geom.Area) cachedBoardFillArea;
+   }
+ 
+   /**
+@@ -115,7 +121,7 @@ public class ConductionArea extends ObstacleArea implements Connectable {
+    */
+   public java.awt.geom.Area getDetailedFillArea(double maxClearanceLookupBoard, int layerIndex) {
+     ensureDetailedFillCache(maxClearanceLookupBoard, layerIndex);
+-    return cachedBoardFillArea;
++    return (java.awt.geom.Area) cachedBoardFillArea;
+   }
+ 
+   private void ensureDetailedFillCache(double maxClearanceLookupBoard, int layerIndex) {
+diff --git a/src/main/java/app/freerouting/core/scoring/BoardStatistics.java b/src/main/java/app/freerouting/core/scoring/BoardStatistics.java
+index 8740f93..4e4a257 100644
+--- a/src/main/java/app/freerouting/core/scoring/BoardStatistics.java
++++ b/src/main/java/app/freerouting/core/scoring/BoardStatistics.java
+@@ -16,7 +16,6 @@ import app.freerouting.datastructures.UndoableObjects;
+ import app.freerouting.geometry.planar.FloatPoint;
+ import app.freerouting.geometry.planar.Line;
+ import app.freerouting.geometry.planar.Polyline;
+-import app.freerouting.gui.workspace.progress.RatsNest;
+ import app.freerouting.io.FileFormat;
+ import app.freerouting.logger.FRLogger;
+ import app.freerouting.rules.BoardRules;
+@@ -28,7 +27,7 @@ import app.freerouting.settings.sources.DefaultSettings;
+ import app.freerouting.util.TextManager;
+ import app.freerouting.util.gson.GsonProvider;
+ import com.google.gson.annotations.SerializedName;
+-import java.awt.geom.Rectangle2D;
++import app.freerouting.geometry.planar.Rectangle2D;
+ import java.io.Serializable;
+ import java.nio.charset.StandardCharsets;
+ import java.util.ArrayList;
+diff --git a/src/main/java/app/freerouting/core/scoring/BoardStatisticsBoard.java b/src/main/java/app/freerouting/core/scoring/BoardStatisticsBoard.java
+index 5815612..e46e918 100644
+--- a/src/main/java/app/freerouting/core/scoring/BoardStatisticsBoard.java
++++ b/src/main/java/app/freerouting/core/scoring/BoardStatisticsBoard.java
+@@ -1,7 +1,7 @@
+ package app.freerouting.core.scoring;
+ 
+ import com.google.gson.annotations.SerializedName;
+-import java.awt.geom.Rectangle2D;
++import app.freerouting.geometry.planar.Rectangle2D;
+ import java.io.Serializable;
+ 
+ /** Basic parameters of a board. */
+diff --git a/src/main/java/app/freerouting/geometry/planar/Rectangle2D.java b/src/main/java/app/freerouting/geometry/planar/Rectangle2D.java
+new file mode 100644
+index 0000000..4608a53
+--- /dev/null
++++ b/src/main/java/app/freerouting/geometry/planar/Rectangle2D.java
+@@ -0,0 +1,48 @@
++package app.freerouting.geometry.planar;
++
++/**
++ * The part of {@code java.awt.geom.Rectangle2D} that board statistics use. Android has no {@code
++ * java.awt}, so the Android build of the router uses this instead.
++ */
++public abstract class Rectangle2D {
++
++  private Rectangle2D() {}
++
++  /** A rectangle with float coordinates. */
++  public static class Float extends Rectangle2D {
++    public float x;
++    public float y;
++    public float width;
++    public float height;
++
++    public Float() {}
++
++    public Float(float x, float y, float width, float height) {
++      this.x = x;
++      this.y = y;
++      this.width = width;
++      this.height = height;
++    }
++
++    public double getX() {
++      return x;
++    }
++
++    public double getY() {
++      return y;
++    }
++
++    public double getWidth() {
++      return width;
++    }
++
++    public double getHeight() {
++      return height;
++    }
++
++    @Override
++    public String toString() {
++      return "Rectangle2D.Float[x=" + x + ",y=" + y + ",w=" + width + ",h=" + height + "]";
++    }
++  }
++}
+diff --git a/src/main/java/app/freerouting/logger/FRLogger.java b/src/main/java/app/freerouting/logger/FRLogger.java
+index 0475e0f..1eab003 100644
+--- a/src/main/java/app/freerouting/logger/FRLogger.java
++++ b/src/main/java/app/freerouting/logger/FRLogger.java
+@@ -9,8 +9,8 @@ import java.time.Instant;
+ import java.util.HashMap;
+ import java.util.UUID;
+ import java.util.concurrent.CopyOnWriteArrayList;
+-import org.apache.logging.log4j.LogManager;
+-import org.apache.logging.log4j.Logger;
++import app.freerouting.logger.LogManager;
++import app.freerouting.logger.Logger;
+ 
+ /// <summary> Provides logging functionality. </summary>
+ /**
+diff --git a/src/main/java/app/freerouting/logger/LogManager.java b/src/main/java/app/freerouting/logger/LogManager.java
+new file mode 100644
+index 0000000..a7ec043
+--- /dev/null
++++ b/src/main/java/app/freerouting/logger/LogManager.java
+@@ -0,0 +1,11 @@
++package app.freerouting.logger;
++
++/** Stands in for Log4j's LogManager on Android, where the router logs to standard output. */
++public final class LogManager {
++
++  private LogManager() {}
++
++  public static Logger getLogger(String name) {
++    return Logger.INSTANCE;
++  }
++}
+diff --git a/src/main/java/app/freerouting/logger/Logger.java b/src/main/java/app/freerouting/logger/Logger.java
+new file mode 100644
+index 0000000..3e9971f
+--- /dev/null
++++ b/src/main/java/app/freerouting/logger/Logger.java
+@@ -0,0 +1,56 @@
++package app.freerouting.logger;
++
++/**
++ * Stands in for the Log4j logger on Android. Android sends standard output to logcat. Debug and
++ * trace messages are dropped unless the system property {@code freerouting.debug} is true.
++ */
++public final class Logger {
++
++  static final Logger INSTANCE = new Logger();
++  private static final boolean DEBUG = Boolean.getBoolean("freerouting.debug");
++
++  private Logger() {}
++
++  private static void print(String level, String msg, Throwable t) {
++    System.out.println("freerouting " + level + ": " + msg);
++    if (t != null) {
++      t.printStackTrace(System.out);
++    }
++  }
++
++  public boolean isTraceEnabled() {
++    return DEBUG;
++  }
++
++  public void trace(String msg) {
++    if (DEBUG) {
++      print("TRACE", msg, null);
++    }
++  }
++
++  public void debug(String msg) {
++    if (DEBUG) {
++      print("DEBUG", msg, null);
++    }
++  }
++
++  public void info(String msg) {
++    print("INFO", msg, null);
++  }
++
++  public void warn(String msg) {
++    print("WARN", msg, null);
++  }
++
++  public void warn(String msg, Throwable t) {
++    print("WARN", msg, t);
++  }
++
++  public void error(String msg) {
++    print("ERROR", msg, null);
++  }
++
++  public void error(String msg, Throwable t) {
++    print("ERROR", msg, t);
++  }
++}
+diff --git a/src/main/java/app/freerouting/management/BoardManager.java b/src/main/java/app/freerouting/management/BoardManager.java
+index d217250..3aeff37 100644
+--- a/src/main/java/app/freerouting/management/BoardManager.java
++++ b/src/main/java/app/freerouting/management/BoardManager.java
+@@ -6,8 +6,6 @@ import app.freerouting.board.state.Communication;
+ import app.freerouting.core.RoutingJob;
+ import app.freerouting.geometry.planar.IntBox;
+ import app.freerouting.geometry.planar.PolylineShape;
+-import app.freerouting.gui.workspace.WorkspaceContract;
+-import app.freerouting.gui.workspace.WorkspaceSettings;
+ import app.freerouting.rules.BoardRules;
+ 
+ /**
+diff --git a/src/main/java/app/freerouting/management/HeadlessBoardManager.java b/src/main/java/app/freerouting/management/HeadlessBoardManager.java
+index 2190262..f890169 100644
+--- a/src/main/java/app/freerouting/management/HeadlessBoardManager.java
++++ b/src/main/java/app/freerouting/management/HeadlessBoardManager.java
+@@ -24,8 +24,6 @@ import app.freerouting.drc.ClearanceViolation;
+ import app.freerouting.geometry.planar.IntBox;
+ import app.freerouting.geometry.planar.Point;
+ import app.freerouting.geometry.planar.PolylineShape;
+-import app.freerouting.gui.workspace.WorkspaceSettings;
+-import app.freerouting.gui.workspace.session.InteractiveActionThread;
+ import app.freerouting.io.BoardReadResult;
+ import app.freerouting.io.kicad.KiCadJsonReader;
+ import app.freerouting.io.specctra.DsnReader;
+@@ -880,9 +878,8 @@ public class HeadlessBoardManager implements BoardManager {
+         new java.util.concurrent.CompletableFuture<>();
+     loadedBoard.postLoadFuture = future;
+     HeadlessBoardManager manager = this;
+-    Thread.ofVirtual()
+-        .name("board-post-load")
+-        .start(
++    startDaemon(
++        "board-post-load",
+             () -> {
+               try {
+                 var boardStats = new BoardStatistics(loadedBoard, null, false, false);
+@@ -1378,4 +1375,11 @@ public class HeadlessBoardManager implements BoardManager {
+       }
+     }
+   }
++
++  /** Android has no virtual threads, so post-load work runs on a plain daemon thread. */
++  private static void startDaemon(String name, Runnable action) {
++    Thread thread = new Thread(action, name);
++    thread.setDaemon(true);
++    thread.start();
++  }
+ }
+diff --git a/src/main/java/app/freerouting/settings/sources/GuiSettingsSource.java b/src/main/java/app/freerouting/settings/sources/GuiSettingsSource.java
+index 8e549eb..bf5f941 100644
+--- a/src/main/java/app/freerouting/settings/sources/GuiSettingsSource.java
++++ b/src/main/java/app/freerouting/settings/sources/GuiSettingsSource.java
+@@ -1,6 +1,5 @@
+ package app.freerouting.settings.sources;
+ 
+-import app.freerouting.gui.workspace.WorkspaceSettings;
+ import app.freerouting.settings.RouterSettings;
+ import app.freerouting.settings.SettingsSource;
+ 
+-- 
+2.54.0 (Apple Git-157)
+

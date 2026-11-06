@@ -162,6 +162,10 @@ cp "$KA_ROOT/android/package/res/xml/qtprovider_paths.xml" "$QT_JAVA/res/xml/qtp
 perl -pi -e "s|^qtAndroidDir=.*|qtAndroidDir=$QT_JAVA|" "$OUT/gradle.properties"
 grep -q "^qtAndroidDir=$QT_JAVA\$" "$OUT/gradle.properties"
 
+# Integrated autorouter (Freerouting's core plus its driver; scripts/build-autorouter.sh)
+[ -f "$KA_ROOT/build/autorouter/autorouter.jar" ] || "$KA_ROOT/scripts/build-autorouter.sh"
+cp "$KA_ROOT/build/autorouter/autorouter.jar" "$OUT/libs/autorouter.jar"
+
 GRADLE_TASK=assembleDebug
 [ "${KICAD_APK_MODE:-debug}" = release ] && GRADLE_TASK=assembleRelease
 ( cd "$OUT" && ./gradlew -q "$GRADLE_TASK" )

@@ -1,0 +1,898 @@
+From 2934c38e10993cb27d0c8a03cbe9ccd743ddda71 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 6 Nov 2026 22:03:22 +0530
+Subject: [PATCH] Integrated autorouter on Android (Route > Autoroute Board)
+
+The Android app carries Freerouting's routing core, run in the app's own Java
+runtime.  The new action exports the board as Specctra DSN, routes it on a
+background thread, and imports the session.  While it routes, the routes found
+so far are shown on the board.  Every import goes into one undo step, so
+Discard (or Undo) puts the board back as it was.
+
+- kiplatform/autorouter.h, os/android/autorouter.cpp: JNI bridge to
+  io.github.deveshrai.kicadandroid.Autorouter
+- dialogs/dialog_autoroute.cpp: options, progress and Keep/Discard
+- PCB_ACTIONS::autorouteBoard, in the Route menu when the router is there
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiaLryXaTy3ujYusUen
+---
+ libs/kiplatform/CMakeLists.txt                |   1 +
+ .../include/kiplatform/autorouter.h           |  77 ++++
+ libs/kiplatform/os/android/autorouter.cpp     | 163 ++++++++
+ pcbnew/CMakeLists.txt                         |   5 +
+ pcbnew/dialogs/dialog_autoroute.cpp           | 357 ++++++++++++++++++
+ pcbnew/dialogs/dialog_autoroute.h             |  90 +++++
+ pcbnew/menubar_pcb_editor.cpp                 |  12 +
+ pcbnew/tools/board_editor_control.cpp         |  22 ++
+ pcbnew/tools/board_editor_control.h           |   1 +
+ pcbnew/tools/pcb_actions.cpp                  |   7 +
+ pcbnew/tools/pcb_actions.h                    |   1 +
+ 11 files changed, 736 insertions(+)
+ create mode 100644 libs/kiplatform/include/kiplatform/autorouter.h
+ create mode 100644 libs/kiplatform/os/android/autorouter.cpp
+ create mode 100644 pcbnew/dialogs/dialog_autoroute.cpp
+ create mode 100644 pcbnew/dialogs/dialog_autoroute.h
+
+diff --git a/libs/kiplatform/CMakeLists.txt b/libs/kiplatform/CMakeLists.txt
+index 46e71fe5..f52a5584 100644
+--- a/libs/kiplatform/CMakeLists.txt
++++ b/libs/kiplatform/CMakeLists.txt
+@@ -105,6 +105,7 @@ elseif( ANDROID )
+     # Android: the generic POSIX pieces come from os/unix, the rest has no glib/gtk/libsecret
+     list( APPEND PLATFORM_SRCS
+         os/android/app.cpp
++        os/android/autorouter.cpp
+         os/android/environment.cpp
+         os/android/printing.cpp
+         os/android/secrets.cpp
+diff --git a/libs/kiplatform/include/kiplatform/autorouter.h b/libs/kiplatform/include/kiplatform/autorouter.h
+new file mode 100644
+index 00000000..610ba516
+--- /dev/null
++++ b/libs/kiplatform/include/kiplatform/autorouter.h
+@@ -0,0 +1,77 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef KIPLATFORM_AUTOROUTER_H_
++#define KIPLATFORM_AUTOROUTER_H_
++
++#include <wx/string.h>
++
++namespace KIPLATFORM
++{
++namespace AUTOROUTER
++{
++
++/**
++ * Status of a running or finished autorouter job.
++ *
++ * Stage is one of "idle", "loading", "routing", "optimizing", "saving", "done", "failed" or
++ * "cancelled".
++ */
++struct STATUS
++{
++    wxString stage;
++    wxString message;
++    int      pass = 0;
++    int      unrouted = -1;      ///< Connections still to route, -1 if not known yet.
++    int      connections = -1;   ///< All connections on the board, -1 if not known yet.
++    int      vias = -1;
++    int      violations = -1;
++    double   traceLengthMm = -1;
++    int      snapshotSerial = 0; ///< Goes up each time the snapshot session file is rewritten.
++    long     elapsedMs = 0;
++    bool     running = false;
++    wxString error;              ///< Set when the job ends with an error.
++};
++
++/// True if this build includes an integrated autorouter.
++bool IsAvailable();
++
++/**
++ * Start routing the Specctra DSN file @a aDsnPath on a background thread.  The routed session
++ * is written to @a aSesPath.  While routing, a session file with the routes so far is written
++ * to @a aSnapshotPath (if not empty) every pass or so.
++ *
++ * @param aMaxPasses is the number of autorouter passes, 0 to stop when routing stops improving.
++ * @return false if a job is already running or the router is not available.
++ */
++bool Start( const wxString& aDsnPath, const wxString& aSesPath, int aMaxPasses, bool aOptimize,
++            const wxString& aSnapshotPath );
++
++/// Stop routing and go on to optimize what is routed so far.
++void StopRouting();
++
++/// Stop routing and optimizing.  The session file still gets the routes made so far.
++void StopAll();
++
++STATUS GetStatus();
++
++} // namespace AUTOROUTER
++} // namespace KIPLATFORM
++
++#endif // KIPLATFORM_AUTOROUTER_H_
+diff --git a/libs/kiplatform/os/android/autorouter.cpp b/libs/kiplatform/os/android/autorouter.cpp
+new file mode 100644
+index 00000000..61a8b22e
+--- /dev/null
++++ b/libs/kiplatform/os/android/autorouter.cpp
+@@ -0,0 +1,163 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++// The Android app carries Freerouting's routing core, run by the Java class
++// io.github.deveshrai.kicadandroid.Autorouter in the app's own runtime.  Routing runs on a
++// thread of its own here, attached to the Java VM; the status getters are called from the UI.
++
++#include <kiplatform/autorouter.h>
++
++#include <QJniEnvironment>
++#include <QJniObject>
++
++#include <atomic>
++#include <mutex>
++#include <thread>
++
++namespace
++{
++const char* const CLASS = "io/github/deveshrai/kicadandroid/Autorouter";
++
++std::mutex        g_lock;
++std::thread       g_thread;
++std::atomic<bool> g_running{ false };
++wxString          g_error;
++
++
++wxString wxstr( const QString& aText )
++{
++    return wxString::FromUTF8( aText.toUtf8().constData() );
++}
++
++
++bool classFound()
++{
++    QJniEnvironment env;
++    return env.findClass( CLASS ) != nullptr;
++}
++} // namespace
++
++
++namespace KIPLATFORM
++{
++namespace AUTOROUTER
++{
++
++bool IsAvailable()
++{
++    static const bool available = classFound();
++    return available;
++}
++
++
++bool Start( const wxString& aDsnPath, const wxString& aSesPath, int aMaxPasses, bool aOptimize,
++            const wxString& aSnapshotPath )
++{
++    std::lock_guard<std::mutex> lock( g_lock );
++
++    if( g_running || !IsAvailable() )
++        return false;
++
++    if( g_thread.joinable() )
++        g_thread.join();
++
++    g_error.clear();
++    g_running = true;
++
++    std::string dsn = aDsnPath.utf8_string();
++    std::string ses = aSesPath.utf8_string();
++    std::string snap = aSnapshotPath.utf8_string();
++
++    g_thread = std::thread(
++            [dsn, ses, snap, aMaxPasses, aOptimize]()
++            {
++                // QJniObject attaches this thread to the VM, and finds the app's classes
++                // through Qt's class loader.
++                QJniObject result = QJniObject::callStaticObjectMethod(
++                        CLASS, "route",
++                        "(Ljava/lang/String;Ljava/lang/String;IZILjava/lang/String;)"
++                        "Ljava/lang/String;",
++                        QJniObject::fromString( QString::fromStdString( dsn ) ).object<jstring>(),
++                        QJniObject::fromString( QString::fromStdString( ses ) ).object<jstring>(),
++                        (jint) aMaxPasses, (jboolean) aOptimize, (jint) 0,
++                        QJniObject::fromString( QString::fromStdString( snap ) ).object<jstring>() );
++
++                QJniEnvironment env;
++
++                if( env.checkAndClearExceptions() )
++                {
++                    std::lock_guard<std::mutex> lock2( g_lock );
++                    g_error = wxS( "The autorouter stopped with a Java exception." );
++                }
++                else if( result.isValid() && !result.toString().isEmpty() )
++                {
++                    std::lock_guard<std::mutex> lock2( g_lock );
++                    g_error = wxstr( result.toString() );
++                }
++
++                g_running = false;
++            } );
++
++    return true;
++}
++
++
++void StopRouting()
++{
++    QJniObject::callStaticMethod<void>( CLASS, "stopRouting" );
++}
++
++
++void StopAll()
++{
++    QJniObject::callStaticMethod<void>( CLASS, "stopAll" );
++}
++
++
++STATUS GetStatus()
++{
++    STATUS s;
++
++    if( !IsAvailable() )
++        return s;
++
++    s.stage = wxstr( QJniObject::callStaticObjectMethod<jstring>( CLASS, "getStage" ).toString() );
++    s.message =
++            wxstr( QJniObject::callStaticObjectMethod<jstring>( CLASS, "getMessage" ).toString() );
++    s.pass = QJniObject::callStaticMethod<jint>( CLASS, "getPass" );
++    s.unrouted = QJniObject::callStaticMethod<jint>( CLASS, "getUnrouted" );
++    s.connections = QJniObject::callStaticMethod<jint>( CLASS, "getConnections" );
++    s.vias = QJniObject::callStaticMethod<jint>( CLASS, "getVias" );
++    s.violations = QJniObject::callStaticMethod<jint>( CLASS, "getViolations" );
++    s.traceLengthMm = QJniObject::callStaticMethod<jfloat>( CLASS, "getTraceLengthMm" );
++    s.snapshotSerial = QJniObject::callStaticMethod<jint>( CLASS, "getSnapshotSerial" );
++    s.elapsedMs = (long) QJniObject::callStaticMethod<jlong>( CLASS, "getElapsedMs" );
++    s.running = g_running;
++
++    std::lock_guard<std::mutex> lock( g_lock );
++    s.error = g_error;
++
++    if( !s.running && g_thread.joinable() )
++        g_thread.join();
++
++    return s;
++}
++
++} // namespace AUTOROUTER
++} // namespace KIPLATFORM
+diff --git a/pcbnew/CMakeLists.txt b/pcbnew/CMakeLists.txt
+index c5510d9d..e3347982 100644
+--- a/pcbnew/CMakeLists.txt
++++ b/pcbnew/CMakeLists.txt
+@@ -266,6 +266,11 @@ set( PCBNEW_DIALOGS
+     footprint_wizard_frame_functions.cpp
+     )
+ 
++# The integrated autorouter runs Freerouting in the Android app's Java runtime
++if( ANDROID )
++    list( APPEND PCBNEW_DIALOGS dialogs/dialog_autoroute.cpp )
++endif()
++
+ set( PCBNEW_BRDSTACKUP_MGR
+     board_stackup_manager/dielectric_material.cpp
+     board_stackup_manager/stackup_predefined_prms.cpp
+diff --git a/pcbnew/dialogs/dialog_autoroute.cpp b/pcbnew/dialogs/dialog_autoroute.cpp
+new file mode 100644
+index 00000000..82144566
+--- /dev/null
++++ b/pcbnew/dialogs/dialog_autoroute.cpp
+@@ -0,0 +1,357 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "dialog_autoroute.h"
++
++#include <board.h>
++#include <board_commit.h>
++#include <confirm.h>
++#include <ki_exception.h>
++#include <kiplatform/autorouter.h>
++#include <kiplatform/environment.h>
++#include <pcb_edit_frame.h>
++#include <specctra_import_export/specctra.h>
++#include <tool/actions.h>
++#include <tool/tool_manager.h>
++#include <tools/pcb_actions.h>
++
++#include <wx/button.h>
++#include <wx/checkbox.h>
++#include <wx/filefn.h>
++#include <wx/filename.h>
++#include <wx/gauge.h>
++#include <wx/sizer.h>
++#include <wx/stattext.h>
++
++namespace AR = KIPLATFORM::AUTOROUTER;
++
++
++DIALOG_AUTOROUTE::DIALOG_AUTOROUTE( PCB_EDIT_FRAME* aFrame ) :
++        DIALOG_SHIM( aFrame, wxID_ANY, _( "Autoroute Board" ), wxDefaultPosition, wxDefaultSize,
++                     wxDEFAULT_DIALOG_STYLE ),
++        m_frame( aFrame ),
++        m_timer( this )
++{
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++
++    m_intro = new wxStaticText( this, wxID_ANY,
++                                _( "Routes every unrouted connection with Freerouting, on this "
++                                   "device.\nRoutes you have already drawn are kept, but the "
++                                   "optimizer may improve them.\nLock any track that must stay "
++                                   "exactly as it is." ) );
++    top->Add( m_intro, 0, wxALL, 10 );
++
++    m_optimize = new wxCheckBox( this, wxID_ANY,
++                                 _( "Optimize the routes afterwards (shorter, fewer vias)" ) );
++    m_optimize->SetValue( true );
++    top->Add( m_optimize, 0, wxLEFT | wxRIGHT | wxBOTTOM, 10 );
++
++    m_live = new wxCheckBox( this, wxID_ANY, _( "Show the routes on the board as they are found" ) );
++    m_live->SetValue( true );
++    top->Add( m_live, 0, wxLEFT | wxRIGHT | wxBOTTOM, 10 );
++
++    m_fillZones = new wxCheckBox( this, wxID_ANY, _( "Refill zones when done" ) );
++    m_fillZones->SetValue( true );
++    top->Add( m_fillZones, 0, wxLEFT | wxRIGHT | wxBOTTOM, 10 );
++
++    m_stage = new wxStaticText( this, wxID_ANY, wxEmptyString );
++    m_stage->SetFont( m_stage->GetFont().Bold() );
++    top->Add( m_stage, 0, wxLEFT | wxRIGHT | wxTOP, 10 );
++
++    m_gauge = new wxGauge( this, wxID_ANY, 100, wxDefaultPosition, wxSize( 420, -1 ) );
++    top->Add( m_gauge, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10 );
++
++    m_routed = new wxStaticText( this, wxID_ANY, wxEmptyString );
++    top->Add( m_routed, 0, wxLEFT | wxRIGHT | wxTOP, 10 );
++
++    m_details = new wxStaticText( this, wxID_ANY, wxEmptyString );
++    top->Add( m_details, 0, wxLEFT | wxRIGHT | wxTOP, 10 );
++
++    wxBoxSizer* buttons = new wxBoxSizer( wxHORIZONTAL );
++    buttons->AddStretchSpacer();
++    m_cancelBtn = new wxButton( this, wxID_CANCEL, _( "Cancel" ) );
++    m_startBtn = new wxButton( this, wxID_ANY, _( "Route" ) );
++    m_skipBtn = new wxButton( this, wxID_ANY, _( "Optimize Now" ) );
++    m_stopBtn = new wxButton( this, wxID_ANY, _( "Stop" ) );
++    m_discardBtn = new wxButton( this, wxID_ANY, _( "Discard" ) );
++    m_keepBtn = new wxButton( this, wxID_OK, _( "Keep" ) );
++
++    for( wxButton* b : { m_cancelBtn, m_startBtn, m_skipBtn, m_stopBtn, m_discardBtn, m_keepBtn } )
++        buttons->Add( b, 0, wxLEFT, 8 );
++
++    top->Add( buttons, 0, wxEXPAND | wxALL, 10 );
++    SetSizer( top );
++
++    m_startBtn->SetDefault();
++    m_startBtn->Bind( wxEVT_BUTTON, &DIALOG_AUTOROUTE::onStart, this );
++    m_skipBtn->Bind( wxEVT_BUTTON, &DIALOG_AUTOROUTE::onSkip, this );
++    m_stopBtn->Bind( wxEVT_BUTTON, &DIALOG_AUTOROUTE::onStop, this );
++    m_discardBtn->Bind( wxEVT_BUTTON, &DIALOG_AUTOROUTE::onDiscard, this );
++    m_keepBtn->Bind( wxEVT_BUTTON, &DIALOG_AUTOROUTE::onKeep, this );
++    Bind( wxEVT_CLOSE_WINDOW, &DIALOG_AUTOROUTE::onClose, this );
++    Bind( wxEVT_TIMER, &DIALOG_AUTOROUTE::onTimer, this );
++
++    wxFileName dir( KIPLATFORM::ENV::GetUserCachePath(), wxEmptyString );
++    dir.AppendDir( wxS( "autoroute" ) );
++    dir.Mkdir( wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++    m_workDir = dir.GetPath();
++    m_dsnPath = m_workDir + wxS( "/board.dsn" );
++    m_sesPath = m_workDir + wxS( "/board.ses" );
++    m_snapPath = m_workDir + wxS( "/snapshot.ses" );
++
++    setState( STATE::SETUP );
++    finishDialogSettings();
++
++    // Sit in the top right corner, so the board stays in view while it is routed.
++    wxRect frameRect = m_frame->GetScreenRect();
++    wxSize size = GetSize();
++    SetPosition( wxPoint( frameRect.GetRight() - size.x - 24, frameRect.GetTop() + 120 ) );
++}
++
++
++DIALOG_AUTOROUTE::~DIALOG_AUTOROUTE()
++{
++    m_timer.Stop();
++
++    if( m_state == STATE::RUNNING )
++        AR::StopAll();
++}
++
++
++void DIALOG_AUTOROUTE::setState( STATE aState )
++{
++    m_state = aState;
++
++    bool setup = aState == STATE::SETUP;
++    bool running = aState == STATE::RUNNING;
++    bool finished = aState == STATE::FINISHED;
++
++    m_intro->Show( setup );
++    m_optimize->Show( setup );
++    m_live->Show( setup );
++    m_fillZones->Show( setup );
++    m_stage->Show( !setup );
++    m_gauge->Show( !setup );
++    m_routed->Show( !setup );
++    m_details->Show( !setup );
++
++    m_cancelBtn->Show( setup );
++    m_startBtn->Show( setup );
++    m_skipBtn->Show( running && m_optimize->GetValue() );
++    m_stopBtn->Show( running );
++    m_discardBtn->Show( finished && m_pushed );
++    m_keepBtn->Show( finished );
++
++    Layout();
++    GetSizer()->Fit( this );
++}
++
++
++void DIALOG_AUTOROUTE::onStart( wxCommandEvent& aEvent )
++{
++    wxRemoveFile( m_sesPath );
++    wxRemoveFile( m_snapPath );
++
++    if( !m_frame->ExportSpecctraFile( m_dsnPath ) )
++        return;
++
++    if( !AR::Start( m_dsnPath, m_sesPath, 0, m_optimize->GetValue(),
++                    m_live->GetValue() ? m_snapPath : wxString() ) )
++    {
++        DisplayErrorMessage( this, _( "The autorouter could not be started." ) );
++        return;
++    }
++
++    m_lastSnapshot = 0;
++    m_stage->SetLabel( _( "Reading the board..." ) );
++    m_routed->SetLabel( wxEmptyString );
++    m_details->SetLabel( wxEmptyString );
++    setState( STATE::RUNNING );
++    m_timer.Start( 250 );
++}
++
++
++void DIALOG_AUTOROUTE::onSkip( wxCommandEvent& aEvent )
++{
++    AR::StopRouting();
++    m_skipBtn->Disable();
++}
++
++
++void DIALOG_AUTOROUTE::onStop( wxCommandEvent& aEvent )
++{
++    m_stopping = true;
++    AR::StopAll();
++    m_skipBtn->Disable();
++    m_stopBtn->Disable();
++    m_stage->SetLabel( _( "Stopping..." ) );
++}
++
++
++void DIALOG_AUTOROUTE::onKeep( wxCommandEvent& aEvent )
++{
++    bool fill = m_pushed && m_fillZones->GetValue();
++
++    EndModal( wxID_OK );
++
++    if( fill )
++        m_frame->GetToolManager()->PostAction( PCB_ACTIONS::zoneFillAll );
++}
++
++
++void DIALOG_AUTOROUTE::onDiscard( wxCommandEvent& aEvent )
++{
++    if( m_pushed )
++        m_frame->GetToolManager()->RunAction( ACTIONS::undo );
++
++    EndModal( wxID_CANCEL );
++}
++
++
++void DIALOG_AUTOROUTE::onClose( wxCloseEvent& aEvent )
++{
++    if( m_state == STATE::RUNNING )
++    {
++        // Closing while routing means stop; the routes found so far are offered when it ends.
++        wxCommandEvent dummy;
++        onStop( dummy );
++        aEvent.Veto();
++        return;
++    }
++
++    EndModal( m_state == STATE::FINISHED ? wxID_OK : wxID_CANCEL );
++}
++
++
++bool DIALOG_AUTOROUTE::importSession( const wxString& aPath )
++{
++    BOARD_COMMIT commit( m_frame );
++
++    m_frame->GetToolManager()->RunAction( ACTIONS::selectionClear );
++
++    try
++    {
++        DSN::ImportSpecctraSession( m_frame->GetBoard(), aPath, commit );
++    }
++    catch( const IO_ERROR& ioe )
++    {
++        commit.Revert();
++        m_result = ioe.What();
++        return false;
++    }
++
++    // Every import replaces the routes of the one before, so they all share one undo step.
++    commit.Push( _( "Autoroute" ), m_pushed ? APPEND_UNDO : 0 );
++    m_pushed = true;
++    m_frame->GetCanvas()->ForceRefresh();
++    return true;
++}
++
++
++void DIALOG_AUTOROUTE::onTimer( wxTimerEvent& aEvent )
++{
++    AR::STATUS s = AR::GetStatus();
++
++    if( s.connections > 0 && s.unrouted >= 0 )
++    {
++        int routed = std::max( 0, s.connections - s.unrouted );
++        m_gauge->SetRange( s.connections );
++        m_gauge->SetValue( routed );
++        m_routed->SetLabel( wxString::Format( _( "%d of %d connections routed" ), routed,
++                                              s.connections ) );
++    }
++
++    long secs = s.elapsedMs / 1000;
++    wxString details = wxString::Format( _( "%ld:%02ld" ), secs / 60, secs % 60 );
++
++    if( s.vias >= 0 )
++        details += wxString::Format( _( "   %d vias" ), s.vias );
++
++    if( s.traceLengthMm >= 0 )
++        details += wxString::Format( _( "   %.0f mm of track" ), s.traceLengthMm );
++
++    if( s.violations > 0 )
++        details += wxString::Format( _( "   %d clearance violations" ), s.violations );
++
++    m_details->SetLabel( details );
++
++    if( !m_stopping )
++    {
++        if( s.stage == wxS( "loading" ) )
++            m_stage->SetLabel( _( "Reading the board..." ) );
++        else if( s.stage == wxS( "routing" ) && s.message == wxS( "fanout" ) )
++            m_stage->SetLabel( wxString::Format( _( "Fanning out pads, pass %d" ), s.pass ) );
++        else if( s.stage == wxS( "routing" ) )
++            m_stage->SetLabel( wxString::Format( _( "Routing, pass %d" ), s.pass ) );
++        else if( s.stage == wxS( "optimizing" ) )
++        {
++            m_stage->SetLabel( wxString::Format( _( "Optimizing, pass %d" ), s.pass ) );
++            m_skipBtn->Hide();
++        }
++        else if( s.stage == wxS( "saving" ) )
++            m_stage->SetLabel( _( "Saving..." ) );
++    }
++
++    if( s.running && s.snapshotSerial != m_lastSnapshot && wxFileExists( m_snapPath ) )
++    {
++        m_lastSnapshot = s.snapshotSerial;
++        importSession( m_snapPath );
++    }
++
++    if( !s.running )
++    {
++        m_timer.Stop();
++        m_result = s.error;
++        finish();
++    }
++
++    Layout();
++    GetSizer()->Fit( this );
++}
++
++
++void DIALOG_AUTOROUTE::finish()
++{
++    if( m_result.IsEmpty() && wxFileExists( m_sesPath ) && importSession( m_sesPath ) )
++    {
++        AR::STATUS s = AR::GetStatus();
++        int        routed = std::max( 0, s.connections - s.unrouted );
++
++        if( s.unrouted == 0 )
++            m_stage->SetLabel( _( "Done: every connection is routed." ) );
++        else
++            m_stage->SetLabel( wxString::Format( _( "Done: %d connections are still unrouted." ),
++                                                 s.unrouted ) );
++
++        m_routed->SetLabel( wxString::Format( _( "%d of %d connections routed. Keep the routes, "
++                                                 "or discard them (same as Undo)." ),
++                                              routed, s.connections ) );
++    }
++    else
++    {
++        m_stage->SetLabel( _( "The autorouter failed." ) );
++        m_routed->SetLabel( m_result );
++
++        if( m_pushed )
++            m_routed->SetLabel( m_result + wxS( "\n" ) + _( "The board shows the last routes "
++                                                            "found. Discard undoes them." ) );
++    }
++
++    setState( STATE::FINISHED );
++}
+diff --git a/pcbnew/dialogs/dialog_autoroute.h b/pcbnew/dialogs/dialog_autoroute.h
+new file mode 100644
+index 00000000..f3fac28c
+--- /dev/null
++++ b/pcbnew/dialogs/dialog_autoroute.h
+@@ -0,0 +1,90 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef DIALOG_AUTOROUTE_H
++#define DIALOG_AUTOROUTE_H
++
++#include <dialog_shim.h>
++#include <wx/timer.h>
++
++class PCB_EDIT_FRAME;
++class wxButton;
++class wxCheckBox;
++class wxGauge;
++class wxStaticText;
++
++/**
++ * Routes the whole board with the integrated autorouter (Freerouting), showing the routes on the
++ * board as they are found.  Everything it changes is one undo step.
++ */
++class DIALOG_AUTOROUTE : public DIALOG_SHIM
++{
++public:
++    DIALOG_AUTOROUTE( PCB_EDIT_FRAME* aFrame );
++    ~DIALOG_AUTOROUTE() override;
++
++private:
++    enum class STATE
++    {
++        SETUP,
++        RUNNING,
++        FINISHED
++    };
++
++    void onStart( wxCommandEvent& aEvent );
++    void onSkip( wxCommandEvent& aEvent );
++    void onStop( wxCommandEvent& aEvent );
++    void onKeep( wxCommandEvent& aEvent );
++    void onDiscard( wxCommandEvent& aEvent );
++    void onClose( wxCloseEvent& aEvent );
++    void onTimer( wxTimerEvent& aEvent );
++
++    void setState( STATE aState );
++    bool importSession( const wxString& aPath );
++    void finish();
++
++    PCB_EDIT_FRAME* m_frame;
++    STATE           m_state = STATE::SETUP;
++    wxTimer         m_timer;
++    wxString        m_workDir;
++    wxString        m_dsnPath;
++    wxString        m_sesPath;
++    wxString        m_snapPath;
++    int             m_lastSnapshot = 0;
++    bool            m_pushed = false;   ///< True once an undo step holds our changes.
++    bool            m_stopping = false;
++    wxString        m_result;
++
++    wxStaticText* m_intro;
++    wxCheckBox*   m_optimize;
++    wxCheckBox*   m_live;
++    wxCheckBox*   m_fillZones;
++    wxStaticText* m_stage;
++    wxGauge*      m_gauge;
++    wxStaticText* m_routed;
++    wxStaticText* m_details;
++    wxButton*     m_cancelBtn;
++    wxButton*     m_startBtn;
++    wxButton*     m_skipBtn;
++    wxButton*     m_stopBtn;
++    wxButton*     m_discardBtn;
++    wxButton*     m_keepBtn;
++};
++
++#endif // DIALOG_AUTOROUTE_H
+diff --git a/pcbnew/menubar_pcb_editor.cpp b/pcbnew/menubar_pcb_editor.cpp
+index 6c58c399..70fc340d 100644
+--- a/pcbnew/menubar_pcb_editor.cpp
++++ b/pcbnew/menubar_pcb_editor.cpp
+@@ -35,6 +35,10 @@
+ #include <tools/pcb_selection_tool.h>
+ #include <widgets/wx_menubar.h>
+ 
++#ifdef __ANDROID__
++#include <kiplatform/autorouter.h>
++#endif
++
+ 
+ void PCB_EDIT_FRAME::doReCreateMenuBar()
+ {
+@@ -399,6 +403,14 @@ void PCB_EDIT_FRAME::doReCreateMenuBar()
+     routeMenu->Add( PCB_ACTIONS::tuneDiffPair );
+     routeMenu->Add( PCB_ACTIONS::tuneSkew );
+ 
++#ifdef __ANDROID__
++    if( KIPLATFORM::AUTOROUTER::IsAvailable() )
++    {
++        routeMenu->AppendSeparator();
++        routeMenu->Add( PCB_ACTIONS::autorouteBoard );
++    }
++#endif
++
+     routeMenu->AppendSeparator();
+     routeMenu->Add( PCB_ACTIONS::routerSettingsDialog );
+ 
+diff --git a/pcbnew/tools/board_editor_control.cpp b/pcbnew/tools/board_editor_control.cpp
+index 39361891..f34bdccf 100644
+--- a/pcbnew/tools/board_editor_control.cpp
++++ b/pcbnew/tools/board_editor_control.cpp
+@@ -88,6 +88,11 @@
+ 
+ #include <widgets/legacyfiledlg_netlist_options.h>
+ 
++#ifdef __ANDROID__
++#include <dialogs/dialog_autoroute.h>
++#include <kiplatform/autorouter.h>
++#endif
++
+ using namespace std::placeholders;
+ 
+ 
+@@ -669,6 +674,22 @@ int BOARD_EDITOR_CONTROL::ImportSpecctraSession( const TOOL_EVENT& aEvent )
+ }
+ 
+ 
++int BOARD_EDITOR_CONTROL::AutorouteBoard( const TOOL_EVENT& aEvent )
++{
++#ifdef __ANDROID__
++    if( !KIPLATFORM::AUTOROUTER::IsAvailable() )
++    {
++        DisplayErrorMessage( frame(), _( "This build has no autorouter." ) );
++        return 0;
++    }
++
++    DIALOG_AUTOROUTE dlg( getEditFrame<PCB_EDIT_FRAME>() );
++    dlg.ShowModal();
++#endif
++    return 0;
++}
++
++
+ int BOARD_EDITOR_CONTROL::ExportSpecctraDSN( const TOOL_EVENT& aEvent )
+ {
+     wxString    fullFileName = m_frame->GetLastPath( LAST_PATH_SPECCTRADSN );
+@@ -2378,6 +2399,7 @@ void BOARD_EDITOR_CONTROL::setTransitions()
+     Go( &BOARD_EDITOR_CONTROL::BoardSetup,             PCB_ACTIONS::boardSetup.MakeEvent() );
+     Go( &BOARD_EDITOR_CONTROL::ImportNetlist,          PCB_ACTIONS::importNetlist.MakeEvent() );
+     Go( &BOARD_EDITOR_CONTROL::ImportSpecctraSession,  PCB_ACTIONS::importSpecctraSession.MakeEvent() );
++    Go( &BOARD_EDITOR_CONTROL::AutorouteBoard,         PCB_ACTIONS::autorouteBoard.MakeEvent() );
+     Go( &BOARD_EDITOR_CONTROL::ExportSpecctraDSN,      PCB_ACTIONS::exportSpecctraDSN.MakeEvent() );
+     Go( &BOARD_EDITOR_CONTROL::EditFootprintFields,    PCB_ACTIONS::editFootprintFields.MakeEvent() );
+ 
+diff --git a/pcbnew/tools/board_editor_control.h b/pcbnew/tools/board_editor_control.h
+index 1b2b41ba..4926f838 100644
+--- a/pcbnew/tools/board_editor_control.h
++++ b/pcbnew/tools/board_editor_control.h
+@@ -68,6 +68,7 @@ public:
+     int ImportNetlist( const TOOL_EVENT& aEvent );
+     int ImportSpecctraSession( const TOOL_EVENT& aEvent );
+     int ExportSpecctraDSN( const TOOL_EVENT& aEvent );
++    int AutorouteBoard( const TOOL_EVENT& aEvent );
+     int ExportNetlist( const TOOL_EVENT& aEvent );
+     int EditFootprintFields( const TOOL_EVENT& aEvent );
+     int GenerateDrillFiles( const TOOL_EVENT& aEvent );
+diff --git a/pcbnew/tools/pcb_actions.cpp b/pcbnew/tools/pcb_actions.cpp
+index 152cd8bf..e2c1df87 100644
+--- a/pcbnew/tools/pcb_actions.cpp
++++ b/pcbnew/tools/pcb_actions.cpp
+@@ -3245,6 +3245,13 @@ TOOL_ACTION PCB_ACTIONS::routerRouteSelectedFromEnd( TOOL_ACTION_ARGS()
+         .Flags( AF_ACTIVATE )
+         .Parameter( PNS::PNS_MODE_ROUTE_SINGLE ) );
+ 
++TOOL_ACTION PCB_ACTIONS::autorouteBoard( TOOL_ACTION_ARGS()
++        .Name( "pcbnew.EditorControl.autorouteBoard" )
++        .Scope( AS_GLOBAL )
++        .FriendlyName( _( "Autoroute Board..." ) )
++        .Tooltip( _( "Route every unrouted connection with the built-in autorouter" ) )
++        .Icon( BITMAPS::ps_router ) );
++
+ TOOL_ACTION PCB_ACTIONS::routerAutorouteSelected( TOOL_ACTION_ARGS()
+         .Name( "pcbnew.InteractiveRouter.Autoroute" )
+         .Scope( AS_GLOBAL )
+diff --git a/pcbnew/tools/pcb_actions.h b/pcbnew/tools/pcb_actions.h
+index f23c13d8..a8a7d557 100644
+--- a/pcbnew/tools/pcb_actions.h
++++ b/pcbnew/tools/pcb_actions.h
+@@ -293,6 +293,7 @@ public:
+     static TOOL_ACTION routerRouteSelected;
+     static TOOL_ACTION routerRouteSelectedFromEnd;
+     static TOOL_ACTION routerAutorouteSelected;
++    static TOOL_ACTION autorouteBoard;          ///< Integrated autorouter (Android)
+     static TOOL_ACTION routerOptimizeSelected;
+     static TOOL_ACTION routerSpreadTracks;
+ 
+-- 
+2.54.0 (Apple Git-157)
+
