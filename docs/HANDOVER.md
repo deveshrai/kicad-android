@@ -261,3 +261,32 @@ Route > Autoroute Board... routes the whole board on the device with Freerouting
   on io.github.deveshrai.kicadandroid.
 - Files pushed with adb are invisible to the system picker until scanned:
   `adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/...`.
+
+## Integrated MCP server (P8, 10.99af)
+Preferences > MCP Server turns on an MCP server inside KiCad (Streamable HTTP, JSON responses, no SSE)
+at `http://127.0.0.1:27880/mcp` ("This device", e.g. Claude Code in Termux) or on the Wi-Fi address
+("Another computer").  Clients send `Authorization: Bearer <token>`; the token is generated once and
+kept in kicad_common.json (`mcp.*`); New Token replaces it.  The page shows the ready-made
+`claude --mcp-config '...'` and `claude mcp add --transport http ...` lines with Copy buttons and a
+live status line (listening / connected client, last request, last tool).
+- **Code** (kicad patch 0031): include/api/mcp_server.h + common/api/mcp_server.cpp (HTTP/1.1 keep-alive
+  server on a thread, JSON-RPC: initialize, ping, tools/list, tools/call; tools run on the main
+  thread via CallAfter, so every change is a normal commit the user sees and can undo);
+  common/dialogs/panel_mcp_server.cpp; KICAD_API_SERVER::HandleRequest() runs IPC API requests in
+  process; api/src/kiapi_json.cpp converts JSON <-> API messages **inside libkiapi**, because
+  libprotobuf.a is linked into several .so files and only kiapi's copy has the API descriptors
+  (lookups from kicommon find nothing).  pcbnew/api/mcp_tools_pcb.cpp adds pcb_* tools while the
+  board editor is open.
+- **Tools** (all declared up front, because clients read the list once; editors attach handlers with
+  SetToolHandler while open, and the tools say "open the board editor" otherwise): kicad_status,
+  kicad_open_editor (project manager's editPCB/editSchematic actions; the GUI has no OpenDocument
+  handler, only kicad-cli's server does), kicad_api (any IPC API command by name, args as JSON with .proto field
+  names), kicad_api_commands, kicad_api_describe; pcb_board_summary, pcb_move_footprint,
+  pcb_run_drc, pcb_autoroute (runs off the main thread, imports snapshots live).
+- **Test from the Mac:** `adb forward tcp:27880 tcp:27880`, then curl JSON-RPC or
+  `claude -p ... --strict-mcp-config --mcp-config '{"mcpServers":{"kicad":{"type":"http","url":"http://127.0.0.1:27880/mcp","headers":{"Authorization":"Bearer <token>"}}}}'`
+  (tested with Claude Code 2.1.319: from a cold start it opened the board editor, autorouted the
+  blinker 20/20, ran DRC 0/0 and reported, while the tablet showed it happening).  Remote mode tested from the Mac over Wi-Fi.
+- Origin header check: when bound to 127.0.0.1, requests from web pages (non-localhost Origin) get 403.
+- Next ideas: sch_* tools (ERC, annotate, update PCB from schematic), a board picture tool
+  (RunBoardJobExportPng), Windows support (sockets are POSIX only).

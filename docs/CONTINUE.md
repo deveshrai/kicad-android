@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ae; next: af).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99af; next: ag).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -34,16 +34,8 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
      "Integrated autorouter").  The blinker routes in under a second, with DRC clean.
    - Possible follow-ups: route only the selected nets, a passes or time limit, a progress
      notification when the app is in the background.
-3. **P8: an integrated MCP server**, so Claude Code (or any MCP client) can drive KiCad.
-   - Clients: Termux on the same device, or a computer on the same Wi-Fi.
-   - The settings page should be as simple as SolidCraft's **Preferences > MCP server** page:
-     - a "Turn on the MCP server" checkbox
-     - a "Connect from: This device / Another computer" toggle
-     - the server address with a Copy button
-     - a ready-to-paste `claude --mcp-config '{...}'` command with a Bearer token, and a Copy button
-     - a listening status line ("waiting for Claude Code to connect")
-     - Advanced: the port (default 27880), and a `claude mcp add --transport http ...` line
-   - The user watches every step happen live in the app.
+3. **P8: integrated MCP server. Done in 10.99af** (Preferences > MCP Server; see HANDOVER).
+   - Follow-ups: schematic tools (ERC, annotate, update PCB), a board-picture tool, Windows sockets.
 4. **P9: import and export third-party symbols, footprints and 3D models.**
    - Test with SnapEDA's ESP32-S31-WROOM-1-N16R16V, including its 3D model.
 5. **P10: UI sweep.** Fields too big, too small, or not scaling.  Check at the Fold's 2.625 scale.

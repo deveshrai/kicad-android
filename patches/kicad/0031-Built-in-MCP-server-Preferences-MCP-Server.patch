@@ -1,0 +1,2714 @@
+From bc9c8c418b582edd067288599b69b47d593fa378 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 6 Nov 2026 23:39:21 +0530
+Subject: [PATCH] Built-in MCP server (Preferences > MCP Server)
+
+An MCP server inside KiCad (Streamable HTTP with JSON responses), so Claude Code
+or another MCP client can read and change the design while the user watches.
+Clients connect to http://127.0.0.1:27880/mcp, or to the device's Wi-Fi address,
+with a Bearer token.  The server is off until it is turned on.
+
+- api_server: HandleRequest() runs IPC API requests in process
+- api/src/kiapi_json.cpp: JSON <-> API messages, inside libkiapi, where the
+  message descriptors are (libprotobuf is linked into several libraries)
+- mcp_server: the HTTP server, JSON-RPC, and the tools: kicad_status,
+  kicad_open_editor, kicad_api, kicad_api_commands, kicad_api_describe, and
+  pcb_board_summary, pcb_move_footprint, pcb_run_drc and pcb_autoroute, whose
+  handlers the board editor attaches while it is open
+- panel_mcp_server: on/off, this device or another computer, the address and
+  ready-to-paste claude commands with Copy buttons, a live status line, port and
+  new token
+- dialog_autoroute: ImportAutorouteSession() shared with pcb_autoroute
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiaLryXaTy3ujYusUen
+---
+ api/CMakeLists.txt                  |   5 +
+ api/src/kiapi_json.cpp              | 245 +++++++
+ common/CMakeLists.txt               |   2 +
+ common/api/api_server.cpp           |  47 +-
+ common/api/mcp_server.cpp           | 983 ++++++++++++++++++++++++++++
+ common/dialogs/panel_mcp_server.cpp | 300 +++++++++
+ common/eda_base_frame.cpp           |   3 +
+ common/settings/common_settings.cpp |   9 +
+ include/api/api_server.h            |  13 +
+ include/api/kiapi_json.h            |  48 ++
+ include/api/mcp_server.h            | 174 +++++
+ include/dialogs/panel_mcp_server.h  |  74 +++
+ include/settings/common_settings.h  |  11 +
+ kicad/kicad.cpp                     |  29 +
+ pcbnew/CMakeLists.txt               |   1 +
+ pcbnew/api/mcp_tools_pcb.cpp        | 370 +++++++++++
+ pcbnew/api/mcp_tools_pcb.h          |  31 +
+ pcbnew/dialogs/dialog_autoroute.cpp |  29 +-
+ pcbnew/dialogs/dialog_autoroute.h   |   9 +
+ pcbnew/pcb_edit_frame.cpp           |   5 +
+ 20 files changed, 2358 insertions(+), 30 deletions(-)
+ create mode 100644 api/src/kiapi_json.cpp
+ create mode 100644 common/api/mcp_server.cpp
+ create mode 100644 common/dialogs/panel_mcp_server.cpp
+ create mode 100644 include/api/kiapi_json.h
+ create mode 100644 include/api/mcp_server.h
+ create mode 100644 include/dialogs/panel_mcp_server.h
+ create mode 100644 pcbnew/api/mcp_tools_pcb.cpp
+ create mode 100644 pcbnew/api/mcp_tools_pcb.h
+
+diff --git a/api/CMakeLists.txt b/api/CMakeLists.txt
+index d202263e..aea1e2bb 100644
+--- a/api/CMakeLists.txt
++++ b/api/CMakeLists.txt
+@@ -77,8 +77,13 @@ add_library( kiapi SHARED
+     ${CMAKE_CURRENT_SOURCE_DIR}/../include/import_export.h
+     ${KIAPI_CPP_SRCS}
+     ${KIAPI_CPP_HEADERS}
++    src/kiapi_json.cpp
+     )
+ 
++# kiapi_json.cpp: JSON access to the messages, used by the MCP server
++target_include_directories( kiapi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include )
++target_link_libraries( kiapi nlohmann_json )
++
+ target_compile_definitions( kiapi PRIVATE KIAPI_IMPORTEXPORT=APIEXPORT )
+ target_compile_definitions( kiapi INTERFACE KIAPI_IMPORTEXPORT=APIIMPORT )
+ 
+diff --git a/api/src/kiapi_json.cpp b/api/src/kiapi_json.cpp
+new file mode 100644
+index 00000000..09d8beb8
+--- /dev/null
++++ b/api/src/kiapi_json.cpp
+@@ -0,0 +1,245 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include <api/kiapi_json.h>
++
++#include <board/board_commands.pb.h>
++#include <board/board_jobs.pb.h>
++#include <common/commands/base_commands.pb.h>
++#include <common/commands/cross_probe_commands.pb.h>
++#include <common/commands/editor_commands.pb.h>
++#include <common/commands/library_commands.pb.h>
++#include <common/commands/project_commands.pb.h>
++#include <common/commands/variant_commands.pb.h>
++#include <schematic/schematic_commands.pb.h>
++#include <schematic/schematic_jobs.pb.h>
++
++#include <google/protobuf/any.pb.h>
++#include <google/protobuf/descriptor.h>
++#include <google/protobuf/message.h>
++#include <google/protobuf/util/json_util.h>
++
++#include <nlohmann/json.hpp>
++
++#include <memory>
++#include <set>
++#include <vector>
++
++namespace gpb = google::protobuf;
++using nlohmann::json;
++
++
++/// One file of each kind of API command; listing walks these files.
++static std::vector<const gpb::FileDescriptor*> apiFiles()
++{
++    return { kiapi::common::commands::GetVersion::descriptor()->file(),
++             kiapi::common::commands::BeginCommit::descriptor()->file(),
++             kiapi::common::commands::OpenDocument::descriptor()->file(),
++             kiapi::common::commands::GetLibraryItems::descriptor()->file(),
++             kiapi::common::commands::GetVariants::descriptor()->file(),
++             kiapi::common::commands::CrossProbeAnnounce::descriptor()->file(),
++             kiapi::board::commands::GetBoardStackup::descriptor()->file(),
++             kiapi::board::jobs::RunBoardJobExportGerbers::descriptor()->file(),
++             kiapi::schematic::commands::GetSchematicHierarchy::descriptor()->file(),
++             kiapi::schematic::jobs::RunSchematicJobExportPdf::descriptor()->file() };
++}
++
++
++static const gpb::Descriptor* findMessage( const std::string& aName )
++{
++    const gpb::DescriptorPool* pool = kiapi::common::commands::GetVersion::descriptor()
++                                              ->file()->pool();
++
++    for( const char* prefix : { "", "kiapi.common.commands.", "kiapi.board.commands.",
++                                "kiapi.schematic.commands.", "kiapi.board.jobs.",
++                                "kiapi.schematic.jobs.", "kiapi.common.project.",
++                                "kiapi.common.types.", "kiapi.board.types.",
++                                "kiapi.schematic.types.", "kiapi.board.", "kiapi.schematic.",
++                                "kiapi.common." } )
++    {
++        if( const gpb::Descriptor* d = pool->FindMessageTypeByName( prefix + aName ) )
++            return d;
++    }
++
++    return nullptr;
++}
++
++
++bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
++                         std::string& aTypeUrl, std::string& aBytes, std::string& aError )
++{
++    const gpb::Descriptor* desc = findMessage( aName );
++
++    if( !desc )
++    {
++        aError = "unknown API command '" + aName + "' (see kicad_api_commands)";
++        return false;
++    }
++
++    const gpb::Message* prototype = gpb::MessageFactory::generated_factory()->GetPrototype( desc );
++
++    if( !prototype )
++    {
++        aError = "no message class for " + std::string( desc->full_name() );
++        return false;
++    }
++
++    std::unique_ptr<gpb::Message> msg( prototype->New() );
++    auto status = gpb::util::JsonStringToMessage( aJson.empty() ? "{}" : aJson, msg.get() );
++
++    if( !status.ok() )
++    {
++        aError = "bad arguments for " + std::string( desc->full_name() ) + ": "
++                 + std::string( status.message() );
++        return false;
++    }
++
++    aTypeUrl = "type.googleapis.com/" + std::string( desc->full_name() );
++    aBytes = msg->SerializeAsString();
++    return true;
++}
++
++
++bool KiapiMessageToJson( const std::string& aTypeUrl, const std::string& aBytes,
++                         std::string& aJson, std::string& aError )
++{
++    std::string name = aTypeUrl.substr( aTypeUrl.rfind( '/' ) + 1 );
++    const gpb::Descriptor* desc = findMessage( name );
++
++    if( !desc )
++    {
++        aJson = "{}";
++        return true;
++    }
++
++    std::unique_ptr<gpb::Message> msg(
++            gpb::MessageFactory::generated_factory()->GetPrototype( desc )->New() );
++
++    if( !msg->ParseFromString( aBytes ) )
++    {
++        aError = "could not read the response " + name;
++        return false;
++    }
++
++    gpb::util::JsonPrintOptions options;
++    options.preserve_proto_field_names = true;
++    auto status = gpb::util::MessageToJsonString( *msg, &aJson, options );
++
++    if( !status.ok() )
++    {
++        aError = "could not convert the response " + name + " to JSON";
++        return false;
++    }
++
++    return true;
++}
++
++
++std::string KiapiListCommands()
++{
++    json out = json::object();
++
++    for( const gpb::FileDescriptor* fd : apiFiles() )
++    {
++        json& list = out[std::string( fd->package() )];
++
++        for( int i = 0; i < fd->message_type_count(); ++i )
++        {
++            std::string name( fd->message_type( i )->name() );
++
++            // Responses are not commands
++            if( name.size() > 8 && name.compare( name.size() - 8, 8, "Response" ) == 0 )
++                continue;
++
++            list.push_back( name );
++        }
++    }
++
++    return out.dump( 1 );
++}
++
++
++static json describeMessage( const gpb::Descriptor* d, int aDepth )
++{
++    json fields = json::array();
++
++    for( int i = 0; i < d->field_count(); ++i )
++    {
++        const gpb::FieldDescriptor* f = d->field( i );
++        json        field = { { "name", std::string( f->name() ) } };
++        std::string type;
++
++        if( f->message_type() )
++            type = std::string( f->message_type()->full_name() );
++        else if( f->enum_type() )
++            type = std::string( f->enum_type()->full_name() );
++        else
++            type = std::string( f->type_name() );
++
++        if( f->is_map() )
++            type = "map";
++        else if( f->is_repeated() )
++            type = "repeated " + type;
++
++        field["type"] = type;
++
++        if( f->enum_type() )
++        {
++            json values = json::array();
++
++            for( int v = 0; v < f->enum_type()->value_count(); ++v )
++                values.push_back( std::string( f->enum_type()->value( v )->name() ) );
++
++            field["values"] = values;
++        }
++
++        if( f->real_containing_oneof() )
++            field["oneof"] = std::string( f->real_containing_oneof()->name() );
++
++        if( aDepth > 0 && f->message_type() && !f->is_map()
++            && std::string( f->message_type()->full_name() ).rfind( "google.protobuf.", 0 ) != 0 )
++        {
++            field["fields"] = describeMessage( f->message_type(), aDepth - 1 );
++        }
++
++        fields.push_back( field );
++    }
++
++    return fields;
++}
++
++
++std::string KiapiDescribe( const std::string& aName )
++{
++    const gpb::Descriptor* d = findMessage( aName );
++
++    if( !d )
++        return std::string();
++
++    json out = { { "message", std::string( d->full_name() ) },
++                 { "fields", describeMessage( d, 2 ) } };
++
++    if( const gpb::Descriptor* resp = findMessage( std::string( d->full_name() ) + "Response" ) )
++    {
++        out["response"] = { { "message", std::string( resp->full_name() ) },
++                            { "fields", describeMessage( resp, 1 ) } };
++    }
++
++    return out.dump( 1 );
++}
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index dba47e3a..a84780f0 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -388,6 +388,7 @@ set( KICOMMON_SRCS
+     api/api_plugin.cpp
+     api/api_plugin_manager.cpp
+     api/api_server.cpp
++    api/mcp_server.cpp
+     api/api_utils.cpp
+     api/cross_probe_client.cpp
+     api/python_manager.cpp
+@@ -692,6 +693,7 @@ set( COMMON_DLG_SRCS
+     dialogs/panel_spacemouse_base.cpp
+     dialogs/panel_packages_and_updates.cpp
+     dialogs/panel_packages_and_updates_base.cpp
++    dialogs/panel_mcp_server.cpp
+     dialogs/panel_plugin_settings.cpp
+     dialogs/panel_plugin_settings_base.cpp
+     dialogs/panel_setup_netclasses.cpp
+diff --git a/common/api/api_server.cpp b/common/api/api_server.cpp
+index 2458fd67..5a18c1c1 100644
+--- a/common/api/api_server.cpp
++++ b/common/api/api_server.cpp
+@@ -304,6 +304,19 @@ void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
+         return;
+     }
+ 
++    ApiResponse response = HandleRequest( request );
++
++    // Note: at the point we call Reply(), we no longer own requestString.
++    m_server->Reply( response.SerializeAsString() );
++
++    if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
++        log( "Response: " + response.Utf8DebugString() );
++}
++
++
++ApiResponse KICAD_API_SERVER::HandleRequest( const ApiRequest& aRequest )
++{
++    ApiRequest request = aRequest;     // handlers take a mutable request
+     API_RESULT result;
+     bool notifyNetSettings = false;
+ 
+@@ -321,35 +334,25 @@ void KICAD_API_SERVER::handleApiRequestString( std::string& aRequestString )
+     if( notifyNetSettings )
+         NotifyNetSettingsChanged();
+ 
+-    // Note: at the point we call Reply(), we no longer own requestString.
+-
+     if( result.has_value() )
+     {
+         result->mutable_header()->set_kicad_token( m_token );
+-        m_server->Reply( result->SerializeAsString() );
+-
+-        if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
+-            log( "Response: " + result->Utf8DebugString() );
++        return *result;
+     }
+-    else
+-    {
+-        ApiResponse error;
+-        error.mutable_status()->CopyFrom( result.error() );
+-        error.mutable_header()->set_kicad_token( m_token );
+-
+-        if( result.error().status() == ApiStatusCode::AS_UNHANDLED )
+-        {
+-            std::string type = "<unparseable Any>";
+-            google::protobuf::Any::ParseAnyTypeUrl( request.message().type_url(), &type );
+-            std::string msg = fmt::format( "no handler available for request of type {}", type );
+-            error.mutable_status()->set_error_message( msg );
+-        }
+ 
+-        m_server->Reply( error.SerializeAsString() );
++    ApiResponse error;
++    error.mutable_status()->CopyFrom( result.error() );
++    error.mutable_header()->set_kicad_token( m_token );
+ 
+-        if( ADVANCED_CFG::GetCfg().m_EnableAPILogging )
+-            log( "Response (ERROR): " + error.Utf8DebugString() );
++    if( result.error().status() == ApiStatusCode::AS_UNHANDLED )
++    {
++        std::string type = "<unparseable Any>";
++        google::protobuf::Any::ParseAnyTypeUrl( aRequest.message().type_url(), &type );
++        std::string msg = fmt::format( "no handler available for request of type {}", type );
++        error.mutable_status()->set_error_message( msg );
+     }
++
++    return error;
+ }
+ 
+ 
+diff --git a/common/api/mcp_server.cpp b/common/api/mcp_server.cpp
+new file mode 100644
+index 00000000..7e60fbe4
+--- /dev/null
++++ b/common/api/mcp_server.cpp
+@@ -0,0 +1,983 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include <api/mcp_server.h>
++
++#include <api/api_server.h>
++#include <api/common/envelope.pb.h>
++#include <build_version.h>
++#include <pgm_base.h>
++#include <project.h>
++#include <settings/common_settings.h>
++#include <settings/settings_manager.h>
++
++#include <api/kiapi_json.h>
++
++#include <wx/app.h>
++#include <wx/base64.h>
++#include <wx/log.h>
++#include <wx/thread.h>
++
++#include <fmt/format.h>
++
++#include <algorithm>
++#include <chrono>
++#include <cstring>
++#include <future>
++#include <random>
++#include <sstream>
++
++#ifndef __WINDOWS__
++#include <arpa/inet.h>
++#include <ifaddrs.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#include <sys/socket.h>
++#include <unistd.h>
++#endif
++
++using nlohmann::json;
++
++static const char* const traceMcp = "KICAD_MCP";
++
++static const char* const SERVER_INSTRUCTIONS =
++        "This is KiCad, the electronics design suite, running on the user's device. The user "
++        "watches every change happen in the open editor, and can undo it.\n"
++        "- Start with kicad_status to see the open project and editors.\n"
++        "- The pcb_* tools (summary, move footprints, DRC, autoroute) need the board editor "
++        "open; kicad_open_editor opens it. For the schematic, use kicad_api "
++        "(GetSchematicNetlist, GetItems, PlaceSymbolFromLibrary, CreateItems...).\n"
++        "- kicad_api runs any command of KiCad's IPC API (the API kicad-python uses). Use "
++        "kicad_api_commands to list them and kicad_api_describe to see a message's fields. "
++        "Lengths are in nanometres; angles are in degrees.\n"
++        "- Edits through kicad_api should be wrapped in BeginCommit / EndCommit so they become "
++        "one undo step.";
++
++
++MCP_RESULT MCP_RESULT::Text( const std::string& aText )
++{
++    MCP_RESULT r;
++    r.content.push_back( { { "type", "text" }, { "text", aText } } );
++    return r;
++}
++
++
++MCP_RESULT MCP_RESULT::Json( const json& aValue )
++{
++    return Text( aValue.dump( 1 ) );
++}
++
++
++MCP_RESULT MCP_RESULT::Error( const std::string& aMessage )
++{
++    MCP_RESULT r = Text( aMessage );
++    r.isError = true;
++    return r;
++}
++
++
++MCP_RESULT& MCP_RESULT::AddPng( const std::string& aBytes )
++{
++    wxString data = wxBase64Encode( aBytes.data(), aBytes.size() );
++    content.push_back( { { "type", "image" }, { "mimeType", "image/png" },
++                         { "data", data.ToStdString() } } );
++    return *this;
++}
++
++
++MCP_SERVER& MCP_SERVER::Instance()
++{
++    static MCP_SERVER server;
++    return server;
++}
++
++
++MCP_SERVER::MCP_SERVER()
++{
++    registerBuiltinTools();
++}
++
++
++MCP_SERVER::~MCP_SERVER()
++{
++    Stop();
++}
++
++
++wxString MCP_SERVER::NewToken()
++{
++    std::random_device rd;
++    std::string        token;
++    const char*        hex = "0123456789abcdef";
++
++    for( int i = 0; i < 32; ++i )
++        token += hex[rd() & 0xf];
++
++    return wxString::FromUTF8( token );
++}
++
++
++wxString MCP_SERVER::EnsureToken()
++{
++    COMMON_SETTINGS* settings = Pgm().GetCommonSettings();
++
++    if( settings->m_Mcp.token.IsEmpty() )
++    {
++        settings->m_Mcp.token = NewToken();
++        Pgm().GetSettingsManager().Save( settings );
++    }
++
++    return settings->m_Mcp.token;
++}
++
++
++std::string MCP_SERVER::LocalNetworkAddress()
++{
++    std::string best;
++
++#ifndef __WINDOWS__
++    ifaddrs* addrs = nullptr;
++
++    if( getifaddrs( &addrs ) != 0 )
++        return best;
++
++    for( ifaddrs* a = addrs; a; a = a->ifa_next )
++    {
++        if( !a->ifa_addr || a->ifa_addr->sa_family != AF_INET )
++            continue;
++
++        char buf[INET_ADDRSTRLEN] = {};
++        inet_ntop( AF_INET, &reinterpret_cast<sockaddr_in*>( a->ifa_addr )->sin_addr, buf,
++                   sizeof( buf ) );
++        std::string ip = buf;
++
++        if( ip.rfind( "127.", 0 ) == 0 )
++            continue;
++
++        // Prefer Wi-Fi (wlan*) over mobile data and VPN interfaces.
++        if( best.empty() || std::string( a->ifa_name ).rfind( "wlan", 0 ) == 0 )
++            best = ip;
++    }
++
++    freeifaddrs( addrs );
++#endif
++
++    return best;
++}
++
++
++std::string MCP_SERVER::ClientUrl( bool aRemote, int aPort )
++{
++    std::string host = aRemote ? LocalNetworkAddress() : std::string( "127.0.0.1" );
++
++    if( host.empty() )
++        host = "127.0.0.1";
++
++    return fmt::format( "http://{}:{}/mcp", host, aPort );
++}
++
++
++void MCP_SERVER::ApplySettings()
++{
++    COMMON_SETTINGS* settings = Pgm().GetCommonSettings();
++
++    Stop();
++
++    if( !settings->m_Mcp.enable_server )
++        return;
++
++    start( settings->m_Mcp.allow_remote, settings->m_Mcp.port,
++           EnsureToken().ToStdString() );
++}
++
++
++MCP_SERVER::STATUS MCP_SERVER::GetStatus() const
++{
++    std::lock_guard<std::mutex> lock( m_lock );
++    return m_status;
++}
++
++
++void MCP_SERVER::RegisterTool( const MCP_TOOL& aTool, const void* aOwner )
++{
++    std::lock_guard<std::mutex> lock( m_lock );
++
++    if( !m_tools.count( aTool.name ) )
++        m_toolOrder.push_back( aTool.name );
++
++    m_tools[aTool.name] = { aTool, aOwner };
++}
++
++
++void MCP_SERVER::SetToolHandler( const std::string& aName,
++                                 std::function<MCP_RESULT( const json& )> aHandler,
++                                 const void* aOwner, bool aMainThread )
++{
++    std::lock_guard<std::mutex> lock( m_lock );
++    auto it = m_tools.find( aName );
++
++    if( it == m_tools.end() )
++        return;
++
++    it->second.first.handler = std::move( aHandler );
++    it->second.first.mainThread = aMainThread;
++    it->second.second = aOwner;
++}
++
++
++void MCP_SERVER::UnregisterTools( const void* aOwner )
++{
++    std::lock_guard<std::mutex> lock( m_lock );
++
++    for( auto it = m_tools.begin(); it != m_tools.end(); )
++    {
++        if( it->second.second != aOwner )
++        {
++            ++it;
++        }
++        else if( m_fallbacks.count( it->first ) )
++        {
++            it->second = { m_fallbacks[it->first], this };
++            ++it;
++        }
++        else
++        {
++            m_toolOrder.erase( std::remove( m_toolOrder.begin(), m_toolOrder.end(), it->first ),
++                               m_toolOrder.end() );
++            it = m_tools.erase( it );
++        }
++    }
++}
++
++
++void MCP_SERVER::declareTool( const std::string& aName, const std::string& aDescription,
++                              const json& aSchema, const std::string& aMissing )
++{
++    MCP_TOOL tool;
++    tool.name = aName;
++    tool.description = aDescription;
++    tool.inputSchema = aSchema;
++    tool.handler = [aMissing]( const json& ) { return MCP_RESULT::Error( aMissing ); };
++
++    m_fallbacks[aName] = tool;
++    RegisterTool( tool, this );
++}
++
++
++bool MCP_SERVER::RunOnMainThread( std::function<void()> aFunc, int aTimeoutMs )
++{
++    if( wxThread::IsMain() )
++    {
++        aFunc();
++        return true;
++    }
++
++    auto done = std::make_shared<std::promise<void>>();
++    std::future<void> finished = done->get_future();
++
++    wxTheApp->CallAfter(
++            [aFunc, done]()
++            {
++                try
++                {
++                    aFunc();
++                }
++                catch( ... )
++                {
++                }
++
++                done->set_value();
++            } );
++
++    return finished.wait_for( std::chrono::milliseconds( aTimeoutMs ) )
++           == std::future_status::ready;
++}
++
++
++json MCP_SERVER::CallApi( const std::string& aCommand, const json& aArgs, std::string& aError )
++{
++    std::string typeUrl, bytes;
++
++    if( !KiapiJsonToMessage( aCommand, aArgs.is_null() ? std::string( "{}" ) : aArgs.dump(),
++                             typeUrl, bytes, aError ) )
++    {
++        return json();
++    }
++
++    kiapi::common::ApiRequest request;
++    request.mutable_header()->set_client_name( "kicad-mcp" );
++    request.mutable_message()->set_type_url( typeUrl );
++    request.mutable_message()->set_value( bytes );
++
++    kiapi::common::ApiResponse response = Pgm().GetApiServer().HandleRequest( request );
++
++    if( response.status().status() != kiapi::common::ApiStatusCode::AS_OK )
++    {
++        aError = std::string( kiapi::common::ApiStatusCode_Name( response.status().status() ) )
++                 + ": " + response.status().error_message();
++        return json();
++    }
++
++    std::string out;
++
++    if( !KiapiMessageToJson( response.message().type_url(), response.message().value(), out,
++                             aError ) )
++    {
++        return json();
++    }
++
++    json result = json::parse( out, nullptr, false );
++    return result.is_discarded() ? json::object() : result;
++}
++
++
++void MCP_SERVER::registerBuiltinTools()
++{
++    MCP_TOOL status;
++    status.name = "kicad_status";
++    status.description = "KiCad's version, the open project, and the documents open in the "
++                         "board and schematic editors.";
++    status.inputSchema = { { "type", "object" }, { "properties", json::object() } };
++    status.handler = []( const json& ) -> MCP_RESULT
++    {
++        json out;
++        out["kicad_version"] = GetBuildVersion().ToStdString();
++
++        PROJECT& prj = Pgm().GetSettingsManager().Prj();
++        out["project"] = prj.GetProjectFullName().ToStdString();
++
++        std::string err;
++        json docs = json::array();
++
++        for( const char* type : { "DOCTYPE_PCB", "DOCTYPE_SCHEMATIC" } )
++        {
++            json r = CallApi( "GetOpenDocuments", { { "type", type } }, err );
++
++            if( r.contains( "documents" ) )
++            {
++                for( const json& d : r["documents"] )
++                    docs.push_back( d );
++            }
++        }
++
++        out["open_documents"] = docs;
++
++        if( docs.empty() )
++            out["hint"] = "No editor is open. Open the project's board or schematic in the app, "
++                          "or use kicad_api with OpenDocument.";
++
++        return MCP_RESULT::Json( out );
++    };
++    RegisterTool( status, this );
++
++    MCP_TOOL api;
++    api.name = "kicad_api";
++    api.description = "Run a command of KiCad's IPC API, the API kicad-python uses. 'command' "
++                      "is the request message name (for example GetItems, CreateItems, "
++                      "BeginCommit, GetNets, RefillZones, RunBoardJobExportGerbers); 'args' "
++                      "holds its fields as JSON, with the field names from the .proto files. "
++                      "Lengths are nanometres. Returns the response message as JSON.";
++    api.inputSchema = {
++        { "type", "object" },
++        { "properties",
++          { { "command", { { "type", "string" } } },
++            { "args", { { "type", "object" } } } } },
++        { "required", { "command" } }
++    };
++    api.handler = []( const json& aArgs ) -> MCP_RESULT
++    {
++        std::string err;
++        json        r = CallApi( aArgs.value( "command", std::string() ),
++                                 aArgs.contains( "args" ) ? aArgs["args"] : json::object(), err );
++
++        if( !err.empty() )
++            return MCP_RESULT::Error( err );
++
++        return MCP_RESULT::Json( r );
++    };
++    RegisterTool( api, this );
++
++    MCP_TOOL commands;
++    commands.name = "kicad_api_commands";
++    commands.description = "List the commands kicad_api can run, by API package.";
++    commands.inputSchema = { { "type", "object" }, { "properties", json::object() } };
++    commands.handler = []( const json& ) -> MCP_RESULT
++    {
++        return MCP_RESULT::Text( KiapiListCommands() );
++    };
++    RegisterTool( commands, this );
++
++    MCP_TOOL describe;
++    describe.name = "kicad_api_describe";
++    describe.description = "Describe the fields of an IPC API message (a command, its response, "
++                           "or a type such as kiapi.board.types.Track), two levels deep.";
++    describe.inputSchema = {
++        { "type", "object" },
++        { "properties", { { "message", { { "type", "string" } } } } },
++        { "required", { "message" } }
++    };
++    describe.handler = []( const json& aArgs ) -> MCP_RESULT
++    {
++        std::string name = aArgs.value( "message", std::string() );
++        std::string out = KiapiDescribe( name );
++
++        if( out.empty() )
++            return MCP_RESULT::Error( "unknown message '" + name + "'" );
++
++        return MCP_RESULT::Text( out );
++    };
++    RegisterTool( describe, this );
++
++    // Implemented by the project manager and the board editor; see SetToolHandler()
++    const std::string noPcb = "The board editor is not open. Open it with kicad_open_editor (editor: pcb), or in the app.";
++
++    declareTool( "kicad_open_editor",
++                 "Open the project's board (editor: pcb) or schematic (editor: schematic) in "
++                 "the app, as if the user had clicked it in the project manager.",
++                 { { "type", "object" },
++                   { "properties",
++                     { { "editor", { { "type", "string" },
++                                     { "enum", { "pcb", "schematic" } } } } } },
++                   { "required", { "editor" } } },
++                 "The project manager is not available." );
++
++    declareTool( "pcb_board_summary",
++                 "Summarise the board open in the PCB editor: outline, layers, every footprint "
++                 "with its position, and counts of tracks, vias, zones and unrouted "
++                 "connections. Set nets to also list the nets.",
++                 { { "type", "object" },
++                   { "properties", { { "nets", { { "type", "boolean" } } } } } },
++                 noPcb );
++
++    declareTool( "pcb_move_footprint",
++                 "Move, rotate or flip a footprint by reference designator. x and y are the "
++                 "footprint's position in mm, rotation is in degrees, side is front or back. "
++                 "Omitted values are left as they are. One undo step.",
++                 { { "type", "object" },
++                   { "properties",
++                     { { "reference", { { "type", "string" } } },
++                       { "x", { { "type", "number" } } },
++                       { "y", { { "type", "number" } } },
++                       { "rotation", { { "type", "number" } } },
++                       { "side", { { "type", "string" }, { "enum", { "front", "back" } } } } } },
++                   { "required", { "reference" } } },
++                 noPcb );
++
++    declareTool( "pcb_run_drc",
++                 "Run the design rules check on the board (refilling zones first unless "
++                 "refill_zones is false) and return the violations. They also appear as "
++                 "markers on the board.",
++                 { { "type", "object" },
++                   { "properties",
++                     { { "refill_zones", { { "type", "boolean" } } },
++                       { "max_items", { { "type", "integer" } } } } } },
++                 noPcb );
++
++    declareTool( "pcb_autoroute",
++                 "Route every unrouted connection with the built-in autorouter (Freerouting), "
++                 "showing the routes on the board as they are found. Existing unlocked tracks "
++                 "may be improved; lock tracks to keep them. Small boards take seconds, dense "
++                 "ones minutes. The result is one undo step. Then refills zones unless "
++                 "refill_zones is false.",
++                 { { "type", "object" },
++                   { "properties",
++                     { { "optimize", { { "type", "boolean" } } },
++                       { "max_passes", { { "type", "integer" } } },
++                       { "refill_zones", { { "type", "boolean" } } } } } },
++                 noPcb );
++}
++
++
++json MCP_SERVER::listTools()
++{
++    std::lock_guard<std::mutex> lock( m_lock );
++    json tools = json::array();
++
++    for( const std::string& name : m_toolOrder )
++    {
++        const MCP_TOOL& t = m_tools[name].first;
++        tools.push_back( { { "name", t.name },
++                           { "description", t.description },
++                           { "inputSchema", t.inputSchema } } );
++    }
++
++    return { { "tools", tools } };
++}
++
++
++json MCP_SERVER::callTool( const std::string& aName, const json& aArgs )
++{
++    MCP_TOOL tool;
++
++    {
++        std::lock_guard<std::mutex> lock( m_lock );
++        auto it = m_tools.find( aName );
++
++        if( it == m_tools.end() )
++        {
++            MCP_RESULT r = MCP_RESULT::Error( "unknown tool '" + aName
++                                              + "'; the editor that provides it may be closed" );
++            return { { "content", r.content }, { "isError", true } };
++        }
++
++        tool = it->second.first;
++        m_status.lastTool = aName;
++    }
++
++    MCP_RESULT result;
++
++    auto run = [&]()
++    {
++        try
++        {
++            result = tool.handler( aArgs );
++        }
++        catch( const std::exception& e )
++        {
++            result = MCP_RESULT::Error( std::string( "tool failed: " ) + e.what() );
++        }
++    };
++
++    if( tool.mainThread )
++    {
++        if( !RunOnMainThread( run ) )
++            result = MCP_RESULT::Error( "KiCad is busy (a dialog may be open); try again" );
++    }
++    else
++    {
++        run();
++    }
++
++    return { { "content", result.content }, { "isError", result.isError } };
++}
++
++
++json MCP_SERVER::handleMessage( const json& aMessage )
++{
++    auto error = [&]( int aCode, const std::string& aText ) -> json
++    {
++        return { { "jsonrpc", "2.0" },
++                 { "id", aMessage.contains( "id" ) ? aMessage["id"] : json() },
++                 { "error", { { "code", aCode }, { "message", aText } } } };
++    };
++
++    if( !aMessage.is_object() || !aMessage.contains( "method" ) )
++    {
++        // A response from the client, or junk; nothing to answer
++        return json();
++    }
++
++    std::string method = aMessage.value( "method", std::string() );
++    bool        isNotification = !aMessage.contains( "id" );
++    json        params = aMessage.contains( "params" ) ? aMessage["params"] : json::object();
++    json        result;
++
++    if( method == "initialize" )
++    {
++        std::string requested = params.value( "protocolVersion", std::string() );
++        std::string version = "2025-06-18";
++
++        for( const char* v : { "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05" } )
++        {
++            if( requested == v )
++                version = v;
++        }
++
++        {
++            std::lock_guard<std::mutex> lock( m_lock );
++
++            if( params.contains( "clientInfo" ) )
++            {
++                m_status.clientName = params["clientInfo"].value( "name", std::string() );
++                m_status.clientVersion = params["clientInfo"].value( "version", std::string() );
++            }
++        }
++
++        result = { { "protocolVersion", version },
++                   { "capabilities", { { "tools", { { "listChanged", false } } } } },
++                   { "serverInfo",
++                     { { "name", "kicad" },
++                       { "title", "KiCad" },
++                       { "version", GetSemanticVersion().ToStdString() } } },
++                   { "instructions", SERVER_INSTRUCTIONS } };
++    }
++    else if( method == "ping" )
++    {
++        result = json::object();
++    }
++    else if( method == "tools/list" )
++    {
++        result = listTools();
++    }
++    else if( method == "tools/call" )
++    {
++        result = callTool( params.value( "name", std::string() ),
++                           params.contains( "arguments" ) ? params["arguments"]
++                                                          : json::object() );
++    }
++    else if( method.rfind( "notifications/", 0 ) == 0 )
++    {
++        return json();
++    }
++    else
++    {
++        return isNotification ? json() : error( -32601, "method not found: " + method );
++    }
++
++    if( isNotification )
++        return json();
++
++    return { { "jsonrpc", "2.0" }, { "id", aMessage["id"] }, { "result", result } };
++}
++
++
++void MCP_SERVER::start( bool aRemote, int aPort, const std::string& aToken )
++{
++#ifdef __WINDOWS__
++    std::lock_guard<std::mutex> lock( m_lock );
++    m_status.error = "The MCP server is not available on Windows yet.";
++#else
++    int fd = socket( AF_INET, SOCK_STREAM, 0 );
++
++    if( fd < 0 )
++    {
++        std::lock_guard<std::mutex> lock( m_lock );
++        m_status.error = std::string( "socket: " ) + strerror( errno );
++        return;
++    }
++
++    int one = 1;
++    setsockopt( fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof( one ) );
++
++    sockaddr_in addr = {};
++    addr.sin_family = AF_INET;
++    addr.sin_port = htons( aPort );
++    addr.sin_addr.s_addr = htonl( aRemote ? INADDR_ANY : INADDR_LOOPBACK );
++
++    if( bind( fd, reinterpret_cast<sockaddr*>( &addr ), sizeof( addr ) ) != 0
++        || listen( fd, 8 ) != 0 )
++    {
++        std::lock_guard<std::mutex> lock( m_lock );
++        m_status.error = fmt::format( "Port {} is not available ({})", aPort, strerror( errno ) );
++        close( fd );
++        return;
++    }
++
++    m_token = aToken;
++    m_remote = aRemote;
++    m_port = aPort;
++    m_stopping = false;
++    m_listenSocket = fd;
++
++    {
++        std::lock_guard<std::mutex> lock( m_lock );
++        m_status = STATUS();
++        m_status.running = true;
++        m_status.address = ClientUrl( aRemote, aPort );
++    }
++
++    m_acceptThread = std::thread( &MCP_SERVER::acceptLoop, this );
++    wxLogTrace( traceMcp, "MCP server listening on port %d", aPort );
++#endif
++}
++
++
++void MCP_SERVER::Stop()
++{
++#ifndef __WINDOWS__
++    int fd = m_listenSocket.exchange( -1 );
++
++    if( fd >= 0 )
++    {
++        m_stopping = true;
++        shutdown( fd, SHUT_RDWR );
++        close( fd );
++    }
++
++    if( m_acceptThread.joinable() )
++        m_acceptThread.join();
++
++    {
++        std::lock_guard<std::mutex> lock( m_lock );
++
++        for( int client : m_clients )
++            shutdown( client, SHUT_RDWR );
++    }
++#endif
++
++    std::lock_guard<std::mutex> lock( m_lock );
++    m_status.running = false;
++}
++
++
++void MCP_SERVER::acceptLoop()
++{
++#ifndef __WINDOWS__
++    while( !m_stopping )
++    {
++        int fd = m_listenSocket;
++
++        if( fd < 0 )
++            break;
++
++        int client = accept( fd, nullptr, nullptr );
++
++        if( client < 0 )
++        {
++            if( m_stopping )
++                break;
++
++            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
++            continue;
++        }
++
++        std::thread( &MCP_SERVER::serveConnection, this, client ).detach();
++    }
++#endif
++}
++
++
++#ifndef __WINDOWS__
++static bool sendAll( int aSocket, const std::string& aData )
++{
++    size_t sent = 0;
++
++    while( sent < aData.size() )
++    {
++        ssize_t n = send( aSocket, aData.data() + sent, aData.size() - sent, MSG_NOSIGNAL );
++
++        if( n <= 0 )
++            return false;
++
++        sent += n;
++    }
++
++    return true;
++}
++
++
++static void sendResponse( int aSocket, int aCode, const std::string& aReason,
++                          const std::string& aBody, const std::string& aExtraHeaders = "" )
++{
++    std::string head = fmt::format( "HTTP/1.1 {} {}\r\n"
++                                    "Content-Length: {}\r\n"
++                                    "Cache-Control: no-store\r\n",
++                                    aCode, aReason, aBody.size() );
++
++    if( !aBody.empty() )
++        head += "Content-Type: application/json\r\n";
++
++    sendAll( aSocket, head + aExtraHeaders + "\r\n" + aBody );
++}
++#endif
++
++
++void MCP_SERVER::serveConnection( int aSocket )
++{
++#ifndef __WINDOWS__
++    {
++        std::lock_guard<std::mutex> lock( m_lock );
++        m_clients.insert( aSocket );
++    }
++
++    // Closes the socket however the connection ends
++    struct CLOSER
++    {
++        MCP_SERVER* server;
++        int         socket;
++
++        ~CLOSER()
++        {
++            {
++                std::lock_guard<std::mutex> lock( server->m_lock );
++                server->m_clients.erase( socket );
++            }
++
++            close( socket );
++        }
++    } closer{ this, aSocket };
++
++    timeval tv = { 300, 0 };
++    setsockopt( aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof( tv ) );
++    int one = 1;
++    setsockopt( aSocket, IPPROTO_TCP, TCP_NODELAY, &one, sizeof( one ) );
++
++    std::string buffer;
++    char        chunk[16384];
++
++    while( !m_stopping )
++    {
++        // Read the request head
++        size_t headEnd;
++
++        while( ( headEnd = buffer.find( "\r\n\r\n" ) ) == std::string::npos )
++        {
++            if( buffer.size() > 65536 )
++                return;
++
++            ssize_t n = recv( aSocket, chunk, sizeof( chunk ), 0 );
++
++            if( n <= 0 )
++                return;
++
++            buffer.append( chunk, n );
++        }
++
++        std::istringstream head( buffer.substr( 0, headEnd ) );
++        std::string        method, path, version, line;
++        head >> method >> path >> version;
++        std::getline( head, line );
++
++        std::map<std::string, std::string> headers;
++
++        while( std::getline( head, line ) )
++        {
++            if( !line.empty() && line.back() == '\r' )
++                line.pop_back();
++
++            size_t colon = line.find( ':' );
++
++            if( colon == std::string::npos )
++                continue;
++
++            std::string key = line.substr( 0, colon );
++            std::transform( key.begin(), key.end(), key.begin(), ::tolower );
++            std::string value = line.substr( colon + 1 );
++            value.erase( 0, value.find_first_not_of( " \t" ) );
++            headers[key] = value;
++        }
++
++        size_t length = headers.count( "content-length" )
++                                ? std::strtoul( headers["content-length"].c_str(), nullptr, 10 )
++                                : 0;
++
++        if( length > 64 * 1024 * 1024 )
++        {
++            sendResponse( aSocket, 413, "Payload Too Large", "" );
++            return;
++        }
++
++        buffer.erase( 0, headEnd + 4 );
++
++        while( buffer.size() < length )
++        {
++            ssize_t n = recv( aSocket, chunk, sizeof( chunk ), 0 );
++
++            if( n <= 0 )
++                return;
++
++            buffer.append( chunk, n );
++        }
++
++        std::string body = buffer.substr( 0, length );
++        buffer.erase( 0, length );
++
++        bool keepAlive = version == "HTTP/1.1" && headers["connection"] != "close";
++
++        {
++            std::lock_guard<std::mutex> lock( m_lock );
++            m_status.requests++;
++            m_status.lastRequestMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                             std::chrono::system_clock::now().time_since_epoch() )
++                                             .count();
++        }
++
++        size_t query = path.find( '?' );
++
++        if( query != std::string::npos )
++            path.erase( query );
++
++        // A web page on this device must not be able to drive KiCad through the user's browser
++        if( !m_remote && headers.count( "origin" ) )
++        {
++            const std::string& origin = headers["origin"];
++
++            if( origin.find( "://127.0.0.1" ) == std::string::npos
++                && origin.find( "://localhost" ) == std::string::npos )
++            {
++                sendResponse( aSocket, 403, "Forbidden", "" );
++                return;
++            }
++        }
++
++        if( headers["authorization"] != "Bearer " + m_token )
++        {
++            sendResponse( aSocket, 401, "Unauthorized",
++                          R"({"error":"missing or wrong Bearer token; copy it from KiCad's )"
++                          R"(Preferences > MCP Server"})" );
++        }
++        else if( path != "/mcp" && path != "/mcp/" )
++        {
++            sendResponse( aSocket, 404, "Not Found", "" );
++        }
++        else if( method == "GET" || method == "DELETE" )
++        {
++            // No server-initiated stream and no session state to end
++            sendResponse( aSocket, 405, "Method Not Allowed", "", "Allow: POST\r\n" );
++        }
++        else if( method != "POST" )
++        {
++            sendResponse( aSocket, 405, "Method Not Allowed", "", "Allow: POST\r\n" );
++        }
++        else
++        {
++            json message = json::parse( body, nullptr, false );
++
++            if( message.is_discarded() )
++            {
++                sendResponse( aSocket, 400, "Bad Request",
++                              R"({"jsonrpc":"2.0","id":null,"error":{"code":-32700,)"
++                              R"("message":"parse error"}})" );
++            }
++            else
++            {
++                json reply;
++
++                if( message.is_array() )
++                {
++                    reply = json::array();
++
++                    for( const json& m : message )
++                    {
++                        json r = handleMessage( m );
++
++                        if( !r.is_null() )
++                            reply.push_back( r );
++                    }
++
++                    if( reply.empty() )
++                        reply = json();
++                }
++                else
++                {
++                    reply = handleMessage( message );
++                }
++
++                if( reply.is_null() )
++                    sendResponse( aSocket, 202, "Accepted", "" );
++                else
++                    sendResponse( aSocket, 200, "OK", reply.dump() );
++            }
++        }
++
++        if( !keepAlive )
++            break;
++    }
++#endif
++}
+diff --git a/common/dialogs/panel_mcp_server.cpp b/common/dialogs/panel_mcp_server.cpp
+new file mode 100644
+index 00000000..e31b5063
+--- /dev/null
++++ b/common/dialogs/panel_mcp_server.cpp
+@@ -0,0 +1,300 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include <dialogs/panel_mcp_server.h>
++
++#include <api/mcp_server.h>
++#include <pgm_base.h>
++#include <settings/common_settings.h>
++#include <settings/settings_manager.h>
++
++#include <wx/button.h>
++#include <wx/checkbox.h>
++#include <wx/clipbrd.h>
++#include <wx/radiobut.h>
++#include <wx/sizer.h>
++#include <wx/spinctrl.h>
++#include <wx/statline.h>
++#include <wx/stattext.h>
++#include <wx/textctrl.h>
++
++#include <chrono>
++
++
++PANEL_MCP_SERVER::PANEL_MCP_SERVER( wxWindow* aParent ) :
++        RESETTABLE_PANEL( aParent ),
++        m_timer( this )
++{
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++
++    m_enable = new wxCheckBox( this, wxID_ANY, _( "Turn on the MCP server" ) );
++    m_enable->SetFont( m_enable->GetFont().Bold() );
++    top->Add( m_enable, 0, wxALL, 8 );
++
++    m_explain = new wxStaticText( this, wxID_ANY,
++                                  _( "Lets Claude Code, or another AI agent that speaks MCP, use "
++                                     "KiCad.  You see every change happen in the editor, and "
++                                     "can undo it." ) );
++    top->Add( m_explain, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8 );
++
++    wxBoxSizer* from = new wxBoxSizer( wxHORIZONTAL );
++    from->Add( new wxStaticText( this, wxID_ANY, _( "Connect from:" ) ), 0,
++               wxALIGN_CENTER_VERTICAL | wxRIGHT, 12 );
++    m_thisDevice = new wxRadioButton( this, wxID_ANY, _( "This device" ), wxDefaultPosition,
++                                      wxDefaultSize, wxRB_GROUP );
++    m_otherComputer = new wxRadioButton( this, wxID_ANY, _( "Another computer" ) );
++    from->Add( m_thisDevice, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12 );
++    from->Add( m_otherComputer, 0, wxALIGN_CENTER_VERTICAL );
++    top->Add( from, 0, wxALL, 8 );
++
++    m_remoteNote = new wxStaticText( this, wxID_ANY,
++                                     _( "The computer must be on the same Wi-Fi network.  The "
++                                        "connection is not encrypted; the token keeps others "
++                                        "out." ) );
++    top->Add( m_remoteNote, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8 );
++
++    top->Add( new wxStaticText( this, wxID_ANY, _( "Server address:" ) ), 0,
++              wxLEFT | wxRIGHT | wxTOP, 8 );
++    wxBoxSizer* addr = new wxBoxSizer( wxHORIZONTAL );
++    m_address = new wxTextCtrl( this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize,
++                                wxTE_READONLY );
++    m_copyAddress = new wxButton( this, wxID_ANY, _( "Copy" ) );
++    addr->Add( m_address, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8 );
++    addr->Add( m_copyAddress, 0, wxALIGN_CENTER_VERTICAL );
++    top->Add( addr, 0, wxEXPAND | wxALL, 8 );
++
++    top->Add( new wxStaticText( this, wxID_ANY,
++                                _( "Start Claude Code connected to KiCad (paste into a "
++                                   "terminal):" ) ),
++              0, wxLEFT | wxRIGHT | wxTOP, 8 );
++    wxBoxSizer* cmd = new wxBoxSizer( wxHORIZONTAL );
++    m_command = new wxTextCtrl( this, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                                wxSize( -1, 64 ), wxTE_READONLY | wxTE_MULTILINE );
++    m_copyCommand = new wxButton( this, wxID_ANY, _( "Copy" ) );
++    cmd->Add( m_command, 1, wxEXPAND | wxRIGHT, 8 );
++    cmd->Add( m_copyCommand, 0, wxALIGN_CENTER_VERTICAL );
++    top->Add( cmd, 0, wxEXPAND | wxALL, 8 );
++
++    m_status = new wxStaticText( this, wxID_ANY, wxEmptyString );
++    m_status->SetFont( m_status->GetFont().Bold() );
++    top->Add( m_status, 0, wxALL, 8 );
++
++    top->Add( new wxStaticLine( this ), 0, wxEXPAND | wxTOP | wxBOTTOM, 8 );
++    top->Add( new wxStaticText( this, wxID_ANY, _( "Advanced" ) ), 0, wxLEFT | wxRIGHT, 8 );
++
++    wxBoxSizer* port = new wxBoxSizer( wxHORIZONTAL );
++    port->Add( new wxStaticText( this, wxID_ANY, _( "Port:" ) ), 0,
++               wxALIGN_CENTER_VERTICAL | wxRIGHT, 8 );
++    m_port = new wxSpinCtrl( this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize,
++                             wxSP_ARROW_KEYS, 1024, 65535, 27880 );
++    port->Add( m_port, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 16 );
++    m_newToken = new wxButton( this, wxID_ANY, _( "New Token" ) );
++    m_newToken->SetToolTip( _( "Make a new token.  Clients that use the old one are locked "
++                               "out." ) );
++    port->Add( m_newToken, 0, wxALIGN_CENTER_VERTICAL );
++    top->Add( port, 0, wxALL, 8 );
++
++    top->Add( new wxStaticText( this, wxID_ANY,
++                                _( "Or add KiCad to Claude Code for good:" ) ),
++              0, wxLEFT | wxRIGHT | wxTOP, 8 );
++    wxBoxSizer* add = new wxBoxSizer( wxHORIZONTAL );
++    m_addCommand = new wxTextCtrl( this, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                                   wxSize( -1, 64 ), wxTE_READONLY | wxTE_MULTILINE );
++    m_copyAdd = new wxButton( this, wxID_ANY, _( "Copy" ) );
++    add->Add( m_addCommand, 1, wxEXPAND | wxRIGHT, 8 );
++    add->Add( m_copyAdd, 0, wxALIGN_CENTER_VERTICAL );
++    top->Add( add, 0, wxEXPAND | wxALL, 8 );
++
++    SetSizer( top );
++
++    m_enable->Bind( wxEVT_CHECKBOX, [this]( wxCommandEvent& ) { apply(); } );
++    m_thisDevice->Bind( wxEVT_RADIOBUTTON, [this]( wxCommandEvent& ) { apply(); } );
++    m_otherComputer->Bind( wxEVT_RADIOBUTTON, [this]( wxCommandEvent& ) { apply(); } );
++    m_port->Bind( wxEVT_SPINCTRL, [this]( wxSpinEvent& ) { apply(); } );
++    m_copyAddress->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { copy( m_address->GetValue() ); } );
++    m_copyCommand->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { copy( m_command->GetValue() ); } );
++    m_copyAdd->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { copy( m_addCommand->GetValue() ); } );
++    m_newToken->Bind( wxEVT_BUTTON,
++                      [this]( wxCommandEvent& )
++                      {
++                          Pgm().GetCommonSettings()->m_Mcp.token = MCP_SERVER::NewToken();
++                          apply();
++                      } );
++    Bind( wxEVT_TIMER, [this]( wxTimerEvent& ) { updateStatus(); } );
++
++    m_timer.Start( 1000 );
++}
++
++
++PANEL_MCP_SERVER::~PANEL_MCP_SERVER()
++{
++    m_timer.Stop();
++}
++
++
++bool PANEL_MCP_SERVER::TransferDataToWindow()
++{
++    const COMMON_SETTINGS::MCP& mcp = Pgm().GetCommonSettings()->m_Mcp;
++
++    m_loading = true;
++    m_enable->SetValue( mcp.enable_server );
++    m_thisDevice->SetValue( !mcp.allow_remote );
++    m_otherComputer->SetValue( mcp.allow_remote );
++    m_port->SetValue( mcp.port );
++    m_loading = false;
++
++    updateTexts();
++    updateStatus();
++    return true;
++}
++
++
++bool PANEL_MCP_SERVER::TransferDataFromWindow()
++{
++    // Everything is applied as it changes
++    return true;
++}
++
++
++void PANEL_MCP_SERVER::ResetPanel()
++{
++    COMMON_SETTINGS::MCP& mcp = Pgm().GetCommonSettings()->m_Mcp;
++
++    m_loading = true;
++    m_enable->SetValue( false );
++    m_thisDevice->SetValue( true );
++    m_otherComputer->SetValue( false );
++    m_port->SetValue( 27880 );
++    m_loading = false;
++
++    mcp.token.clear();
++    apply();
++}
++
++
++void PANEL_MCP_SERVER::apply()
++{
++    if( m_loading )
++        return;
++
++    COMMON_SETTINGS* settings = Pgm().GetCommonSettings();
++    settings->m_Mcp.enable_server = m_enable->GetValue();
++    settings->m_Mcp.allow_remote = m_otherComputer->GetValue();
++    settings->m_Mcp.port = m_port->GetValue();
++    MCP_SERVER::EnsureToken();
++    Pgm().GetSettingsManager().Save( settings );
++
++    MCP_SERVER::Instance().ApplySettings();
++
++    updateTexts();
++    updateStatus();
++}
++
++
++void PANEL_MCP_SERVER::updateTexts()
++{
++    const COMMON_SETTINGS::MCP& mcp = Pgm().GetCommonSettings()->m_Mcp;
++    bool     on = m_enable->GetValue();
++    wxString token = mcp.token.IsEmpty() ? wxString( wxS( "<token>" ) ) : mcp.token;
++    wxString url = wxString::FromUTF8( MCP_SERVER::ClientUrl( mcp.allow_remote, mcp.port ) );
++
++    m_address->SetValue( url );
++
++    m_command->SetValue( wxString::Format(
++            wxS( "claude --mcp-config '{\"mcpServers\":{\"kicad\":{\"type\":\"http\",\"url\":"
++                 "\"%s\",\"headers\":{\"Authorization\":\"Bearer %s\"}}}}'" ),
++            url, token ) );
++
++    m_addCommand->SetValue( wxString::Format(
++            wxS( "claude mcp add --transport http kicad %s --header \"Authorization: Bearer "
++                 "%s\"" ),
++            url, token ) );
++
++    for( wxWindow* w : std::initializer_list<wxWindow*>{ m_thisDevice, m_otherComputer, m_address,
++                                                         m_copyAddress, m_command, m_copyCommand,
++                                                         m_port, m_addCommand, m_copyAdd,
++                                                         m_newToken } )
++    {
++        w->Enable( on );
++    }
++
++    m_remoteNote->Show( mcp.allow_remote );
++
++    if( mcp.allow_remote && MCP_SERVER::LocalNetworkAddress().empty() )
++        m_remoteNote->SetLabel( _( "This device is not on a network.  Connect to Wi-Fi first." ) );
++    else
++        m_remoteNote->SetLabel( _( "The computer must be on the same Wi-Fi network.  The "
++                                   "connection is not encrypted; the token keeps others out." ) );
++
++    Layout();
++}
++
++
++void PANEL_MCP_SERVER::updateStatus()
++{
++    MCP_SERVER::STATUS s = MCP_SERVER::Instance().GetStatus();
++    wxString           text;
++
++    if( !m_enable->GetValue() )
++    {
++        text = _( "The server is off." );
++    }
++    else if( !s.running )
++    {
++        text = wxString::Format( _( "The server could not start: %s" ),
++                                 wxString::FromUTF8( s.error ) );
++    }
++    else if( s.clientName.empty() && s.requests == 0 )
++    {
++        text = _( "Listening.  Waiting for Claude Code to connect..." );
++    }
++    else
++    {
++        long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                std::chrono::system_clock::now().time_since_epoch() )
++                                .count();
++        long long ago = std::max( 0LL, ( now - s.lastRequestMs ) / 1000 );
++        wxString  who = s.clientName.empty() ? wxString( _( "A client" ) )
++                                             : wxString::FromUTF8( s.clientName + " "
++                                                                   + s.clientVersion );
++
++        text = wxString::Format( _( "Connected: %s.  Last request %lld s ago." ), who.Trim(),
++                                 ago );
++
++        if( !s.lastTool.empty() )
++            text += wxString::Format( _( "  Last tool: %s." ), wxString::FromUTF8( s.lastTool ) );
++    }
++
++    if( m_status->GetLabel() != text )
++    {
++        m_status->SetLabel( text );
++        Layout();
++    }
++}
++
++
++void PANEL_MCP_SERVER::copy( const wxString& aText )
++{
++    if( wxTheClipboard->Open() )
++    {
++        wxTheClipboard->SetData( new wxTextDataObject( aText ) );
++        wxTheClipboard->Flush();
++        wxTheClipboard->Close();
++    }
++}
+diff --git a/common/eda_base_frame.cpp b/common/eda_base_frame.cpp
+index acf0bbb0..99c780b1 100644
+--- a/common/eda_base_frame.cpp
++++ b/common/eda_base_frame.cpp
+@@ -38,6 +38,7 @@
+ #include <dialogs/panel_spacemouse.h>
+ #include <dialogs/panel_data_collection.h>
+ #include <dialogs/panel_plugin_settings.h>
++#include <dialogs/panel_mcp_server.h>
+ #include <file_history.h>
+ #include <id.h>
+ #include <kiface_base.h>
+@@ -1760,6 +1761,8 @@ void EDA_BASE_FRAME::ShowPreferences( const wxString& aStartPage, const wxString
+ 
+         book->AddPage( new PANEL_PLUGIN_SETTINGS( book ), _( "Plugins" ) );
+ 
++        book->AddPage( new PANEL_MCP_SERVER( book ), _( "MCP Server" ) );
++
+         book->AddPage( new PANEL_MAINTENANCE( book, this ), _( "Maintenance" ) );
+ 
+         // Update all of the action hotkeys. The process of loading the actions through
+diff --git a/common/settings/common_settings.cpp b/common/settings/common_settings.cpp
+index 7374107c..ee0278a9 100644
+--- a/common/settings/common_settings.cpp
++++ b/common/settings/common_settings.cpp
+@@ -63,6 +63,7 @@ COMMON_SETTINGS::COMMON_SETTINGS() :
+         m_DoNotShowAgain(),
+         m_PackageManager(),
+         m_Api(),
++        m_Mcp(),
+         m_FieldNameTemplates(),
+         m_csInternals( std::make_unique<COMMON_SETTINGS_INTERNALS>() )
+ {
+@@ -521,6 +522,14 @@ COMMON_SETTINGS::COMMON_SETTINGS() :
+     m_params.emplace_back( new PARAM<bool>( "api.enable_server",
+             &m_Api.enable_server, false ) );
+ 
++    m_params.emplace_back( new PARAM<bool>( "mcp.enable_server", &m_Mcp.enable_server, false ) );
++
++    m_params.emplace_back( new PARAM<bool>( "mcp.allow_remote", &m_Mcp.allow_remote, false ) );
++
++    m_params.emplace_back( new PARAM<int>( "mcp.port", &m_Mcp.port, 27880, 1024, 65535 ) );
++
++    m_params.emplace_back( new PARAM<wxString>( "mcp.token", &m_Mcp.token, wxS( "" ) ) );
++
+     m_params.emplace_back( new PARAM_LAMBDA<nlohmann::json>( "dialog.controls",
+             [&]() -> nlohmann::json
+             {
+diff --git a/include/api/api_server.h b/include/api/api_server.h
+index 6b868266..cdc9dd88 100644
+--- a/include/api/api_server.h
++++ b/include/api/api_server.h
+@@ -35,6 +35,12 @@
+ 
+ class API_HANDLER;
+ class KINNG_REQUEST_SERVER;
++
++namespace kiapi::common
++{
++class ApiRequest;
++class ApiResponse;
++}
+ class wxEvtHandler;
+ 
+ 
+@@ -115,6 +121,13 @@ public:
+         m_renameListener = std::move( aListener );
+     }
+ 
++    /**
++     * Handle a request from inside KiCad, without the IPC socket: runs it through the registered
++     * handlers and returns the response.  Used by the MCP server.  Must be called from the main
++     * thread.
++     */
++    kiapi::common::ApiResponse HandleRequest( const kiapi::common::ApiRequest& aRequest );
++
+ private:
+ 
+     /**
+diff --git a/include/api/kiapi_json.h b/include/api/kiapi_json.h
+new file mode 100644
+index 00000000..cc5295ea
+--- /dev/null
++++ b/include/api/kiapi_json.h
+@@ -0,0 +1,48 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef KIAPI_JSON_H
++#define KIAPI_JSON_H
++
++#include <string>
++
++// JSON access to the API messages.  These live in the kiapi library because the message
++// descriptors are registered with the protobuf copy linked into it; other libraries can only
++// pass serialized messages across.
++
++/**
++ * Convert JSON to an API message.  @a aName may be a full name (kiapi.board.commands.GetItems)
++ * or a short one (GetItems).  On success, @a aTypeUrl and @a aBytes are what goes into a
++ * google.protobuf.Any.
++ */
++KIAPI_IMPORTEXPORT bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
++                                            std::string& aTypeUrl, std::string& aBytes,
++                                            std::string& aError );
++
++/// Convert a serialized message (as found in an Any) to JSON, with the .proto field names.
++KIAPI_IMPORTEXPORT bool KiapiMessageToJson( const std::string& aTypeUrl, const std::string& aBytes,
++                                            std::string& aJson, std::string& aError );
++
++/// A JSON object listing the request messages of each API package.
++KIAPI_IMPORTEXPORT std::string KiapiListCommands();
++
++/// A JSON description of a message's fields (and its response's), or empty if unknown.
++KIAPI_IMPORTEXPORT std::string KiapiDescribe( const std::string& aName );
++
++#endif // KIAPI_JSON_H
+diff --git a/include/api/mcp_server.h b/include/api/mcp_server.h
+new file mode 100644
+index 00000000..d268e7e4
+--- /dev/null
++++ b/include/api/mcp_server.h
+@@ -0,0 +1,174 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef KICAD_MCP_SERVER_H
++#define KICAD_MCP_SERVER_H
++
++#include <atomic>
++#include <functional>
++#include <map>
++#include <memory>
++#include <mutex>
++#include <set>
++#include <string>
++#include <thread>
++#include <vector>
++
++#include <nlohmann/json.hpp>
++#include <wx/string.h>
++
++#include <kicommon.h>
++
++/**
++ * The result of an MCP tool call: a list of MCP content blocks (text or image), and whether the
++ * call failed.
++ */
++struct KICOMMON_API MCP_RESULT
++{
++    nlohmann::json content = nlohmann::json::array();
++    bool           isError = false;
++
++    static MCP_RESULT Text( const std::string& aText );
++    static MCP_RESULT Json( const nlohmann::json& aValue );
++    static MCP_RESULT Error( const std::string& aMessage );
++
++    /// Add a PNG image (raw bytes) to the result.
++    MCP_RESULT& AddPng( const std::string& aBytes );
++};
++
++
++/**
++ * A tool offered to MCP clients.  Tools run on the main (UI) thread unless mainThread is false;
++ * then the handler runs on the connection's thread and must use MCP_SERVER::RunOnMainThread()
++ * for anything that touches KiCad's data.
++ */
++struct KICOMMON_API MCP_TOOL
++{
++    std::string    name;
++    std::string    description;
++    nlohmann::json inputSchema;
++    std::function<MCP_RESULT( const nlohmann::json& aArgs )> handler;
++    bool           mainThread = true;
++};
++
++
++/**
++ * A Model Context Protocol server built into KiCad (Streamable HTTP transport, JSON responses).
++ * Clients such as Claude Code connect to http://<host>:<port>/mcp with a Bearer token.  Every
++ * change a tool makes goes through KiCad's normal editing paths, so the user sees it happen and
++ * can undo it.
++ *
++ * Built-in tools give access to KiCad's IPC API in process.  Every tool is declared up front
++ * (clients read the list once, when they connect); editors attach the handlers of their tools
++ * with SetToolHandler() while they are open, and until then those tools say what to open.
++ */
++class KICOMMON_API MCP_SERVER
++{
++public:
++    struct STATUS
++    {
++        bool        running = false;
++        std::string error;        ///< Why the server is not running, if it failed to start.
++        std::string address;      ///< The URL clients connect to.
++        std::string clientName;   ///< From the last initialize request.
++        std::string clientVersion;
++        long long   lastRequestMs = 0;  ///< Wall-clock time of the last request, 0 if none.
++        int         requests = 0;
++        std::string lastTool;
++    };
++
++    static MCP_SERVER& Instance();
++
++    /// Start, stop or restart the server from the current settings (COMMON_SETTINGS::m_Mcp).
++    void ApplySettings();
++
++    void Stop();
++
++    STATUS GetStatus() const;
++
++    /// The token in the settings, generating and saving one first if there is none.
++    static wxString EnsureToken();
++
++    /// A new random token.
++    static wxString NewToken();
++
++    /// The URL clients use: on this device, or on this device's Wi-Fi address.
++    static std::string ClientUrl( bool aRemote, int aPort );
++
++    /// The device's address on the local network, or empty if it has none.
++    static std::string LocalNetworkAddress();
++
++    void RegisterTool( const MCP_TOOL& aTool, const void* aOwner );
++
++    /// Attach the handler of a declared tool while @a aOwner (an editor) is open.
++    void SetToolHandler( const std::string& aName,
++                         std::function<MCP_RESULT( const nlohmann::json& )> aHandler,
++                         const void* aOwner, bool aMainThread = true );
++
++    /// Remove every tool registered by @a aOwner, or give declared tools their fallback back.
++    void UnregisterTools( const void* aOwner );
++
++    /**
++     * Run @a aFunc on the main thread and wait for it.  Runs it directly when called on the main
++     * thread.  Returns false if it did not finish within @a aTimeoutMs (it may still run later).
++     */
++    static bool RunOnMainThread( std::function<void()> aFunc, int aTimeoutMs = 600000 );
++
++    /// Run a KiCad IPC API command, given its message type name and its fields as JSON.
++    /// Must be called on the main thread.
++    static nlohmann::json CallApi( const std::string& aCommand, const nlohmann::json& aArgs,
++                                   std::string& aError );
++
++private:
++    MCP_SERVER();
++    ~MCP_SERVER();
++
++    void start( bool aRemote, int aPort, const std::string& aToken );
++    void acceptLoop();
++    void serveConnection( int aSocket );
++
++    /// Handle one JSON-RPC message; returns a null json for notifications.
++    nlohmann::json handleMessage( const nlohmann::json& aMessage );
++    nlohmann::json callTool( const std::string& aName, const nlohmann::json& aArgs );
++    nlohmann::json listTools();
++
++    void registerBuiltinTools();
++
++    /// Declare a tool that an editor or the project manager implements; @a aMissing says what
++    /// to do while it is not there.
++    void declareTool( const std::string& aName, const std::string& aDescription,
++                      const nlohmann::json& aSchema, const std::string& aMissing );
++
++    mutable std::mutex m_lock;
++    std::map<std::string, std::pair<MCP_TOOL, const void*>> m_tools;
++    std::vector<std::string> m_toolOrder;
++    std::map<std::string, MCP_TOOL> m_fallbacks;    ///< Declared tools without their owner
++
++    std::set<int>     m_clients;   ///< Open connections, guarded by m_lock
++    std::atomic<int>  m_listenSocket{ -1 };
++    std::thread       m_acceptThread;
++    std::atomic<bool> m_stopping{ false };
++    std::string       m_token;
++    bool              m_remote = false;
++    int               m_port = 0;
++
++    STATUS            m_status;
++};
++
++#endif // KICAD_MCP_SERVER_H
+diff --git a/include/dialogs/panel_mcp_server.h b/include/dialogs/panel_mcp_server.h
+new file mode 100644
+index 00000000..20d36beb
+--- /dev/null
++++ b/include/dialogs/panel_mcp_server.h
+@@ -0,0 +1,74 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef PANEL_MCP_SERVER_H
++#define PANEL_MCP_SERVER_H
++
++#include <widgets/resettable_panel.h>
++#include <wx/timer.h>
++
++class wxButton;
++class wxCheckBox;
++class wxRadioButton;
++class wxSpinCtrl;
++class wxStaticText;
++class wxTextCtrl;
++
++/**
++ * Preferences > MCP Server: turns on the built-in MCP server and shows what to paste into
++ * Claude Code to connect.  Changes take effect at once.
++ */
++class PANEL_MCP_SERVER : public RESETTABLE_PANEL
++{
++public:
++    PANEL_MCP_SERVER( wxWindow* aParent );
++    ~PANEL_MCP_SERVER() override;
++
++    void ResetPanel() override;
++
++protected:
++    bool TransferDataToWindow() override;
++    bool TransferDataFromWindow() override;
++
++private:
++    /// Save the controls to the settings and restart the server to match.
++    void apply();
++    void updateTexts();
++    void updateStatus();
++    void copy( const wxString& aText );
++
++    wxCheckBox*    m_enable;
++    wxStaticText*  m_explain;
++    wxRadioButton* m_thisDevice;
++    wxRadioButton* m_otherComputer;
++    wxStaticText*  m_remoteNote;
++    wxTextCtrl*    m_address;
++    wxButton*      m_copyAddress;
++    wxTextCtrl*    m_command;
++    wxButton*      m_copyCommand;
++    wxStaticText*  m_status;
++    wxSpinCtrl*    m_port;
++    wxTextCtrl*    m_addCommand;
++    wxButton*      m_copyAdd;
++    wxButton*      m_newToken;
++    wxTimer        m_timer;
++    bool           m_loading = false;
++};
++
++#endif // PANEL_MCP_SERVER_H
+diff --git a/include/settings/common_settings.h b/include/settings/common_settings.h
+index 81ed6353..9d076356 100644
+--- a/include/settings/common_settings.h
++++ b/include/settings/common_settings.h
+@@ -228,6 +228,15 @@ public:
+         bool enable_server;
+     };
+ 
++    /// The built-in MCP server, for AI agents such as Claude Code to drive KiCad.
++    struct MCP
++    {
++        bool     enable_server;
++        bool     allow_remote;    ///< Listen on all interfaces, not just this device.
++        int      port;
++        wxString token;           ///< Bearer token clients must send; generated when empty.
++    };
++
+     COMMON_SETTINGS();
+ 
+     virtual ~COMMON_SETTINGS();
+@@ -292,6 +301,8 @@ public:
+     GIT                 m_Git;
+     API                 m_Api;
+ 
++    MCP                 m_Mcp;
++
+     /// Global field name templates shared by all project editors.
+     TEMPLATES           m_FieldNameTemplates;
+ 
+diff --git a/kicad/kicad.cpp b/kicad/kicad.cpp
+index 1e256b66..a71fabb6 100644
+--- a/kicad/kicad.cpp
++++ b/kicad/kicad.cpp
+@@ -32,6 +32,8 @@
+ #include <wx/cmdline.h>
+ 
+ #include <api/api_server.h>
++#include <api/mcp_server.h>
++#include <tool/tool_manager.h>
+ #include <common.h>
+ #include <env_vars.h>
+ #include <file_history.h>
+@@ -480,8 +482,35 @@ bool PGM_KICAD::OnPgmInit()
+     }
+ 
+     if( m_api_server )
++    {
+         m_api_server->SetReadyToReply();
+ 
++        // The built-in MCP server answers through the API handlers, so start it once they are
++        // ready (it is off unless turned on in Preferences > MCP Server)
++        if( managerFrame )
++        {
++            MCP_SERVER::Instance().SetToolHandler(
++                    "kicad_open_editor",
++                    [managerFrame]( const nlohmann::json& aArgs ) -> MCP_RESULT
++                    {
++                        bool sch = aArgs.value( "editor", std::string() ) == "schematic";
++
++                        if( managerFrame->Prj().IsNullProject() )
++                            return MCP_RESULT::Error( "no project is open in KiCad" );
++
++                        managerFrame->GetToolManager()->RunAction(
++                                sch ? "kicad.Control.editSchematic" : "kicad.Control.editPCB" );
++
++                        return MCP_RESULT::Text( sch ? "The schematic editor is open."
++                                                     : "The board editor is open; the pcb_* "
++                                                       "tools work now." );
++                    },
++                    managerFrame );
++        }
++
++        MCP_SERVER::Instance().ApplySettings();
++    }
++
+     return true;
+ }
+ 
+diff --git a/pcbnew/CMakeLists.txt b/pcbnew/CMakeLists.txt
+index e3347982..23ba0a14 100644
+--- a/pcbnew/CMakeLists.txt
++++ b/pcbnew/CMakeLists.txt
+@@ -508,6 +508,7 @@ set( PCBNEW_CLASS_SRCS
+     api/api_handler_fp_libraries.cpp
+     api/api_handler_footprint.cpp
+     api/api_handler_pcb.cpp
++    api/mcp_tools_pcb.cpp
+     api/footprint_context.cpp
+     api/headless_pcb_context.cpp
+     api/headless_footprint_context.cpp
+diff --git a/pcbnew/api/mcp_tools_pcb.cpp b/pcbnew/api/mcp_tools_pcb.cpp
+new file mode 100644
+index 00000000..1615cbea
+--- /dev/null
++++ b/pcbnew/api/mcp_tools_pcb.cpp
+@@ -0,0 +1,370 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "mcp_tools_pcb.h"
++
++#include <api/mcp_server.h>
++#include <board.h>
++#include <board_commit.h>
++#include <board_design_settings.h>
++#include <connectivity/connectivity_data.h>
++#include <drc/drc_item.h>
++#include <footprint.h>
++#include <pcb_edit_frame.h>
++#include <pcb_marker.h>
++#include <pcb_track.h>
++#include <tool/actions.h>
++#include <tool/tool_manager.h>
++#include <tools/drc_tool.h>
++#include <tools/zone_filler_tool.h>
++#include <units_provider.h>
++#include <widgets/wx_progress_reporters.h>
++#include <zone.h>
++
++#ifdef __ANDROID__
++#include <dialogs/dialog_autoroute.h>
++#include <kiplatform/autorouter.h>
++#include <kiplatform/environment.h>
++#include <wx/filename.h>
++#include <chrono>
++#include <thread>
++#endif
++
++using nlohmann::json;
++
++
++static double mm( int aIU )
++{
++    return std::round( pcbIUScale.IUTomm( aIU ) * 1000.0 ) / 1000.0;
++}
++
++
++static json boardSummary( PCB_EDIT_FRAME* aFrame, bool aNets )
++{
++    BOARD* board = aFrame->GetBoard();
++    json   out;
++
++    out["file"] = board->GetFileName().ToStdString();
++    out["units"] = "mm, degrees; y grows downwards";
++
++    BOX2I edges = board->GetBoardEdgesBoundingBox();
++    out["outline_bbox"] = { { "x", mm( edges.GetX() ) }, { "y", mm( edges.GetY() ) },
++                            { "width", mm( edges.GetWidth() ) },
++                            { "height", mm( edges.GetHeight() ) } };
++    out["copper_layers"] = board->GetCopperLayerCount();
++
++    json fps = json::array();
++
++    for( FOOTPRINT* fp : board->Footprints() )
++    {
++        fps.push_back( { { "reference", fp->GetReference().ToStdString() },
++                         { "value", fp->GetValue().ToStdString() },
++                         { "footprint", std::string( fp->GetFPID().Format().c_str() ) },
++                         { "x", mm( fp->GetPosition().x ) },
++                         { "y", mm( fp->GetPosition().y ) },
++                         { "rotation", fp->GetOrientation().AsDegrees() },
++                         { "side", fp->IsFlipped() ? "back" : "front" },
++                         { "locked", fp->IsLocked() },
++                         { "pads", (int) fp->Pads().size() } } );
++    }
++
++    out["footprints"] = fps;
++
++    int tracks = 0, vias = 0;
++
++    for( PCB_TRACK* t : board->Tracks() )
++    {
++        if( t->Type() == PCB_VIA_T )
++            vias++;
++        else
++            tracks++;
++    }
++
++    out["track_segments"] = tracks;
++    out["vias"] = vias;
++    out["zones"] = (int) board->Zones().size();
++    out["nets"] = (int) board->GetNetInfo().GetNetCount();
++    out["unrouted_connections"] = (int) board->GetConnectivity()->GetUnconnectedCount( false );
++
++    if( aNets )
++    {
++        json nets = json::array();
++
++        for( NETINFO_ITEM* net : board->GetNetInfo() )
++        {
++            if( net->GetNetCode() <= 0 )
++                continue;
++
++            nets.push_back( { { "name", net->GetNetname().ToStdString() },
++                              { "class", net->GetNetClass() ? net->GetNetClass()->GetName().ToStdString()
++                                                        : std::string() },
++                              { "pads", (int) board->GetConnectivity()->GetPadCount(
++                                                net->GetNetCode() ) } } );
++        }
++
++        out["net_list"] = nets;
++    }
++
++    return out;
++}
++
++
++static MCP_RESULT moveFootprint( PCB_EDIT_FRAME* aFrame, const json& aArgs )
++{
++    BOARD*     board = aFrame->GetBoard();
++    wxString   ref = wxString::FromUTF8( aArgs.value( "reference", std::string() ) );
++    FOOTPRINT* fp = board->FindFootprintByReference( ref );
++
++    if( !fp )
++        return MCP_RESULT::Error( "no footprint " + ref.ToStdString() + " on the board" );
++
++    BOARD_COMMIT commit( aFrame );
++    commit.Modify( fp );
++
++    if( aArgs.contains( "side" ) )
++    {
++        bool back = aArgs["side"] == "back";
++
++        if( back != fp->IsFlipped() )
++            fp->Flip( fp->GetPosition(), FLIP_DIRECTION::LEFT_RIGHT );
++    }
++
++    if( aArgs.contains( "x" ) || aArgs.contains( "y" ) )
++    {
++        VECTOR2I pos = fp->GetPosition();
++
++        if( aArgs.contains( "x" ) )
++            pos.x = pcbIUScale.mmToIU( aArgs["x"].get<double>() );
++
++        if( aArgs.contains( "y" ) )
++            pos.y = pcbIUScale.mmToIU( aArgs["y"].get<double>() );
++
++        fp->SetPosition( pos );
++    }
++
++    if( aArgs.contains( "rotation" ) )
++        fp->SetOrientation( EDA_ANGLE( aArgs["rotation"].get<double>(), DEGREES_T ) );
++
++    commit.Push( _( "Move Footprint" ) );
++
++    return MCP_RESULT::Json( { { "reference", ref.ToStdString() },
++                               { "x", mm( fp->GetPosition().x ) },
++                               { "y", mm( fp->GetPosition().y ) },
++                               { "rotation", fp->GetOrientation().AsDegrees() },
++                               { "side", fp->IsFlipped() ? "back" : "front" } } );
++}
++
++
++static MCP_RESULT runDrc( PCB_EDIT_FRAME* aFrame, const json& aArgs )
++{
++    BOARD*         board = aFrame->GetBoard();
++    TOOL_MANAGER*  mgr = aFrame->GetToolManager();
++    bool           refill = aArgs.value( "refill_zones", true );
++    size_t         limit = aArgs.value( "max_items", 100 );
++
++    mgr->RunAction( ACTIONS::selectionClear );
++    board->DeleteMARKERs( true, false );
++
++    {
++        WX_PROGRESS_REPORTER reporter( aFrame, _( "Design Rules Check" ), 2, PR_CAN_ABORT );
++
++        if( refill )
++            mgr->GetTool<ZONE_FILLER_TOOL>()->FillAllZones( aFrame, &reporter );
++
++        mgr->GetTool<DRC_TOOL>()->RunTests( &reporter, false, false, false );
++    }
++
++    UNITS_PROVIDER         units( pcbIUScale, EDA_UNITS::MM );
++    BOARD_RC_ITEM_RESOLVER resolver( *board );
++    json                   items = json::array();
++    int                    errors = 0, warnings = 0;
++
++    for( PCB_MARKER* marker : board->Markers() )
++    {
++        SEVERITY severity = marker->GetSeverity();
++
++        if( severity == RPT_SEVERITY_EXCLUSION || severity == RPT_SEVERITY_IGNORE )
++            continue;
++
++        std::shared_ptr<RC_ITEM> item = marker->GetRCItem();
++
++        if( severity == RPT_SEVERITY_ERROR )
++            errors++;
++        else
++            warnings++;
++
++        if( items.size() < limit )
++        {
++            items.push_back( { { "severity", severity == RPT_SEVERITY_ERROR ? "error"
++                                                                             : "warning" },
++                               { "type", item->GetSettingsKey().ToStdString() },
++                               { "report", item->ShowReport( &units, severity, resolver )
++                                                   .ToStdString() } } );
++        }
++    }
++
++    aFrame->GetCanvas()->ForceRefresh();
++
++    return MCP_RESULT::Json(
++            { { "errors", errors },
++              { "warnings", warnings },
++              { "unrouted_connections",
++                (int) board->GetConnectivity()->GetUnconnectedCount( false ) },
++              { "items", items },
++              { "note", "The violations are shown as markers on the board." } } );
++}
++
++
++#ifdef __ANDROID__
++// Runs on the MCP connection's thread, so the UI stays live while the router works; every
++// board change is made on the main thread.
++static MCP_RESULT autoroute( PCB_EDIT_FRAME* aFrame, const json& aArgs )
++{
++    namespace AR = KIPLATFORM::AUTOROUTER;
++
++    if( !AR::IsAvailable() )
++        return MCP_RESULT::Error( "this build has no autorouter" );
++
++    bool optimize = aArgs.value( "optimize", true );
++    int  passes = aArgs.value( "max_passes", 0 );
++    bool fill = aArgs.value( "refill_zones", true );
++
++    wxFileName dir( KIPLATFORM::ENV::GetUserCachePath(), wxEmptyString );
++    dir.AppendDir( wxS( "autoroute" ) );
++    dir.Mkdir( wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++    wxString dsn = dir.GetPath() + wxS( "/mcp.dsn" );
++    wxString ses = dir.GetPath() + wxS( "/mcp.ses" );
++    wxString snap = dir.GetPath() + wxS( "/mcp-snapshot.ses" );
++
++    for( const wxString& old : { ses, snap } )
++    {
++        if( wxFileExists( old ) )
++            wxRemoveFile( old );
++    }
++
++    bool exported = false;
++    MCP_SERVER::RunOnMainThread( [&]() { exported = aFrame->ExportSpecctraFile( dsn ); } );
++
++    if( !exported )
++        return MCP_RESULT::Error( "could not export the board for routing" );
++
++    if( !AR::Start( dsn, ses, passes, optimize, snap ) )
++        return MCP_RESULT::Error( "the autorouter is busy (is the Autoroute dialog open?)" );
++
++    bool     pushed = false;
++    int      lastSnapshot = 0;
++    wxString error;
++    AR::STATUS s;
++
++    while( true )
++    {
++        std::this_thread::sleep_for( std::chrono::milliseconds( 500 ) );
++        s = AR::GetStatus();
++
++        if( s.running && s.snapshotSerial != lastSnapshot && wxFileExists( snap ) )
++        {
++            lastSnapshot = s.snapshotSerial;
++            MCP_SERVER::RunOnMainThread(
++                    [&]()
++                    {
++                        if( ImportAutorouteSession( aFrame, snap, pushed, nullptr ) )
++                            pushed = true;
++                    } );
++        }
++
++        if( !s.running )
++            break;
++    }
++
++    if( !s.error.IsEmpty() || !wxFileExists( ses ) )
++        return MCP_RESULT::Error( "routing failed: " + s.error.ToStdString() );
++
++    bool imported = false;
++    MCP_SERVER::RunOnMainThread(
++            [&]()
++            {
++                imported = ImportAutorouteSession( aFrame, ses, pushed, &error );
++
++                if( imported && fill )
++                    aFrame->GetToolManager()->GetTool<ZONE_FILLER_TOOL>()->FillAllZones( aFrame );
++            } );
++
++    if( !imported )
++        return MCP_RESULT::Error( "could not import the routes: " + error.ToStdString() );
++
++    int unrouted = 0;
++    MCP_SERVER::RunOnMainThread(
++            [&]()
++            {
++                unrouted = aFrame->GetBoard()->GetConnectivity()->GetUnconnectedCount( false );
++            } );
++
++    return MCP_RESULT::Json(
++            { { "routed_connections", std::max( 0, s.connections - s.unrouted ) },
++              { "connections", s.connections },
++              { "unrouted_connections", unrouted },
++              { "vias", s.vias },
++              { "track_length_mm", std::round( s.traceLengthMm ) },
++              { "seconds", s.elapsedMs / 1000.0 },
++              { "undo", "All the routing is one undo step (Edit > Undo, or Ctrl+Z)." } } );
++}
++#endif
++
++
++void RegisterPcbMcpTools( PCB_EDIT_FRAME* aFrame )
++{
++    // The tools are declared by the MCP server (so clients see them before the editor opens);
++    // this attaches their handlers while the frame is open.
++    MCP_SERVER& server = MCP_SERVER::Instance();
++
++    server.SetToolHandler( "pcb_board_summary",
++                           [aFrame]( const json& aArgs )
++                           {
++                               return MCP_RESULT::Json(
++                                       boardSummary( aFrame, aArgs.value( "nets", false ) ) );
++                           },
++                           aFrame );
++
++    server.SetToolHandler( "pcb_move_footprint",
++                           [aFrame]( const json& aArgs ) { return moveFootprint( aFrame, aArgs ); },
++                           aFrame );
++
++    server.SetToolHandler( "pcb_run_drc",
++                           [aFrame]( const json& aArgs ) { return runDrc( aFrame, aArgs ); },
++                           aFrame );
++
++#ifdef __ANDROID__
++    server.SetToolHandler( "pcb_autoroute",
++                           [aFrame]( const json& aArgs ) { return autoroute( aFrame, aArgs ); },
++                           aFrame, false );
++#else
++    server.SetToolHandler( "pcb_autoroute",
++                           []( const json& )
++                           {
++                               return MCP_RESULT::Error( "this build has no built-in autorouter" );
++                           },
++                           aFrame );
++#endif
++}
++
++
++void UnregisterPcbMcpTools( PCB_EDIT_FRAME* aFrame )
++{
++    MCP_SERVER::Instance().UnregisterTools( aFrame );
++}
+diff --git a/pcbnew/api/mcp_tools_pcb.h b/pcbnew/api/mcp_tools_pcb.h
+new file mode 100644
+index 00000000..f580966a
+--- /dev/null
++++ b/pcbnew/api/mcp_tools_pcb.h
+@@ -0,0 +1,31 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef MCP_TOOLS_PCB_H
++#define MCP_TOOLS_PCB_H
++
++class PCB_EDIT_FRAME;
++
++/// Offer the board editor's MCP tools (pcb_*) while @a aFrame is open.
++void RegisterPcbMcpTools( PCB_EDIT_FRAME* aFrame );
++
++/// Withdraw the tools registered for @a aFrame.
++void UnregisterPcbMcpTools( PCB_EDIT_FRAME* aFrame );
++
++#endif // MCP_TOOLS_PCB_H
+diff --git a/pcbnew/dialogs/dialog_autoroute.cpp b/pcbnew/dialogs/dialog_autoroute.cpp
+index e4f6b5cc..7201a3ab 100644
+--- a/pcbnew/dialogs/dialog_autoroute.cpp
++++ b/pcbnew/dialogs/dialog_autoroute.cpp
+@@ -254,27 +254,40 @@ void DIALOG_AUTOROUTE::onClose( wxCloseEvent& aEvent )
+ }
+ 
+ 
+-bool DIALOG_AUTOROUTE::importSession( const wxString& aPath )
++bool ImportAutorouteSession( PCB_EDIT_FRAME* aFrame, const wxString& aPath, bool aAppend,
++                             wxString* aError )
+ {
+-    BOARD_COMMIT commit( m_frame );
++    BOARD_COMMIT commit( aFrame );
+ 
+-    m_frame->GetToolManager()->RunAction( ACTIONS::selectionClear );
++    aFrame->GetToolManager()->RunAction( ACTIONS::selectionClear );
+ 
+     try
+     {
+-        DSN::ImportSpecctraSession( m_frame->GetBoard(), aPath, commit );
++        DSN::ImportSpecctraSession( aFrame->GetBoard(), aPath, commit );
+     }
+     catch( const IO_ERROR& ioe )
+     {
+         commit.Revert();
+-        m_result = ioe.What();
++
++        if( aError )
++            *aError = ioe.What();
++
+         return false;
+     }
+ 
+-    // Every import replaces the routes of the one before, so they all share one undo step.
+-    commit.Push( _( "Autoroute" ), m_pushed ? APPEND_UNDO : 0 );
++    // Every import replaces the routes of the one before, so they can share one undo step.
++    commit.Push( _( "Autoroute" ), aAppend ? APPEND_UNDO : 0 );
++    aFrame->GetCanvas()->ForceRefresh();
++    return true;
++}
++
++
++bool DIALOG_AUTOROUTE::importSession( const wxString& aPath )
++{
++    if( !ImportAutorouteSession( m_frame, aPath, m_pushed, &m_result ) )
++        return false;
++
+     m_pushed = true;
+-    m_frame->GetCanvas()->ForceRefresh();
+     return true;
+ }
+ 
+diff --git a/pcbnew/dialogs/dialog_autoroute.h b/pcbnew/dialogs/dialog_autoroute.h
+index b3ed46b0..a3968b88 100644
+--- a/pcbnew/dialogs/dialog_autoroute.h
++++ b/pcbnew/dialogs/dialog_autoroute.h
+@@ -29,6 +29,15 @@ class wxCheckBox;
+ class wxGauge;
+ class wxStaticText;
+ 
++/**
++ * Import a Specctra session (the autorouter's output) into the board as the "Autoroute" undo
++ * step.  With @a aAppend, it goes into the last undo step instead, replacing routes imported
++ * into it before.  Must be called on the main thread.
++ */
++bool ImportAutorouteSession( PCB_EDIT_FRAME* aFrame, const wxString& aPath, bool aAppend,
++                             wxString* aError );
++
++
+ /**
+  * Routes the whole board with the integrated autorouter (Freerouting), showing the routes on the
+  * board as they are found.  Everything it changes is one undo step.
+diff --git a/pcbnew/pcb_edit_frame.cpp b/pcbnew/pcb_edit_frame.cpp
+index 9061ad30..79981a21 100644
+--- a/pcbnew/pcb_edit_frame.cpp
++++ b/pcbnew/pcb_edit_frame.cpp
+@@ -45,6 +45,7 @@
+ #include <api/api_handler_common.h>
+ #include <api/api_handler_libraries.h>
+ #include <api/api_handler_pcb.h>
++#include <api/mcp_tools_pcb.h>
+ #include <api/api_plugin_manager.h>
+ #include <api/api_server.h>
+ #include <api/api_utils.h>
+@@ -569,6 +570,8 @@ PCB_EDIT_FRAME::PCB_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
+         Pgm().GetApiServer().RegisterHandler( m_apiLibrariesHandler.get() );
+     }
+ 
++    RegisterPcbMcpTools( this );
++
+     resolveCanvasType();
+     ActivateGalCanvas();
+ 
+@@ -799,6 +802,8 @@ void PCB_EDIT_FRAME::OnCrossProbeFlashTimer( wxTimerEvent& aEvent )
+ 
+ PCB_EDIT_FRAME::~PCB_EDIT_FRAME()
+ {
++    UnregisterPcbMcpTools( this );
++
+     // Always ensure that we are unregistered even in a close without graceful doCloseWindow()
+     if( GetBoard() )
+         Kiway().LocalHistory().UnregisterSaver( GetBoard() );
+-- 
+2.54.0 (Apple Git-157)
+

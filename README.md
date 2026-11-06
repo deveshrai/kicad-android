@@ -32,6 +32,9 @@ upstream KiCad sources.
 - **Built-in autorouter.**  **Route > Autoroute Board** runs
   [Freerouting](https://github.com/freerouting/freerouting)'s routing engine inside the app.
   You watch the routes appear on the board, then keep them or undo them in one step.
+- **Built-in MCP server.**  Turn it on in **Preferences > MCP Server** and Claude Code (on the
+  tablet in Termux, or on a computer on the same Wi-Fi) can read and edit your design, route it
+  and run DRC while you watch.
 - **3D viewer** with STEP component models, through [gl4es](https://github.com/ptitSeb/gl4es).
 - **Desktop-identical output.**  Gerbers and drill files match the macOS build of the same sources
   byte for byte.  [How we checked](docs/CHANGES.md#how-it-was-checked).
@@ -65,6 +68,31 @@ second on the tablet, then the zones are refilled.
 
 Full-resolution videos: [schematic](docs/media/video/schematic.mp4),
 [PCB](docs/media/video/pcb-layout.mp4), [3D](docs/media/video/3d-blinker.mp4).
+
+## Drive it from Claude Code
+
+**Preferences > MCP Server** has a single switch.  Turn it on, copy the ready-made command, and
+paste it into a terminal:
+
+```
+claude --mcp-config '{"mcpServers":{"kicad":{"type":"http","url":"http://127.0.0.1:27880/mcp","headers":{"Authorization":"Bearer <token>"}}}}'
+```
+
+Choose **This device** to connect from the tablet itself (for example Claude Code in Termux), or
+**Another computer** to use the tablet's Wi-Fi address.  The status line shows when a client is
+connected and what it last did.
+
+<img src="docs/media/mcp-preferences.png" alt="Preferences > MCP Server: the on switch, This device or Another computer, the address and the claude --mcp-config command with Copy buttons, and the status line" width="860">
+
+What a client can do:
+- **See the design:** `kicad_status`, `kicad_open_editor`, `pcb_board_summary` (every footprint, its position, and the
+  unrouted count).
+- **Change it:** `pcb_move_footprint`, `pcb_autoroute`, `pcb_run_drc`.  The changes appear on the
+  board as they happen, and each one is an undo step.
+- **Do anything else KiCad's IPC API can:** `kicad_api` runs any API command (the API
+  kicad-python uses), with `kicad_api_commands` and `kicad_api_describe` to find your way around.
+  That covers creating tracks and zones, placing footprints and symbols from the libraries, net
+  classes, design rules, and Gerber, drill and PDF exports.
 
 ## See it run
 
@@ -142,6 +170,7 @@ upstream revisions.
 | KiCad | [`patches/kicad`](patches/kicad): Android platform layer, Vulkan canvas, touch, 3D viewer, a few general fixes |
 | wxWidgets (wxQt) | [`patches/wxwidgets`](patches/wxwidgets): input, dialogs, fonts, Android pickers and intents, crash fixes |
 | Qt for Android | [`patches/qtbase`](patches/qtbase): faster window composition, input-method fixes |
+| MCP server | part of [`patches/kicad`](patches/kicad) (patch 0031): an MCP server on KiCad's IPC API, with a one-page settings panel |
 | Freerouting | [`patches/freerouting`](patches/freerouting): its routing core built for Android's Java runtime, driven by [`android/autorouter`](android/autorouter) |
 
 **[Read the full write-up of the changes →](docs/CHANGES.md)**
