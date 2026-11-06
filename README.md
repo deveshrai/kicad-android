@@ -1,6 +1,6 @@
 <div align="center">
 
-# KiCad Android (unofficial)
+# KiCad Android
 
 **The real KiCad 10.99 EDA suite, running natively on Android tablets and foldables.**
 

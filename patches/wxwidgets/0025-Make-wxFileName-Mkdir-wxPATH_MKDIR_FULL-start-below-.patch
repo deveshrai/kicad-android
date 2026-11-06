@@ -1,0 +1,62 @@
+From cb58b389627159fc965628e5a59466e33ed15f44 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 6 Nov 2026 17:17:54 +0530
+Subject: [PATCH 25/25] Make wxFileName::Mkdir(wxPATH_MKDIR_FULL) start below
+ the deepest existing dir
+
+Walking down from the root fails where an ancestor exists but can't be
+examined: on Android /storage/emulated looks missing to an app, and
+creating it fails with EEXIST, so no directory below it could be made
+(KiCad's save and backup to shared storage failed).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/common/filename.cpp | 26 ++++++++++++++++++++++----
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/src/common/filename.cpp b/src/common/filename.cpp
+index fc7012a..fc51823 100644
+--- a/src/common/filename.cpp
++++ b/src/common/filename.cpp
+@@ -1354,15 +1354,33 @@ bool wxFileName::Mkdir( const wxString& dir, int perm, int flags )
+         wxFileName filename;
+         filename.AssignDir(dir);
+ 
+-        // create the directories one by one
++        // Start below the deepest directory that already exists.  Walking down
++        // from the root instead fails where an ancestor exists but can't be
++        // examined (e.g. /storage/emulated on Android): it looks missing, and
++        // creating it fails with EEXIST.
++        const wxArrayString& dirs = filename.GetDirs();
++        size_t existing = dirs.size();
++
++        for ( ; existing > 0; --existing )
++        {
++            wxFileName prefix(filename);
++            prefix.m_dirs.Clear();
++            for ( size_t i = 0; i < existing; ++i )
++                prefix.AppendDir(dirs[i]);
++
++            if ( prefix.DirExists() )
++                break;
++        }
++
++        // create the remaining directories one by one
+         wxFileName currPath(filename);
+         currPath.m_dirs.Clear();
+ 
+-        for ( const auto& pathComponent : filename.GetDirs() )
++        for ( size_t i = 0; i < dirs.size(); ++i )
+         {
+-            currPath.AppendDir(pathComponent);
++            currPath.AppendDir(dirs[i]);
+ 
+-            if (!currPath.DirExists())
++            if ( i >= existing && !currPath.DirExists() )
+             {
+                 if (!wxMkdir(currPath.GetPath(), perm))
+                 {
+-- 
+2.54.0 (Apple Git-157)
+

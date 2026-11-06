@@ -23,7 +23,7 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
   (it sets KICAD_VERSION_EXTRA). APK versionName is 10.99<letter>, versionCode is
   1099000 + letter index (a=1 .. z=26, aa=27 .. zz=702). Bump for every build handed to the
   user. The in-app version (About, kicad-cli) reads 10.99<letter> too (kicad patch 23; the
-  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99z** = first public release (io.github.deveshrai.kicadandroid, release-signed with ~/.android/kicad-android-release.jks; GitHub deveshrai/kicad-android). Dev builds keep org.kicad.kicad (the Fold has 10.99x, the tablet 10.99n). Next letter: aa.
+  shallow clone has no tags, so it used to say 10.99.0-unknown). **Current: 10.99ad** (tablet, release-signed; 10.99z was the first public release) (io.github.deveshrai.kicadandroid, release-signed with ~/.android/kicad-android-release.jks; GitHub deveshrai/kicad-android). Dev builds keep org.kicad.kicad (the Fold has 10.99x, the tablet 10.99n). Next letter: aa.
 - APK bundles the KiCad 10.0.8 libraries (`scripts/fetch-kicad-libs.sh`; asset tree
   `kicad-libs`, extracted once per version) and libkimalloc (mimalloc new/delete;
   `scripts/build-kimalloc.sh`, loaded before libc++_shared). APK is about 375 MB.
@@ -191,7 +191,23 @@ pinch CX CY FROM TO | pan X Y DX DY | tap3 X Y | drag X Y DX DY (display pixels)
 through InputManager(Global).injectInputEvent with the shell's permission, like scrcpy.
 
 ## Publishing a release
-KA_APP_ID=io.github.deveshrai.kicadandroid KA_APP_LABEL="KiCad Android (unofficial)" \
+KA_APP_ID=io.github.deveshrai.kicadandroid KA_APP_LABEL="KiCad Android" \
 KA_RELEASE_KEYSTORE=~/.android/kicad-android-release.jks KICAD_APK_MODE=release scripts/build-kicad-apk.sh
-gives build/KiCad-Android-unofficial-<version>.apk.  Keep the keystore and its .pass file backed up:
-updates must be signed with the same key.  Then tag android-<version> and `gh release create`.
+gives build/KiCad-Android-<version>.apk.  Keep the keystore and its .pass file backed up:
+updates must be signed with the same key.  Then commit, push to GitHub, tag android-<version> and `gh release create`.
+The user wants every publish to update the git repo too (2026-11-06).  App name: just "KiCad Android"
+(no "(unofficial)"); the README keeps a short not-affiliated note.
+
+## 2026-11-06: end-to-end blinker test on the Galaxy Tab (10.99ad)
+work/blinker: new project via the Android save picker → generated schematic (ERC 0) → Update PCB →
+placement → Freerouting → zones, DRC 0 + parity → 3D with STEP models.  All in the app on the tablet.
+Fixed on the way (wx 0023-0025): picker URIs (msf:/numeric Downloads ids) → paths; DoGetPosition null
+crash (New Project); wxFileName::Mkdir failing on /storage/emulated (save/backup to shared storage).
+Open, found in this test:
+- Preferences > Configure Paths: grid cells can't be edited (tap, double tap, F2) and the dialog then
+  ignores Cancel/Escape — forced a restart.  So KICAD10_3DMODEL_DIR can't be set; the test used
+  absolute model paths in the board.
+- First launch after the welcome wizard: the frame fills ~77% of the screen, centred (fine after a
+  restart).  The tablet's display size is set below default (density 280 vs 320).
+- The Specctra import picker listed a 0-byte "blinker" placeholder that the picker left in Downloads.
+- Wireless adb only (USB dropped); `svc power stayon true` is set on the tablet.

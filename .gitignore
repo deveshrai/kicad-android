@@ -21,3 +21,4 @@ work/rp2350/app-created.kicad_sch
 work/rp2350/from-app.kicad_pcb
 work/rp2350/placed.kicad_pcb
 work/rp2350/rot*.kicad_pcb
+__pycache__/

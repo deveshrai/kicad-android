@@ -1,0 +1,139 @@
+From b9d4beb12e3b141ae87138c7c219e0288436144c Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 6 Nov 2026 17:17:54 +0530
+Subject: [PATCH 23/25] qt: map more Android document picker URIs to paths
+
+Samsung's file picker and current Downloads return "msf:<id>" (MediaStore)
+document ids and, for a document just created in Downloads, a plain numeric
+id that maps to no path.  Resolve MediaStore ids through the "_data"
+column, ask other documents for "_data", and for new documents in Downloads
+use their display name.  Without this, saving through the picker (e.g. New
+Project) lost the typed name.  The picked URIs are logged for diagnosis.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/filedlg.cpp | 84 +++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 83 insertions(+), 1 deletion(-)
+
+diff --git a/src/qt/filedlg.cpp b/src/qt/filedlg.cpp
+index 70ca20b..8361f01 100644
+--- a/src/qt/filedlg.cpp
++++ b/src/qt/filedlg.cpp
+@@ -24,6 +24,10 @@
+ #include <QtCore/QFile>
+ #include <QtCore/QFileInfo>
+ #include <QtCore/QUrl>
++#include <QtCore/QJniEnvironment>
++#include <android/log.h>
++#include <QtCore/QJniObject>
++#include <QtCore/QCoreApplication>
+ 
+ namespace
+ {
+@@ -31,6 +35,47 @@ namespace
+ // Applications using wxFileDialog expect paths, so turn URIs of the device's own storage into
+ // paths.  This needs read/write access to shared storage (MANAGE_EXTERNAL_STORAGE on Android
+ // 11+); documents of other providers (cloud storage, ...) have no path and are skipped.
++// One string column of a content URI, or empty
++QString wxQtAndroidQueryColumn(const QJniObject& uri, const QString& column)
++{
++    QJniObject ctx = QNativeInterface::QAndroidApplication::context();
++    if ( !ctx.isValid() || !uri.isValid() )
++        return QString();
++
++    QJniEnvironment env;
++    QJniObject resolver = ctx.callObjectMethod("getContentResolver",
++                                               "()Landroid/content/ContentResolver;");
++    jobjectArray projection = env->NewObjectArray(1, env->FindClass("java/lang/String"),
++                                                  QJniObject::fromString(column).object<jstring>());
++    QJniObject cursor = resolver.callObjectMethod(
++            "query",
++            "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;",
++            uri.object(), projection, nullptr, nullptr, nullptr);
++    env->DeleteLocalRef(projection);
++
++    QString path;
++    if ( !env.checkAndClearExceptions() && cursor.isValid() )
++    {
++        if ( cursor.callMethod<jboolean>("moveToFirst") )
++        {
++            QJniObject value = cursor.callObjectMethod("getString", "(I)Ljava/lang/String;", jint(0));
++            if ( !env.checkAndClearExceptions() && value.isValid() )
++                path = value.toString();
++        }
++        cursor.callMethod<void>("close");
++        env.checkAndClearExceptions();
++    }
++
++    return path;
++}
++
++// The "_data" column (the file path) of a content URI, or empty.  MediaStore and some
++// providers still report it to apps holding all-files access.
++QString wxQtAndroidQueryDataPath(const QJniObject& uri)
++{
++    return wxQtAndroidQueryColumn(uri, QStringLiteral("_data"));
++}
++
+ QString wxQtAndroidUrlToPath(const QUrl& url)
+ {
+     if ( url.isLocalFile() )
+@@ -78,9 +123,44 @@ QString wxQtAndroidUrlToPath(const QUrl& url)
+ 
+         if ( id == QLatin1String("downloads") )
+             return QStringLiteral("/storage/emulated/0/Download");
++
++        // "msf:<id>": a MediaStore file (current Downloads and Samsung's file picker)
++        if ( id.startsWith(QLatin1String("msf:")) )
++        {
++            bool ok = false;
++            const jlong mediaId = id.mid(4).toLongLong(&ok);
++            if ( ok )
++            {
++                QJniObject files = QJniObject::callStaticObjectMethod(
++                        "android/provider/MediaStore$Files", "getContentUri",
++                        "(Ljava/lang/String;)Landroid/net/Uri;",
++                        QJniObject::fromString(QStringLiteral("external")).object<jstring>());
++                QJniObject item = QJniObject::callStaticObjectMethod(
++                        "android/content/ContentUris", "withAppendedId",
++                        "(Landroid/net/Uri;J)Landroid/net/Uri;", files.object(), mediaId);
++                const QString path = wxQtAndroidQueryDataPath(item);
++                if ( !path.isEmpty() )
++                    return path;
++            }
++        }
++    }
++
++    // Other providers: ask the document itself for its path
++    QJniObject uri = QJniObject::callStaticObjectMethod(
++            "android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;",
++            QJniObject::fromString(url.toString(QUrl::FullyEncoded)).object<jstring>());
++    QString path = wxQtAndroidQueryDataPath(uri);
++
++    // A document just created in Downloads has an id that maps to no path (and no "_data");
++    // its display name does, as Downloads is a plain directory
++    if ( path.isEmpty() && authority == QLatin1String("com.android.providers.downloads.documents") )
++    {
++        const QString name = wxQtAndroidQueryColumn(uri, QStringLiteral("_display_name"));
++        if ( !name.isEmpty() && !name.contains(QLatin1Char('/')) )
++            path = QStringLiteral("/storage/emulated/0/Download/") + name;
+     }
+ 
+-    return QString();
++    return path;
+ }
+ 
+ QStringList wxQtAndroidSelectedPaths(const QFileDialog* dialog)
+@@ -90,6 +170,8 @@ QStringList wxQtAndroidSelectedPaths(const QFileDialog* dialog)
+     foreach ( const QUrl& url, dialog->selectedUrls() )
+     {
+         const QString path = wxQtAndroidUrlToPath(url);
++        __android_log_print(ANDROID_LOG_INFO, "wxQtFileDialog", "picked %s -> '%s'",
++                            qPrintable(url.toString()), qPrintable(path));
+ 
+         if ( !path.isEmpty() )
+             paths << path;
+-- 
+2.54.0 (Apple Git-157)
+

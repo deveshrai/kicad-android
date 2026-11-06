@@ -1,0 +1,47 @@
+From f3e3078ef0ce247a9f688f5f978b6619ece8a675 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 6 Nov 2026 17:17:54 +0530
+Subject: [PATCH 24/25] qt: allow null pointers in wxWindow::DoGetPosition()
+
+wxWindow::GetPosition(int*, int*) accepts null for a coordinate the caller
+doesn't need; wxQt wrote through both.  KiCad's New Project dialog crashed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PMkXiZQmqtvCJRtsVHJjyT
+---
+ src/qt/window.cpp | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 6364bc7..34a151b 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1168,17 +1168,22 @@ void wxWindowQt::DoThaw()
+ 
+ void wxWindowQt::DoGetPosition(int *x, int *y) const
+ {
++    // Either pointer may be null (wxWindow::GetPosition(int*, int*) allows it)
+     QWidget *qtWidget = GetHandle();
+-    *x = qtWidget->x();
+-    *y = qtWidget->y();
++    int px = qtWidget->x();
+ 
+     if ( GetLayoutDirection() == wxLayout_RightToLeft && GetParent() )
+     {
+         int w;
+         GetParent()->GetClientSize(&w, nullptr);
+ 
+-        *x = w - (*x + qtWidget->width());
++        px = w - (px + qtWidget->width());
+     }
++
++    if ( x )
++        *x = px;
++    if ( y )
++        *y = qtWidget->y();
+ }
+ 
+ namespace
+-- 
+2.54.0 (Apple Git-157)
+
