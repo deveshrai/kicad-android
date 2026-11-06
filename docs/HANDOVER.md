@@ -233,3 +233,31 @@ Open, found in this test:
   restart).  The tablet's display size is set below default (density 280 vs 320).
 - The Specctra import picker listed a 0-byte "blinker" placeholder that the picker left in Downloads.
 - Wireless adb only (USB dropped); `svc power stayon true` is set on the tablet.
+
+## Integrated autorouter (P7, 10.99ae)
+Route > Autoroute Board... routes the whole board on the device with Freerouting 2.5.0.
+- **Java side:** `scripts/build-autorouter.sh` clones Freerouting v2.5.0 into toolchain/freerouting-src,
+  applies `patches/freerouting` on branch `android`, and compiles only the routing core (no gui/, api/,
+  cli/) plus `android/autorouter/java` (the driver, `io.github.deveshrai.kicadandroid.Autorouter`)
+  into build/autorouter/autorouter.jar.  build-kicad-apk.sh copies it into the APK's libs/.
+  - Freerouting needs Java 25; D8 (build-tools 36) reads class files only up to Java 24, so the
+    script relabels the class files as Java 21 (the bytecode is the same).  After a Freerouting
+    update, run `scripts/check-autorouter-api.sh` to list library calls Android lacks (java.awt,
+    JMX, virtual threads, java.net.http).  The 2.5.0 list is all off the routing path or caught.
+  - The patch: board statistics use their own Rectangle2D.Float; ConductionArea keeps its awt cache
+    in an Object field with a fixed serialVersionUID (board hashing serializes the board, and
+    serialization reflects on field and method types); logging goes to stdout (logcat); no
+    analytics client is ever created.
+  - Test without the app: `adb push build/autorouter/autorouter.dex /data/local/tmp/` then
+    `adb shell CLASSPATH=/data/local/tmp/autorouter.dex app_process / io.github.deveshrai.kicadandroid.Autorouter in.dsn out.ses [passes [optimize]]`.
+- **KiCad side** (kicad patch 0030): kiplatform/autorouter.h (JNI bridge; the class comes from the app's
+  ClassLoader, held as a global ref, because FindClass on native threads only sees system classes),
+  dialogs/dialog_autoroute.cpp (export DSN to the cache dir, route on a thread, poll every 250 ms,
+  import each snapshot SES into one undo step with APPEND_UNDO, Keep/Discard, zone refill).
+- **Results:** blinker (stripped of tracks): 20/20 connections, 0 vias, 162 mm, < 1 s on the Tab S12+;
+  DRC 0 errors, 0 unconnected.  rp2350_ili9341 (hard: 185 connections, GND planes): Freerouting
+  itself stops with 33 unrouted after 21 passes on the Mac (358 s); the tablet is about 3x slower per pass.
+- Debug APKs install as org.kicad.kicad (a second "KiCad Android" icon); test release-signed builds
+  on io.github.deveshrai.kicadandroid.
+- Files pushed with adb are invisible to the system picker until scanned:
+  `adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/...`.

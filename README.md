@@ -29,6 +29,9 @@ upstream KiCad sources.
   `kicad-cli`.
 - **GPU canvas.**  It runs on KiCad's Vulkan backend, with pointer motion coalesced so the
   interactive router keeps up.
+- **Built-in autorouter.**  **Route > Autoroute Board** runs
+  [Freerouting](https://github.com/freerouting/freerouting)'s routing engine inside the app.
+  You watch the routes appear on the board, then keep them or undo them in one step.
 - **3D viewer** with STEP component models, through [gl4es](https://github.com/ptitSeb/gl4es).
 - **Desktop-identical output.**  Gerbers and drill files match the macOS build of the same sources
   byte for byte.  [How we checked](docs/CHANGES.md#how-it-was-checked).
@@ -45,10 +48,16 @@ ERC until it shows 0 errors and 0 warnings.
 
 <img src="docs/media/schematic.gif" alt="Adding a resistor, LED, wire, ground and net label in the schematic editor, then fixing the one ERC error" width="860">
 
-**2. PCB.**  Pull the footprints in from the schematic and drag them onto the board.  Import the
-autorouted tracks (a Specctra session from Freerouting) and fill the ground zones.
+**2. PCB.**  Pull the footprints in from the schematic and drag them onto the board.  Route them
+(the recording imports a Specctra session from Freerouting; since 10.99ae, **Route > Autoroute
+Board** does the same on the device in under a second) and fill the ground zones.
 
 <img src="docs/media/pcb-layout.gif" alt="Dragging footprints onto the board outline, importing routed tracks and filling the GND zones" width="860">
+
+**Or let the built-in autorouter do it.**  Route > Autoroute Board routes the blinker in under a
+second on the tablet, then the zones are refilled.
+
+<img src="docs/media/autoroute.gif" alt="Route > Autoroute Board routing the blinker on the tablet: the routes appear, Keep, and the ground zones fill" width="860">
 
 **3. 3D.**  Check the board with its STEP component models.
 
@@ -133,6 +142,7 @@ upstream revisions.
 | KiCad | [`patches/kicad`](patches/kicad): Android platform layer, Vulkan canvas, touch, 3D viewer, a few general fixes |
 | wxWidgets (wxQt) | [`patches/wxwidgets`](patches/wxwidgets): input, dialogs, fonts, Android pickers and intents, crash fixes |
 | Qt for Android | [`patches/qtbase`](patches/qtbase): faster window composition, input-method fixes |
+| Freerouting | [`patches/freerouting`](patches/freerouting): its routing core built for Android's Java runtime, driven by [`android/autorouter`](android/autorouter) |
 
 **[Read the full write-up of the changes →](docs/CHANGES.md)**
 

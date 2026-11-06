@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ad; next: ae).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ae; next: af).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -29,10 +29,11 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 1. **Waiting on the user:**
    - How routing feels (P1).
    - Hands-on checks of the touch gestures (P4) and of the blue text-handle fix (P6).
-2. **P7: an integrated autorouter, and a good one.**  Route the whole board from inside the app.
-   - Today the build only has KiCad's "Attempt Finish Selected (Autoroute)" (Shift+F, untested on
-     Android) and a Specctra round trip through Freerouting on a computer.
-   - Freerouting can't run as is, because Android has no `java.awt` and no desktop JVM.
+2. **P7: integrated autorouter. Done in 10.99ae; tune it if the user asks.**
+   - Route > Autoroute Board... runs Freerouting 2.5.0's core inside the app (see HANDOVER,
+     "Integrated autorouter").  The blinker routes in under a second, with DRC clean.
+   - Possible follow-ups: route only the selected nets, a passes or time limit, a progress
+     notification when the app is in the background.
 3. **P8: an integrated MCP server**, so Claude Code (or any MCP client) can drive KiCad.
    - Clients: Termux on the same device, or a computer on the same Wi-Fi.
    - The settings page should be as simple as SolidCraft's **Preferences > MCP server** page:

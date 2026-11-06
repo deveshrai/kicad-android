@@ -1,4 +1,4 @@
-From 2934c38e10993cb27d0c8a03cbe9ccd743ddda71 Mon Sep 17 00:00:00 2001
+From eaa1a899b336af3c43926878f2d752c7d48f64d6 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 6 Nov 2026 22:03:22 +0530
 Subject: [PATCH] Integrated autorouter on Android (Route > Autoroute Board)
@@ -20,16 +20,16 @@ Claude-Session: https://claude.ai/code/session_01PMkXiaLryXaTy3ujYusUen
 ---
  libs/kiplatform/CMakeLists.txt                |   1 +
  .../include/kiplatform/autorouter.h           |  77 ++++
- libs/kiplatform/os/android/autorouter.cpp     | 163 ++++++++
+ libs/kiplatform/os/android/autorouter.cpp     | 203 ++++++++++
  pcbnew/CMakeLists.txt                         |   5 +
- pcbnew/dialogs/dialog_autoroute.cpp           | 357 ++++++++++++++++++
- pcbnew/dialogs/dialog_autoroute.h             |  90 +++++
+ pcbnew/dialogs/dialog_autoroute.cpp           | 380 ++++++++++++++++++
+ pcbnew/dialogs/dialog_autoroute.h             |  91 +++++
  pcbnew/menubar_pcb_editor.cpp                 |  12 +
- pcbnew/tools/board_editor_control.cpp         |  22 ++
+ pcbnew/tools/board_editor_control.cpp         |  22 +
  pcbnew/tools/board_editor_control.h           |   1 +
  pcbnew/tools/pcb_actions.cpp                  |   7 +
  pcbnew/tools/pcb_actions.h                    |   1 +
- 11 files changed, 736 insertions(+)
+ 11 files changed, 800 insertions(+)
  create mode 100644 libs/kiplatform/include/kiplatform/autorouter.h
  create mode 100644 libs/kiplatform/os/android/autorouter.cpp
  create mode 100644 pcbnew/dialogs/dialog_autoroute.cpp
@@ -132,10 +132,10 @@ index 00000000..610ba516
 +#endif // KIPLATFORM_AUTOROUTER_H_
 diff --git a/libs/kiplatform/os/android/autorouter.cpp b/libs/kiplatform/os/android/autorouter.cpp
 new file mode 100644
-index 00000000..61a8b22e
+index 00000000..4c4ac3e9
 --- /dev/null
 +++ b/libs/kiplatform/os/android/autorouter.cpp
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,203 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -161,8 +161,11 @@ index 00000000..61a8b22e
 +
 +#include <kiplatform/autorouter.h>
 +
++#include <QCoreApplication>
 +#include <QJniEnvironment>
 +#include <QJniObject>
++
++#include <android/log.h>
 +
 +#include <atomic>
 +#include <mutex>
@@ -170,7 +173,9 @@ index 00000000..61a8b22e
 +
 +namespace
 +{
-+const char* const CLASS = "io/github/deveshrai/kicadandroid/Autorouter";
++const char* const CLASS_NAME = "io.github.deveshrai.kicadandroid.Autorouter";
++
++jclass            g_class = nullptr;   // global reference, usable from any thread
 +
 +std::mutex        g_lock;
 +std::thread       g_thread;
@@ -184,10 +189,44 @@ index 00000000..61a8b22e
 +}
 +
 +
++// The app's own class loader finds classes from the APK on any thread; JNI FindClass on a
++// native thread only sees the system classes.
 +bool classFound()
 +{
 +    QJniEnvironment env;
-+    return env.findClass( CLASS ) != nullptr;
++    QJniObject      ctx = QNativeInterface::QAndroidApplication::context();
++    QJniObject      loader = ctx.callObjectMethod( "getClassLoader", "()Ljava/lang/ClassLoader;" );
++    QJniObject      cls;
++
++    if( loader.isValid() )
++    {
++        cls = loader.callObjectMethod( "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;",
++                                       QJniObject::fromString( CLASS_NAME ).object<jstring>() );
++    }
++
++    if( env.checkAndClearExceptions() || !cls.isValid() )
++    {
++        __android_log_print( ANDROID_LOG_WARN, "KiCad", "Autorouter: class %s not found",
++                             CLASS_NAME );
++        return false;
++    }
++
++    g_class = static_cast<jclass>( env->NewGlobalRef( cls.object() ) );
++    return true;
++}
++
++
++QString callString( const char* aMethod )
++{
++    return QJniObject::callStaticObjectMethod( g_class, aMethod, "()Ljava/lang/String;" )
++            .toString();
++}
++
++
++template <typename T>
++T call( const char* aMethod, const char* aSignature )
++{
++    return QJniObject::callStaticMethod<T>( g_class, aMethod, aSignature );
 +}
 +} // namespace
 +
@@ -228,7 +267,7 @@ index 00000000..61a8b22e
 +                // QJniObject attaches this thread to the VM, and finds the app's classes
 +                // through Qt's class loader.
 +                QJniObject result = QJniObject::callStaticObjectMethod(
-+                        CLASS, "route",
++                        g_class, "route",
 +                        "(Ljava/lang/String;Ljava/lang/String;IZILjava/lang/String;)"
 +                        "Ljava/lang/String;",
 +                        QJniObject::fromString( QString::fromStdString( dsn ) ).object<jstring>(),
@@ -258,13 +297,15 @@ index 00000000..61a8b22e
 +
 +void StopRouting()
 +{
-+    QJniObject::callStaticMethod<void>( CLASS, "stopRouting" );
++    if( IsAvailable() )
++        call<void>( "stopRouting", "()V" );
 +}
 +
 +
 +void StopAll()
 +{
-+    QJniObject::callStaticMethod<void>( CLASS, "stopAll" );
++    if( IsAvailable() )
++        call<void>( "stopAll", "()V" );
 +}
 +
 +
@@ -275,17 +316,16 @@ index 00000000..61a8b22e
 +    if( !IsAvailable() )
 +        return s;
 +
-+    s.stage = wxstr( QJniObject::callStaticObjectMethod<jstring>( CLASS, "getStage" ).toString() );
-+    s.message =
-+            wxstr( QJniObject::callStaticObjectMethod<jstring>( CLASS, "getMessage" ).toString() );
-+    s.pass = QJniObject::callStaticMethod<jint>( CLASS, "getPass" );
-+    s.unrouted = QJniObject::callStaticMethod<jint>( CLASS, "getUnrouted" );
-+    s.connections = QJniObject::callStaticMethod<jint>( CLASS, "getConnections" );
-+    s.vias = QJniObject::callStaticMethod<jint>( CLASS, "getVias" );
-+    s.violations = QJniObject::callStaticMethod<jint>( CLASS, "getViolations" );
-+    s.traceLengthMm = QJniObject::callStaticMethod<jfloat>( CLASS, "getTraceLengthMm" );
-+    s.snapshotSerial = QJniObject::callStaticMethod<jint>( CLASS, "getSnapshotSerial" );
-+    s.elapsedMs = (long) QJniObject::callStaticMethod<jlong>( CLASS, "getElapsedMs" );
++    s.stage = wxstr( callString( "getStage" ) );
++    s.message = wxstr( callString( "getMessage" ) );
++    s.pass = call<jint>( "getPass", "()I" );
++    s.unrouted = call<jint>( "getUnrouted", "()I" );
++    s.connections = call<jint>( "getConnections", "()I" );
++    s.vias = call<jint>( "getVias", "()I" );
++    s.violations = call<jint>( "getViolations", "()I" );
++    s.traceLengthMm = call<jfloat>( "getTraceLengthMm", "()F" );
++    s.snapshotSerial = call<jint>( "getSnapshotSerial", "()I" );
++    s.elapsedMs = (long) call<jlong>( "getElapsedMs", "()J" );
 +    s.running = g_running;
 +
 +    std::lock_guard<std::mutex> lock( g_lock );
@@ -317,10 +357,10 @@ index c5510d9d..e3347982 100644
      board_stackup_manager/stackup_predefined_prms.cpp
 diff --git a/pcbnew/dialogs/dialog_autoroute.cpp b/pcbnew/dialogs/dialog_autoroute.cpp
 new file mode 100644
-index 00000000..82144566
+index 00000000..e4f6b5cc
 --- /dev/null
 +++ b/pcbnew/dialogs/dialog_autoroute.cpp
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,380 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -441,10 +481,22 @@ index 00000000..82144566
 +    setState( STATE::SETUP );
 +    finishDialogSettings();
 +
-+    // Sit in the top right corner, so the board stays in view while it is routed.
++    // Sit in the top right corner, so the board stays in view while it is routed.  Showing the
++    // dialog centres it, so move it once it is up.
++    Bind( wxEVT_INIT_DIALOG,
++          [this]( wxInitDialogEvent& aEvent )
++          {
++              aEvent.Skip();
++              CallAfter( [this]() { moveToCorner(); } );
++          } );
++}
++
++
++void DIALOG_AUTOROUTE::moveToCorner()
++{
 +    wxRect frameRect = m_frame->GetScreenRect();
 +    wxSize size = GetSize();
-+    SetPosition( wxPoint( frameRect.GetRight() - size.x - 24, frameRect.GetTop() + 120 ) );
++    Move( wxPoint( frameRect.GetRight() - size.x - 24, frameRect.GetTop() + 140 ) );
 +}
 +
 +
@@ -488,8 +540,11 @@ index 00000000..82144566
 +
 +void DIALOG_AUTOROUTE::onStart( wxCommandEvent& aEvent )
 +{
-+    wxRemoveFile( m_sesPath );
-+    wxRemoveFile( m_snapPath );
++    for( const wxString& old : { m_sesPath, m_snapPath } )
++    {
++        if( wxFileExists( old ) )
++            wxRemoveFile( old );
++    }
 +
 +    if( !m_frame->ExportSpecctraFile( m_dsnPath ) )
 +        return;
@@ -600,8 +655,9 @@ index 00000000..82144566
 +                                              s.connections ) );
 +    }
 +
-+    long secs = s.elapsedMs / 1000;
-+    wxString details = wxString::Format( _( "%ld:%02ld" ), secs / 60, secs % 60 );
++    long     secs = s.elapsedMs / 1000;
++    wxString details = secs < 60 ? wxString::Format( _( "%.1f s" ), s.elapsedMs / 1000.0 )
++                                 : wxString::Format( _( "%ld:%02ld" ), secs / 60, secs % 60 );
 +
 +    if( s.vias >= 0 )
 +        details += wxString::Format( _( "   %d vias" ), s.vias );
@@ -646,6 +702,7 @@ index 00000000..82144566
 +
 +    Layout();
 +    GetSizer()->Fit( this );
++    moveToCorner();
 +}
 +
 +
@@ -658,8 +715,14 @@ index 00000000..82144566
 +
 +        if( s.unrouted == 0 )
 +            m_stage->SetLabel( _( "Done: every connection is routed." ) );
++        else if( m_stopping )
++            m_stage->SetLabel( wxString::Format( _( "Stopped: %d connections are still "
++                                                    "unrouted." ),
++                                                 s.unrouted ) );
 +        else
-+            m_stage->SetLabel( wxString::Format( _( "Done: %d connections are still unrouted." ),
++            m_stage->SetLabel( wxString::Format( _( "Done: %d connections are still unrouted. "
++                                                    "Route them by hand, or move parts and "
++                                                    "try again." ),
 +                                                 s.unrouted ) );
 +
 +        m_routed->SetLabel( wxString::Format( _( "%d of %d connections routed. Keep the routes, "
@@ -680,10 +743,10 @@ index 00000000..82144566
 +}
 diff --git a/pcbnew/dialogs/dialog_autoroute.h b/pcbnew/dialogs/dialog_autoroute.h
 new file mode 100644
-index 00000000..f3fac28c
+index 00000000..b3ed46b0
 --- /dev/null
 +++ b/pcbnew/dialogs/dialog_autoroute.h
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,91 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -742,6 +805,7 @@ index 00000000..f3fac28c
 +    void onTimer( wxTimerEvent& aEvent );
 +
 +    void setState( STATE aState );
++    void moveToCorner();
 +    bool importSession( const wxString& aPath );
 +    void finish();
 +
