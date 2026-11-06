@@ -121,6 +121,13 @@ Open (next):
    ".kicad_pro.kicad_pro" (typed name lost); adb `input text abcdef` into a wx text field gave
    "bcdefbcdefe" (emulator IME? the Fold typed correctly); the soft keyboard covers the focused
    field (the window doesn't pan).
+**Re-prioritised 2026-11-06:** the user inserted two new items ahead of the rest.  The current
+order is in docs/CONTINUE.md:
+- P7 is an integrated autorouter (a good one).
+- P8 is an integrated MCP server, with a SolidCraft-style settings page.
+- The items below each move down by two: import/export becomes P9, the UI sweep P10 and the
+  desktop-GL work P11.
+
 7. Import/export third-party symbols, footprints and 3D models (test: SnapEDA ESP32-S31-WROOM-1-N16R16V).
 8. UI sweep: fields too big/small or not scaling (check on the Fold's 2.625 scale too).
    Seen so far (Fold): Plot dialog's top edge sits under the status bar and its bottom buttons
