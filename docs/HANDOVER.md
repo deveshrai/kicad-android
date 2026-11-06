@@ -52,6 +52,21 @@ adb -s R5GL8486SDD install -r -g build/KiCad-debug.apk       # tablet; emulator 
 - Session recorder: `scripts/record-session.sh -s R5GL8486SDD` (screen, logcat, memory into
   build/sessions/<ts>).
 
+### README recordings (2026-11-06)
+- **New media** in docs/media: `schematic.gif`, `pcb-layout.gif`, `3d-blinker.gif`,
+  `hero-tablet-3d.jpg` and `blinker-3d-closeup.jpg`; MP4s are in `docs/media/video`.
+  - Recorded on the tablet from a demo copy of the blinker; see work/blinker/README.md.
+  - The device project was restored afterwards.
+- **`tools/touchinject`:** gained `hover` and `click` (SOURCE_MOUSE events).
+  - The router doesn't follow injected hover events, so the hand-routing part was dropped from
+    the video.  Real mouse hover is untested this way.
+- **Bug:** after File > Import > Specctra Session, the canvas didn't show the new tracks until the
+  view moved.  The status bar already counted 51 segments.
+- **Bug:** a single-finger tap on a footprint and an immediate drag sometimes started a selection
+  rectangle instead of moving it.  Tap to select first, then drag.
+- **Bug:** with W (wire), the wire starts at the pointer at once, so a tap afterwards adds a
+  segment from wherever the pointer was.
+
 ## Tablet session findings (build/sessions/20261101-140854/notes.md has the full log)
 Fixed and verified on the tablet:
 - Crash on selecting a symbol: Vulkan surface lifetime. We now make our own VkSurfaceKHR on the

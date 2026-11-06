@@ -10,3 +10,17 @@ Update PCB from Schematic → placement (`place_pcb.py`) → Freerouting (Specct
 zone fill, DRC (0 violations, schematic parity OK) → 3D viewer with STEP models.
 
 `project/` holds the finished files.
+
+## README recordings
+
+The schematic, PCB and 3D GIFs in the top-level README were recorded on the tablet from a demo
+copy of this project:
+
+- `BLINKER_DEMO=1 gen_sch.py out.kicad_sch` leaves out the LED stage (R3, D1), so it can be drawn
+  in the app.
+- `demo_pcb.py finished.kicad_pcb out.kicad_pcb` removes the tracks and zone fills and lines the
+  footprints up beside the board.
+
+The recording was driven over adb: keys, `input text`, and `tools/touchinject` for drags, pinches,
+mouse hover and clicks.  It used `screenrecord`, and was cut with ffmpeg (`mpdecimate` drops idle
+frames).

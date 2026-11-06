@@ -12,9 +12,9 @@ upstream KiCad sources.
 ![Android 10+](https://img.shields.io/badge/Android-10%2B%20arm64-3DDC84?logo=android&logoColor=white)
 ![KiCad 10.99](https://img.shields.io/badge/KiCad-10.99%20(master)-314CB0)
 
-<img src="docs/media/hero-3d-fold.jpg" alt="KiCad's 3D viewer showing an RP2350 board on a Galaxy Z Fold" width="860">
+<img src="docs/media/hero-tablet-3d.jpg" alt="KiCad's 3D viewer showing a 555 LED blinker board on a Galaxy Tab" width="860">
 
-<sub>The 3D viewer on a Samsung Galaxy Z Fold: STEP models rendered through OpenGL 2.1 on GLES.</sub>
+<sub>A 555 LED blinker, designed on a Galaxy Tab S12+ from schematic to 3D. STEP models rendered through OpenGL 2.1 on GLES.</sub>
 
 </div>
 
@@ -35,6 +35,28 @@ upstream KiCad sources.
 - **Keyboard and mouse first**, with KiCad's normal hotkeys, plus touch gestures on the canvas.
 - **Libraries included.**  The KiCad 10.0.8 symbol and footprint libraries are bundled.
 
+## From schematic to 3D on a tablet
+
+A complete small board, a CR2032-powered 555 LED blinker, made in the app on a Samsung Galaxy Tab.
+The project is in [`work/blinker`](work/blinker).
+
+**1. Schematic.**  Place symbols from the bundled libraries, set values, wire, add power, and run
+ERC until it shows 0 errors and 0 warnings.
+
+<img src="docs/media/schematic.gif" alt="Adding a resistor, LED, wire, ground and net label in the schematic editor, then fixing the one ERC error" width="860">
+
+**2. PCB.**  Pull the footprints in from the schematic and drag them onto the board.  Import the
+autorouted tracks (a Specctra session from Freerouting) and fill the ground zones.
+
+<img src="docs/media/pcb-layout.gif" alt="Dragging footprints onto the board outline, importing routed tracks and filling the GND zones" width="860">
+
+**3. 3D.**  Check the board with its STEP component models.
+
+<img src="docs/media/3d-blinker.gif" alt="Orbiting the finished blinker board in the 3D viewer" width="860">
+
+Full-resolution videos: [schematic](docs/media/video/schematic.mp4),
+[PCB](docs/media/video/pcb-layout.mp4), [3D](docs/media/video/3d-blinker.mp4).
+
 ## See it run
 
 <table>
@@ -46,6 +68,16 @@ upstream KiCad sources.
 <td width="50%" align="center">
 <img src="docs/media/3d-viewer.gif" alt="Rotating a board in the 3D viewer by dragging"><br>
 <sub><b>3D viewer:</b> drag to orbit the board and its STEP models</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<img src="docs/media/hero-3d-fold.jpg" alt="KiCad's 3D viewer showing an RP2350 board on a Galaxy Z Fold"><br>
+<sub><b>3D viewer</b> on a Galaxy Z Fold, with an RP2350 board</sub>
+</td>
+<td width="50%" align="center">
+<img src="docs/media/blinker-3d-closeup.jpg" alt="Close-up of the blinker board in the 3D viewer"><br>
+<sub>The blinker's STEP models up close</sub>
 </td>
 </tr>
 <tr>

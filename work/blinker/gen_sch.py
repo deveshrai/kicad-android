@@ -231,8 +231,10 @@ two_pin('Device:C', 'C2', '10n', 91.44, 104.14, 'CV', 'GND', C_DISC)
 two_pin('Device:C', 'C3', '100n', 76.2, 50.8, 'VCC', 'GND', C_DISC)
 
 # LED and its resistor (5 mm red LED, about 5 mA from 3 V)
-two_pin('Device:R', 'R3', '220', 185.42, 66.04, 'OUT', 'LED_A', R_THT)
-two_pin('Device:LED', 'D1', 'Red 5mm', 185.42, 88.9, 'GND', 'LED_A', 'LED_THT:LED_D5.0mm')
+# BLINKER_DEMO=1 leaves this stage out, so the README recording can draw it in the app
+if not os.environ.get('BLINKER_DEMO'):
+    two_pin('Device:R', 'R3', '220', 185.42, 66.04, 'OUT', 'LED_A', R_THT)
+    two_pin('Device:LED', 'D1', 'Red 5mm', 185.42, 88.9, 'GND', 'LED_A', 'LED_THT:LED_D5.0mm')
 
 # Power flag: GND comes from the cell, which has no power output pin
 for i, (net, xx) in enumerate((('GND', 30.48),)):

@@ -5,6 +5,8 @@
 //   Touch pan X Y DX DY [STEPS]                   two fingers 200 px apart, moved together
 //   Touch tap3 X Y                                three-finger tap around X,Y
 //   Touch drag X Y DX DY [STEPS]                  one finger
+//   Touch hover X Y DX DY [STEPS]                 mouse pointer moved with no button down
+//   Touch click X Y                               mouse left click (press and release)
 //
 // Coordinates are display pixels on the default display.  Build: tools/touchinject/build.sh
 import android.os.SystemClock;
@@ -84,6 +86,25 @@ public class Touch {
         }
     }
 
+    /** One mouse event (source SOURCE_MOUSE, tool type MOUSE) at x,y. */
+    static void mouse(int action, float x, float y, int buttons) throws Exception {
+        MotionEvent.PointerProperties[] props = { new MotionEvent.PointerProperties() };
+        props[0].id = 0;
+        props[0].toolType = MotionEvent.TOOL_TYPE_MOUSE;
+        MotionEvent.PointerCoords[] coords = { new MotionEvent.PointerCoords() };
+        coords[0].x = x;
+        coords[0].y = y;
+        coords[0].pressure = buttons != 0 ? 1f : 0f;
+        long now = SystemClock.uptimeMillis();
+        if (action == MotionEvent.ACTION_DOWN) sDown = now;
+        MotionEvent ev = MotionEvent.obtain(action == MotionEvent.ACTION_HOVER_MOVE ? now : sDown, now,
+                action, 1, props, coords, 0, buttons, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0);
+        if (action == MotionEvent.ACTION_BUTTON_PRESS || action == MotionEvent.ACTION_BUTTON_RELEASE)
+            MotionEvent.class.getMethod("setActionButton", int.class).invoke(ev, MotionEvent.BUTTON_PRIMARY);
+        sInject.invoke(sInputManager, ev, 2);
+        ev.recycle();
+    }
+
     public static void main(String[] args) throws Exception {
         init();
         String cmd = args[0];
@@ -111,6 +132,27 @@ public class Touch {
                 float dx = Float.parseFloat(args[3]), dy = Float.parseFloat(args[4]);
                 int steps = args.length > 5 ? Integer.parseInt(args[5]) : 20;
                 gesture(new float[][] {{x, y}}, new float[][] {{x + dx, y + dy}}, steps, 16);
+                break;
+            }
+            case "hover": {
+                float dx = Float.parseFloat(args[3]), dy = Float.parseFloat(args[4]);
+                int steps = args.length > 5 ? Integer.parseInt(args[5]) : 20;
+                for (int s = 0; s <= steps; s++) {
+                    float t = (float) s / steps;
+                    mouse(MotionEvent.ACTION_HOVER_MOVE, x + dx * t, y + dy * t, 0);
+                    Thread.sleep(16);
+                }
+                break;
+            }
+            case "click": {
+                final int b = MotionEvent.BUTTON_PRIMARY;
+                mouse(MotionEvent.ACTION_HOVER_MOVE, x, y, 0);
+                mouse(MotionEvent.ACTION_DOWN, x, y, b);
+                mouse(MotionEvent.ACTION_BUTTON_PRESS, x, y, b);
+                Thread.sleep(40);
+                mouse(MotionEvent.ACTION_BUTTON_RELEASE, x, y, 0);
+                mouse(MotionEvent.ACTION_UP, x, y, 0);
+                mouse(MotionEvent.ACTION_HOVER_MOVE, x, y, 0);
                 break;
             }
             default:
