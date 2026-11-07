@@ -171,6 +171,17 @@ kicad/library_package_import.{h,cpp}).
   - The GUI has no handler for the IPC API's DeleteLibraryTableEntry. To remove a test row, edit the table file.
   - The wxSingleChoiceDialog (export library list) draws without a title bar (P10).
 
+## Crash fix: tree item data on wxQt (10.99ai)
+The user hit a crash on 2026-11-07 (10.99ah) in the PCB editor's Tools > DRC Rule Editor.
+- **Stack:** SIGSEGV in `__dynamic_cast`, from RULE_EDITOR_DIALOG_BASE::saveRuleTreeState, from onRuleTreeItemLeftUp (the end of a drag in the rule tree).
+- **Cause:** the drag moves each item's data to a new item (SetItemData(new, d); SetItemData(old, nullptr)). The wx docs say SetItemData doesn't free the old data, but wxQt kept the data in a wxSharedPtr per item. The second call therefore deleted d, and the new item pointed at freed memory.
+- **Fix:** wx patch 0026 detaches the old data instead of deleting it. Deleting an item still frees its data.
+- **Check:** tools/wx-tests/tree_item_data_move.cpp with ASan crashes on the old desktop wxQt and passes with the patch.
+- **Symbolizing a tablet crash:**
+  1. `adb logcat -d -b crash`.
+  2. Find the APK entry holding the frame's offset (python zipfile header_offset; libraries are stored uncompressed).
+  3. Run `llvm-addr2line -f -C -i -e build/kicad-android/<dir>/<lib>.so <pc>`.
+
 ## RP2350 board experiment
 - Project on the tablet: files/RP2350A-DevBoard (the user is building it by hand).
 - Scripted version on the emulator: work/rp2350 (gen_sch.py, place_pcb.py with R=8 mm rounded

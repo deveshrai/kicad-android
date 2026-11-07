@@ -12,9 +12,9 @@ upstream KiCad sources.
 ![Android 10+](https://img.shields.io/badge/Android-10%2B%20arm64-3DDC84?logo=android&logoColor=white)
 ![KiCad 10.99](https://img.shields.io/badge/KiCad-10.99%20(master)-314CB0)
 
-<img src="docs/media/hero-tablet-3d.jpg" alt="KiCad's 3D viewer showing a 555 LED blinker board on a Galaxy Tab" width="860">
+<a href="#a-whole-board-over-mcp-esp32-s3-in-uno-format"><img src="docs/media/esp32s3-uno-tablet.png" alt="KiCad's board editor on a Galaxy Tab showing the routed ESP32-S3 board in Arduino Uno format, with GND pours and no unrouted connections" width="860"></a>
 
-<sub>A 555 LED blinker, designed on a Galaxy Tab S12+ from schematic to 3D. STEP models rendered through OpenGL 2.1 on GLES.</sub>
+<sub>An ESP32-S3 board in Arduino Uno format, designed on a Galaxy Tab S12+ from an empty schematic to Gerbers, every step driven by Claude Code through KiCad's built-in MCP server.</sub>
 
 </div>
 

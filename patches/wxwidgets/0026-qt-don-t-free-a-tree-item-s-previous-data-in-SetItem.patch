@@ -1,0 +1,97 @@
+From e6ff89c54c7b88c0887247157ac9ddd8abd4f9b2 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 7 Nov 2026 11:35:37 +0530
+Subject: [PATCH] qt: don't free a tree item's previous data in SetItemData()
+
+wxTreeCtrl::SetItemData() is documented not to free the data the item had before, and the other
+ports don't, so code moves data between items: SetItemData(newItem, data) then
+SetItemData(oldItem, nullptr).  wxQt kept each item's data in its own wxSharedPtr, so the second
+call deleted the data the new item now pointed to, and the next access crashed (KiCad's rule
+editor did this when a rule was dragged in its tree; on a touchscreen a tap that moves a little
+is a drag).  Replacing an item's data now detaches the old data instead of deleting it; deleting
+the item still deletes its data.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/treectrl.cpp | 40 +++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/src/qt/treectrl.cpp b/src/qt/treectrl.cpp
+index cb28510..28e42e3 100644
+--- a/src/qt/treectrl.cpp
++++ b/src/qt/treectrl.cpp
+@@ -26,15 +26,21 @@
+ #include <QtWidgets/QScrollBar>
+ #include <QtGui/QPainter>
+ 
++#include <memory>
++
+ namespace
+ {
++// The client data of a tree item, kept in the item's Qt::UserRole.  The item owns the data and
++// deletes it when the item goes away, but wxTreeCtrl::SetItemData() does not free the data an
++// item had before (as in the other ports), so code can move data from one item to another:
++// replacing an item's data detaches the old data from it instead of deleting it.
+ struct TreeItemDataQt
+ {
+     TreeItemDataQt()
+     {
+     }
+ 
+-    explicit TreeItemDataQt(wxTreeItemData* data) : data(data)
++    explicit TreeItemDataQt(wxTreeItemData* data) : owner(std::make_shared<Owner>(data))
+     {
+ #if QT_VERSION_MAJOR < 6
+         static bool s_registered = false;
+@@ -48,11 +54,27 @@ struct TreeItemDataQt
+ 
+     wxTreeItemData *getData() const
+     {
+-        return data.get();
++        return owner ? owner->data : nullptr;
++    }
++
++    // Stop owning the data, without deleting it
++    void detach() const
++    {
++        if ( owner )
++            owner->data = nullptr;
+     }
+ 
+ private:
+-    wxSharedPtr<wxTreeItemData> data;
++    struct Owner
++    {
++        explicit Owner(wxTreeItemData* d) : data(d) {}
++        ~Owner() { delete data; }
++
++        wxTreeItemData* data;
++    };
++
++    // Shared because QVariant copies the value
++    std::shared_ptr<Owner> owner;
+ };
+ 
+ QDataStream &operator<<(QDataStream &out, const TreeItemDataQt &WXUNUSED(obj))
+@@ -913,6 +935,18 @@ void wxTreeCtrl::SetItemData(const wxTreeItemId& item, wxTreeItemData *data)
+         data->SetId(item);
+ 
+     QTreeWidgetItem *qTreeItem = wxQtConvertTreeItem(item);
++
++    // The data the item had is not ours to free any more (see TreeItemDataQt)
++    const QVariant previous = qTreeItem->data(0, Qt::UserRole);
++
++    if ( previous.canConvert<TreeItemDataQt>() )
++    {
++        const TreeItemDataQt old = previous.value<TreeItemDataQt>();
++
++        if ( old.getData() != data )
++            old.detach();
++    }
++
+     const TreeItemDataQt treeItemData(data);
+     qTreeItem->setData(0, Qt::UserRole, QVariant::fromValue(treeItemData));
+ }
+-- 
+2.54.0 (Apple Git-157)
+
