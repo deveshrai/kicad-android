@@ -1,0 +1,136 @@
+From c13b319e2ccc5ee895771729a878136aea1bf822 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 7 Nov 2026 07:10:08 +0530
+Subject: [PATCH] MCP server: hold tool calls during yields; DRC rebuilds its
+ rules
+
+A zone fill or DRC keeps its progress dialog alive by yielding to the event loop, and wxQt's
+yield delivers CallAfter events too, so an MCP tool call could run in the middle of one.  A DRC
+started that way inside a zone fill never finished.  Tool calls that arrive during a yield now
+wait until the main loop is back.
+
+pcb_run_drc reinitializes the DRC engine first, so changes made through the IPC API
+(SetBoardDesignRules, SetNetClasses, SetCustomDesignRules) are checked; until now DRC kept the
+rules from when the board was opened.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/api/mcp_server.cpp    | 50 ++++++++++++++++++++++++++++--------
+ pcbnew/api/mcp_tools_pcb.cpp | 15 +++++++++++
+ 2 files changed, 54 insertions(+), 11 deletions(-)
+
+diff --git a/common/api/mcp_server.cpp b/common/api/mcp_server.cpp
+index 7e60fbe4..5db4b8b9 100644
+--- a/common/api/mcp_server.cpp
++++ b/common/api/mcp_server.cpp
+@@ -31,6 +31,7 @@
+ 
+ #include <wx/app.h>
+ #include <wx/base64.h>
++#include <wx/evtloop.h>
+ #include <wx/log.h>
+ #include <wx/thread.h>
+ 
+@@ -42,6 +43,7 @@
+ #include <future>
+ #include <random>
+ #include <sstream>
++#include <thread>
+ 
+ #ifndef __WINDOWS__
+ #include <arpa/inet.h>
+@@ -291,19 +293,45 @@ bool MCP_SERVER::RunOnMainThread( std::function<void()> aFunc, int aTimeoutMs )
+     auto done = std::make_shared<std::promise<void>>();
+     std::future<void> finished = done->get_future();
+ 
+-    wxTheApp->CallAfter(
+-            [aFunc, done]()
+-            {
+-                try
+-                {
+-                    aFunc();
+-                }
+-                catch( ... )
++    // A long operation on the main thread (zone fill, DRC, plotting) keeps its progress dialog
++    // alive by yielding to the event loop, and wxQt's yield also delivers CallAfter events.  A
++    // tool run from inside that yield would edit the board under the operation (a DRC nested in
++    // a zone fill never finishes), so while the loop is yielding the call is posted again a
++    // little later, and runs once the operation has returned to the main loop.
++    auto post = std::make_shared<std::function<void()>>();
++
++    *post = [aFunc, done, post]()
++    {
++        wxTheApp->CallAfter(
++                [aFunc, done, post]()
+                 {
+-                }
++                    wxEventLoopBase* loop = wxEventLoopBase::GetActive();
++
++                    if( loop && loop->IsYielding() )
++                    {
++                        std::thread( [post]()
++                                     {
++                                         std::this_thread::sleep_for(
++                                                 std::chrono::milliseconds( 100 ) );
++                                         ( *post )();
++                                     } ).detach();
++                        return;
++                    }
++
++                    try
++                    {
++                        aFunc();
++                    }
++                    catch( ... )
++                    {
++                    }
++
++                    done->set_value();
++                    *post = nullptr;    // break the self-reference
++                } );
++    };
+ 
+-                done->set_value();
+-            } );
++    ( *post )();
+ 
+     return finished.wait_for( std::chrono::milliseconds( aTimeoutMs ) )
+            == std::future_status::ready;
+diff --git a/pcbnew/api/mcp_tools_pcb.cpp b/pcbnew/api/mcp_tools_pcb.cpp
+index 1615cbea..e4817251 100644
+--- a/pcbnew/api/mcp_tools_pcb.cpp
++++ b/pcbnew/api/mcp_tools_pcb.cpp
+@@ -24,8 +24,10 @@
+ #include <board_commit.h>
+ #include <board_design_settings.h>
+ #include <connectivity/connectivity_data.h>
++#include <drc/drc_engine.h>
+ #include <drc/drc_item.h>
+ #include <footprint.h>
++#include <ki_exception.h>
+ #include <pcb_edit_frame.h>
+ #include <pcb_marker.h>
+ #include <pcb_track.h>
+@@ -181,6 +183,19 @@ static MCP_RESULT runDrc( PCB_EDIT_FRAME* aFrame, const json& aArgs )
+     mgr->RunAction( ACTIONS::selectionClear );
+     board->DeleteMARKERs( true, false );
+ 
++    // The engine compiles the board setup (minimum sizes, net classes) and the custom rules into
++    // its rules when it is initialized; IPC API calls such as SetBoardDesignRules or
++    // SetNetClasses change those without reinitializing it, so do that now.
++    try
++    {
++        mgr->GetTool<DRC_TOOL>()->GetDRCEngine()->InitEngine( board->GetDesignRulesPath() );
++    }
++    catch( PARSE_ERROR& pe )
++    {
++        return MCP_RESULT::Error( "the custom design rules do not parse: "
++                                  + pe.What().ToStdString() );
++    }
++
+     {
+         WX_PROGRESS_REPORTER reporter( aFrame, _( "Design Rules Check" ), 2, PR_CAN_ABORT );
+ 
+-- 
+2.54.0 (Apple Git-157)
+

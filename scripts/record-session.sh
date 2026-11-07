@@ -9,7 +9,7 @@ source "$(dirname "$0")/env.sh"
 
 SERIAL_ARGS=()
 if [ "${1:-}" = "-s" ]; then SERIAL_ARGS=(-s "$2"); fi
-ADB=(adb "${SERIAL_ARGS[@]}")
+ADB=(adb ${SERIAL_ARGS[@]+"${SERIAL_ARGS[@]}"})   # bash 3.2: empty arrays trip set -u
 
 OUT="$KA_ROOT/build/sessions/$(date +%Y%m%d-%H%M%S)"
 DEVREC=/sdcard/kicad-rec
@@ -21,8 +21,8 @@ echo "$OUT"
 "${ADB[@]}" shell getprop > "$OUT/device-props.txt"
 
 # Rolling 3-minute screen recordings (screenrecord's limit), numbered on the device
-"${ADB[@]}" shell "i=0; while true; do i=\$((i+1)); screenrecord --bit-rate 6000000 --time-limit 180 \
-    $DEVREC/part\$(printf %03d \$i).mp4 || sleep 2; done" &
+"${ADB[@]}" shell "i=0; while true; do i=\$((i+1)); f=$DEVREC/part\$(printf %03d \$i).mp4; \
+    screenrecord --bit-rate 6000000 --time-limit 180 \$f || { rm -f \$f; i=\$((i-1)); sleep 5; }; done" &
 REC_PID=$!
 
 "${ADB[@]}" logcat -v threadtime -b main,system,crash > "$OUT/logcat.txt" &

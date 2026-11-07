@@ -22,3 +22,9 @@ work/rp2350/from-app.kicad_pcb
 work/rp2350/placed.kicad_pcb
 work/rp2350/rot*.kicad_pcb
 __pycache__/
+# ESP32-S3 Uno MCP session: the raw log is kept compressed (mcp-log.jsonl.gz)
+work/esp32s3-uno/mcp-log.jsonl
+work/esp32s3-uno/out/
+work/esp32s3-uno/__pycache__/
+work/esp32s3-uno/project/3dmodels/
+work/snapeda-esp32-s31/

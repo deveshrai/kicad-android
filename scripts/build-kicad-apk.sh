@@ -144,6 +144,12 @@ grep -q 'android:icon=' "$OUT/AndroidManifest.xml" || \
     perl -0pi -e 's|(<application\b)|$1 android:icon="\@mipmap/ic_launcher"|' "$OUT/AndroidManifest.xml"
 grep -q 'android:icon="@mipmap/ic_launcher"' "$OUT/AndroidManifest.xml"
 
+# Profileable from the shell: simpleperf can sample a stuck release build (a hang report needs
+# a stack).  It grants no access to the app's data and does not make the app debuggable.
+grep -q '<profileable' "$OUT/AndroidManifest.xml" || \
+    perl -0pi -e 's|(<application\b[^>]*>)|$1\n        <profileable android:shell="true"/>|' "$OUT/AndroidManifest.xml"
+grep -q '<profileable android:shell="true"/>' "$OUT/AndroidManifest.xml"
+
 PATCH_CLASSES="$KA_ROOT/build/qt-patches-classes"
 rm -rf "$PATCH_CLASSES" && mkdir -p "$PATCH_CLASSES"
 "$JAVA_HOME/bin/javac" --release 8 -nowarn -d "$PATCH_CLASSES" \

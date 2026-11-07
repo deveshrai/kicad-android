@@ -94,6 +94,17 @@ What a client can do:
   That covers creating tracks and zones, placing footprints and symbols from the libraries, net
   classes, design rules, and Gerber, drill and PDF exports.
 
+### A whole board over MCP: ESP32-S3 in Uno format
+
+Claude Code designed [this board](work/esp32s3-uno) on the tablet through the MCP server alone:
+- **Schematic:** an ESP32-S3-WROOM-1, every IO on Uno-style shield headers plus a 2x8 header, USB-B and a 7-12 V jack with 5 V and 3.3 V regulators, and RESET and BOOT buttons.
+- **Board:** net classes for each kind of line, so power gets 0.8/0.6 mm tracks, USB is a 0.3 mm pair, and signals get 0.25 mm. Then placement, the autorouter, GND pours on both layers, a clean DRC, Gerbers and a 3D render.
+
+The scripts and the full MCP log are in `work/esp32s3-uno`.
+
+<img src="docs/media/esp32s3-uno-route.gif" alt="The autorouter routing the ESP32-S3 Uno board on the tablet, started over MCP, then the GND pours filling (10x speed)" width="640">
+<img src="docs/media/esp32s3-uno-3d.png" alt="3D render of the routed ESP32-S3 Uno board, exported over MCP" width="640">
+
 ## See it run
 
 <table>

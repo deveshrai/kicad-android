@@ -1,0 +1,8 @@
+(version 2)
+
+(rule "ESP32 module courtyard"
+	# The module courtyard includes the antenna keepout guideline (24 mm each side), which an Uno-sized board cannot meet; the antenna overhangs the edge instead.
+	(condition "A.Reference == 'U1' || B.Reference == 'U1'")
+	(constraint courtyard_clearance)
+	(severity ignore)
+)

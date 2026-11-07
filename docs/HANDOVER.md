@@ -243,7 +243,10 @@ Route > Autoroute Board... routes the whole board on the device with Freerouting
   - Freerouting needs Java 25; D8 (build-tools 36) reads class files only up to Java 24, so the
     script relabels the class files as Java 21 (the bytecode is the same).  After a Freerouting
     update, run `scripts/check-autorouter-api.sh` to list library calls Android lacks (java.awt,
-    JMX, virtual threads, java.net.http).  The 2.5.0 list is all off the routing path or caught.
+    JMX, virtual threads, java.net.http).  Check every entry: a missing class is only harmless when
+    its use is off the routing path or inside a `catch (Throwable)`.  10.99ae missed
+    java.io.ObjectInputFilter, which broke routing with optimization on (fixed in 10.99ag by
+    patch 0002, which checks the same allowlist in SafeObjectInputStream.resolveClass()).
   - The patch: board statistics use their own Rectangle2D.Float; ConductionArea keeps its awt cache
     in an Object field with a fixed serialVersionUID (board hashing serializes the board, and
     serialization reflects on field and method types); logging goes to stdout (logcat); no
@@ -288,5 +291,27 @@ live status line (listening / connected client, last request, last tool).
   (tested with Claude Code 2.1.319: from a cold start it opened the board editor, autorouted the
   blinker 20/20, ran DRC 0/0 and reported, while the tablet showed it happening).  Remote mode tested from the Mac over Wi-Fi.
 - Origin header check: when bound to 127.0.0.1, requests from web pages (non-localhost Origin) get 403.
+- **Full-board test (10.99ag), work/esp32s3-uno:** an ESP32-S3 Uno board built entirely over MCP
+  (schematic, net classes, rules, placement, routing, pours, DRC, Gerbers, 3D render; 465 tool calls,
+  log in mcp-log.jsonl.gz).  Things it found, all fixed in 10.99ag:
+  - Re-entrancy: KiCad's progress dialogs yield with YieldFor(TIMER), but wxQt's yield processes
+    all Qt events, so MCP CallAfter requests ran inside a zone fill or DRC; a DRC nested in a fill
+    spun the main thread for good.  RunOnMainThread() now re-posts (100 ms later, from a helper
+    thread) while wxEventLoopBase::GetActive()->IsYielding() (patch 0032).  Other CallAfter users
+    on wxQt can hit the same thing.
+  - pcb_run_drc reinitializes the DRC engine first: SetBoardDesignRules / SetNetClasses /
+    SetCustomDesignRules don't, so DRC kept the rules from when the board was opened (patch 0032;
+    the GUI DRC dialog still has that problem after API changes, upstream too).
+  - Freerouting's SafeObjectInputStream used java.io.ObjectInputFilter (absent on Android), which
+    broke routing with optimization (freerouting patch 0002).
+  - Route before pouring: a filled GND pour reaches the router as copper over the layer, and it
+    routed 84/107 instead of 107/107.  Upstream KiCad behaves the same; worth handling in
+    pcb_autoroute (ignore or temporarily unfill pours) later.
+  - Project text variables resolve ${KICAD10_3DMODEL_DIR}, so a project can carry its own 3D
+    models (SetTextVariables with a DOCTYPE_PROJECT document) while Configure Paths is broken.
+  - IPC ProjectSpecifier paths must match exactly, trailing slash included (take them from the
+    schematic document in kicad_status).
+- Release APKs are `<profileable android:shell="true"/>` (10.99ag), so a stuck process can be
+  sampled with `adb shell simpleperf record -p <pid> --call-graph dwarf` (not yet tried).
 - Next ideas: sch_* tools (ERC, annotate, update PCB from schematic), a board picture tool
   (RunBoardJobExportPng), Windows support (sockets are POSIX only).

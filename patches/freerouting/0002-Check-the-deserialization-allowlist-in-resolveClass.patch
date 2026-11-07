@@ -1,0 +1,111 @@
+From cd01b4a839078122773f069a106ac38f606c4192 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh@Deveshs-MacBook-Pro.local>
+Date: Sat, 7 Nov 2026 06:25:23 +0530
+Subject: [PATCH] Check the deserialization allowlist in resolveClass()
+
+Android's class library has no java.io.ObjectInputFilter, so SafeObjectInputStream threw
+NoClassDefFoundError the first time the optimizer copied a board.  The same allowlist is now
+enforced in resolveClass(), which every class in the stream (array element types included)
+passes through, and proxy classes are refused.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../util/SafeObjectInputStream.java           | 69 +++++++++++++++----
+ 1 file changed, 54 insertions(+), 15 deletions(-)
+
+diff --git a/src/main/java/app/freerouting/util/SafeObjectInputStream.java b/src/main/java/app/freerouting/util/SafeObjectInputStream.java
+index 1f86728..de555bc 100644
+--- a/src/main/java/app/freerouting/util/SafeObjectInputStream.java
++++ b/src/main/java/app/freerouting/util/SafeObjectInputStream.java
+@@ -2,34 +2,73 @@ package app.freerouting.util;
+ 
+ import java.io.IOException;
+ import java.io.InputStream;
+-import java.io.ObjectInputFilter;
++import java.io.InvalidClassException;
+ import java.io.ObjectInputStream;
++import java.io.ObjectStreamClass;
+ 
+ /**
+- * An {@link ObjectInputStream} that enforces a strict allowlist {@link ObjectInputFilter} to
+- * prevent arbitrary code execution and Java deserialization gadget attacks.
++ * An {@link ObjectInputStream} that enforces a strict class allowlist to prevent arbitrary code
++ * execution and Java deserialization gadget attacks.
++ *
++ * <p>The allowlist is enforced in {@link #resolveClass} rather than with an ObjectInputFilter,
++ * because Android's class library has no java.io.ObjectInputFilter. Every class in the stream,
++ * array component classes included, passes through resolveClass, so the effect is the same as the
++ * filter pattern "app.freerouting.**;java.lang.**;java.util.**;java.math.**;java.awt.Point;
++ * java.awt.Rectangle;java.awt.Color;[L*;!*".
+  */
+ public class SafeObjectInputStream extends ObjectInputStream {
+ 
+-  private static final String ALLOWLIST_PATTERN =
+-      "app.freerouting.**;java.lang.**;java.util.**;java.math.**;java.awt.Point;"
+-          + "java.awt.Rectangle;java.awt.Color;[L*;!*";
++  private static final String[] ALLOWED_PACKAGES = {
++      "app.freerouting.", "java.lang.", "java.util.", "java.math."};
++  private static final String[] ALLOWED_CLASSES = {
++      "java.awt.Point", "java.awt.Rectangle", "java.awt.Color"};
+ 
+   /**
+-   * Filter allowing only Freerouting domain classes, JDK standard types, primitives, and geometry.
+-   */
+-  public static final ObjectInputFilter STRICT_FILTER =
+-      ObjectInputFilter.Config.createFilter(ALLOWLIST_PATTERN);
+-
+-  /**
+-   * Creates a new SafeObjectInputStream wrapping the provided stream and attaching the strict
+-   * deserialization filter.
++   * Creates a new SafeObjectInputStream wrapping the provided stream.
+    *
+    * @param in the input stream
+    * @throws IOException if an I/O error occurs
+    */
+   public SafeObjectInputStream(InputStream in) throws IOException {
+     super(in);
+-    setObjectInputFilter(STRICT_FILTER);
++  }
++
++  /** Whether a class name passes the allowlist. Arrays pass when their element type does. */
++  public static boolean isAllowed(String name) {
++    String n = name;
++    while (n.startsWith("[")) {
++      n = n.substring(1);
++    }
++    if (n.length() == 1) {
++      return true; // primitive array element (I, J, B, ...)
++    }
++    if (n.startsWith("L") && n.endsWith(";")) {
++      n = n.substring(1, n.length() - 1);
++    }
++    for (String p : ALLOWED_PACKAGES) {
++      if (n.startsWith(p)) {
++        return true;
++      }
++    }
++    for (String c : ALLOWED_CLASSES) {
++      if (n.equals(c)) {
++        return true;
++      }
++    }
++    return false;
++  }
++
++  @Override
++  protected Class<?> resolveClass(ObjectStreamClass desc)
++      throws IOException, ClassNotFoundException {
++    if (!isAllowed(desc.getName())) {
++      throw new InvalidClassException(desc.getName(), "class not allowed by the allowlist");
++    }
++    return super.resolveClass(desc);
++  }
++
++  @Override
++  protected Class<?> resolveProxyClass(String[] interfaces) throws IOException {
++    throw new InvalidClassException("proxy classes are not allowed");
+   }
+ }
+-- 
+2.54.0 (Apple Git-157)
+
