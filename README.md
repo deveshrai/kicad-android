@@ -41,6 +41,7 @@ upstream KiCad sources.
   byte for byte.  [How we checked](docs/CHANGES.md#how-it-was-checked).
 - **Keyboard and mouse first**, with KiCad's normal hotkeys, plus touch gestures on the canvas.
 - **Libraries included.**  The KiCad 10.0.8 symbol and footprint libraries are bundled.
+- **Parts from SnapEDA and other parts sites in one step.**  **File > Import Library Package** adds a downloaded part's symbol, footprint and 3D model to your libraries.  **Export Library Package** packs a library back up to share.  [More below](#parts-from-snapeda-ultra-librarian-and-other-sites).
 
 ## From schematic to 3D on a tablet
 
@@ -190,12 +191,46 @@ A keyboard and mouse are recommended: a Bluetooth or USB keyboard, or Samsung De
 <details>
 <summary><b>3D models</b> (not bundled, the full set is several GB)</summary>
 
-Download the `.3dshapes` folders you need from
-[kicad-packages3D](https://gitlab.com/kicad/libraries/kicad-packages3D) into a folder in shared
-storage (e.g. `Documents/kicad-3dmodels`).  Then set `KICAD10_3DMODEL_DIR` to that folder in
-**Preferences > Configure Paths**.
+Parts imported with **Import Library Package** bring their own 3D models.
+
+For KiCad's own footprints:
+1. Download the `.3dshapes` folders you need from [kicad-packages3D](https://gitlab.com/kicad/libraries/kicad-packages3D) into the project, for example `<project>/3dmodels`.
+2. Set a project text variable named `KICAD10_3DMODEL_DIR` to `${KIPRJMOD}/3dmodels`. Use the schematic editor's **File > Schematic Setup > Project > Text Variables**, or the MCP server's `SetTextVariables`.
+
+Preferences > Configure Paths can't be edited on Android yet.
 
 </details>
+
+## Parts from SnapEDA, Ultra Librarian and other sites
+
+Download the part's **KiCad** zip in the browser, then in the project manager choose
+**File > Import Library Package...** and pick the zip from Downloads.  Choose **All Projects**
+or **This Project** (the files are then copied into the project folder, so they travel with it).
+The symbol, footprint and 3D model are ready to place straight away:
+
+- The footprint's 3D model path, which usually points into the author's own computer, is
+  pointed at the unpacked model.
+- The symbol's footprint field is pointed at the footprint library.
+- The libraries are added to the library tables and loaded in the open editors.
+- Importing the same zip again updates the part.
+
+**File > Export Library Package...** does the reverse.  It saves a symbol library, the footprints
+its symbols use and their 3D models as one zip, ready to import on another device or into
+desktop KiCad.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/library-package-import.gif" alt="File > Import Library Package on the tablet: the Android file picker finds the SnapEDA zip, All Projects, and the summary of what was added"></td>
+<td width="50%"><img src="docs/media/library-package-3d.png" alt="3D render with the imported ESP32-S31-WROOM-1 module and its SnapEDA STEP model on the board"></td>
+</tr>
+<tr>
+<td>Importing SnapEDA's ESP32-S31-WROOM-1 zip on the tablet</td>
+<td>The imported footprint with its 3D model, trial-placed on a board</td>
+</tr>
+</table>
+
+Both are also MCP tools (`kicad_import_library_package`, `kicad_export_library_package`), so
+Claude Code can bring in the parts a design needs.
 
 ## Using it
 

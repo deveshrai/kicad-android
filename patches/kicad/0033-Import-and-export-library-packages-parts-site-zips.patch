@@ -1,0 +1,1432 @@
+From 8b62921a908a541098949eca813243e7bdd28577 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 7 Nov 2026 08:10:25 +0530
+Subject: [PATCH] Import and export library packages (parts-site zips)
+
+File > Import Library Package... takes the zip a parts site (SnapEDA, Ultra Librarian,
+SamacSys, Digi-Key, Mouser...) offers for KiCad and makes the part usable in one step: the
+symbol libraries, footprints and 3D models are unpacked into the 3rd-party folder (all
+projects) or into the project (this project), the footprints' 3D model paths (usually a path on
+the author's disk) are pointed at the unpacked models, the symbols' Footprint fields at the
+footprint libraries as registered, and the libraries are added to the library tables and
+reloaded in the open editors.  Importing the same zip again updates it.  Zip entries that would
+land outside the package are refused (PROJECT_ARCHIVER::Unarchive).
+
+File > Export Library Package... writes the reverse: a symbol library (a .kicad_sym, or a
+.kicad_symdir merged), the footprints its symbols name and their 3D models, with the model
+paths pointing into the zip, so a part moves between devices or to someone else.
+
+Both are also MCP tools (kicad_import_library_package, kicad_export_library_package).  On
+Android there is no other practical way to bring in a downloaded part: Configure Paths cannot
+be edited and the library table grids are hard to use with a finger.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/api/mcp_server.cpp             |  26 +
+ kicad/CMakeLists.txt                  |   1 +
+ kicad/kicad.cpp                       |  64 ++
+ kicad/library_package_import.cpp      | 952 ++++++++++++++++++++++++++
+ kicad/library_package_import.h        |  79 +++
+ kicad/menubar.cpp                     |   2 +
+ kicad/tools/kicad_manager_actions.cpp |  16 +
+ kicad/tools/kicad_manager_actions.h   |   2 +
+ kicad/tools/kicad_manager_control.cpp | 126 ++++
+ kicad/tools/kicad_manager_control.h   |   2 +
+ 10 files changed, 1270 insertions(+)
+ create mode 100644 kicad/library_package_import.cpp
+ create mode 100644 kicad/library_package_import.h
+
+diff --git a/common/api/mcp_server.cpp b/common/api/mcp_server.cpp
+index 5db4b8b9..e7c994f7 100644
+--- a/common/api/mcp_server.cpp
++++ b/common/api/mcp_server.cpp
+@@ -485,6 +485,32 @@ void MCP_SERVER::registerBuiltinTools()
+                    { "required", { "editor" } } },
+                  "The project manager is not available." );
+ 
++    declareTool( "kicad_import_library_package",
++                 "Import a part downloaded from a parts site (SnapEDA, Ultra Librarian, SamacSys, "
++                 "Digi-Key, Mouser...) as a zip of KiCad files: its symbols, footprints and 3D "
++                 "models are unpacked, the footprints' 3D model paths and the symbols' Footprint "
++                 "fields are fixed up, and the libraries are added to the library tables "
++                 "(scope: global for all projects, or project to copy them into the open "
++                 "project). path is the zip's path on the device.",
++                 { { "type", "object" },
++                   { "properties",
++                     { { "path", { { "type", "string" } } },
++                       { "scope", { { "type", "string" },
++                                    { "enum", { "global", "project" } } } } } },
++                   { "required", { "path" } } },
++                 "The project manager is not available." );
++
++    declareTool( "kicad_export_library_package",
++                 "Save a symbol library (by nickname), the footprints its symbols name and "
++                 "their 3D models as one zip at path on the device, with the model paths "
++                 "pointing into the zip; kicad_import_library_package imports it again.",
++                 { { "type", "object" },
++                   { "properties",
++                     { { "library", { { "type", "string" } } },
++                       { "path", { { "type", "string" } } } } },
++                   { "required", { "library", "path" } } },
++                 "The project manager is not available." );
++
+     declareTool( "pcb_board_summary",
+                  "Summarise the board open in the PCB editor: outline, layers, every footprint "
+                  "with its position, and counts of tracks, vias, zones and unrouted "
+diff --git a/kicad/CMakeLists.txt b/kicad/CMakeLists.txt
+index d01ace1d..dd2768d9 100644
+--- a/kicad/CMakeLists.txt
++++ b/kicad/CMakeLists.txt
+@@ -43,6 +43,7 @@ set( KICAD_SRCS
+     import_proj.cpp
+     import_project.cpp
+     kicad_manager_frame.cpp
++    library_package_import.cpp
+     local_history_pane.cpp
+     menubar.cpp
+     mergetool_frame.cpp
+diff --git a/kicad/kicad.cpp b/kicad/kicad.cpp
+index a71fabb6..96d9a166 100644
+--- a/kicad/kicad.cpp
++++ b/kicad/kicad.cpp
+@@ -61,6 +61,7 @@
+ 
+ #include "pgm_kicad.h"
+ #include "kicad_manager_frame.h"
++#include "library_package_import.h"
+ #include "mergetool_frame.h"
+ 
+ #include <wx/crt.h>
+@@ -508,6 +509,69 @@ bool PGM_KICAD::OnPgmInit()
+                     managerFrame );
+         }
+ 
++        MCP_SERVER::Instance().SetToolHandler(
++                "kicad_import_library_package",
++                [managerFrame]( const nlohmann::json& aArgs ) -> MCP_RESULT
++                {
++                    wxString path = wxString::FromUTF8( aArgs.value( "path", std::string() ) );
++                    bool     project = aArgs.value( "scope", std::string() ) == "project";
++
++                    LIBRARY_PACKAGE_RESULT result;
++
++                    if( !ImportLibraryPackage( &managerFrame->Kiway(), path,
++                                               project ? LIBRARY_TABLE_SCOPE::PROJECT
++                                                       : LIBRARY_TABLE_SCOPE::GLOBAL,
++                                               result ) )
++                    {
++                        return MCP_RESULT::Error( result.Summary().ToStdString( wxConvUTF8 ) );
++                    }
++
++                    nlohmann::json out = {
++                        { "package_dir", result.m_PackageDir.ToStdString( wxConvUTF8 ) },
++                        { "symbol_libraries", nlohmann::json::array() },
++                        { "footprint_libraries", nlohmann::json::array() },
++                        { "footprints", result.m_Footprints },
++                        { "models", result.m_Models },
++                        { "model_links", result.m_ModelLinks },
++                        { "footprint_field_links", result.m_FootprintLinks },
++                        { "notes", nlohmann::json::array() } };
++
++                    for( const wxString& s : result.m_SymbolLibs )
++                        out["symbol_libraries"].push_back( s.ToStdString( wxConvUTF8 ) );
++
++                    for( const wxString& s : result.m_FootprintLibs )
++                        out["footprint_libraries"].push_back( s.ToStdString( wxConvUTF8 ) );
++
++                    for( const wxString& s : result.m_Notes )
++                        out["notes"].push_back( s.ToStdString( wxConvUTF8 ) );
++
++                    return MCP_RESULT::Json( out );
++                },
++                managerFrame );
++
++        MCP_SERVER::Instance().SetToolHandler(
++                "kicad_export_library_package",
++                [managerFrame]( const nlohmann::json& aArgs ) -> MCP_RESULT
++                {
++                    LIBRARY_PACKAGE_RESULT result;
++                    wxString lib = wxString::FromUTF8( aArgs.value( "library", std::string() ) );
++                    wxString path = wxString::FromUTF8( aArgs.value( "path", std::string() ) );
++
++                    if( !ExportLibraryPackage( &managerFrame->Kiway(), lib, path, result ) )
++                        return MCP_RESULT::Error( result.Summary().ToStdString( wxConvUTF8 ) );
++
++                    nlohmann::json notes = nlohmann::json::array();
++
++                    for( const wxString& s : result.m_Notes )
++                        notes.push_back( s.ToStdString( wxConvUTF8 ) );
++
++                    return MCP_RESULT::Json( { { "zip", path.ToStdString( wxConvUTF8 ) },
++                                               { "footprints", result.m_Footprints },
++                                               { "models", result.m_Models },
++                                               { "notes", notes } } );
++                },
++                managerFrame );
++
+         MCP_SERVER::Instance().ApplySettings();
+     }
+ 
+diff --git a/kicad/library_package_import.cpp b/kicad/library_package_import.cpp
+new file mode 100644
+index 00000000..f787ba22
+--- /dev/null
++++ b/kicad/library_package_import.cpp
+@@ -0,0 +1,952 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "library_package_import.h"
++
++#include <common.h>
++#include <env_paths.h>
++#include <env_vars.h>
++#include <frame_type.h>
++#include <kiway.h>
++#include <libraries/library_manager.h>
++#include <mail_type.h>
++#include <paths.h>
++#include <pgm_base.h>
++#include <project.h>
++#include <project/project_archiver.h>
++#include <reporter.h>
++#include <wx_filename.h>
++
++#include <wx/dir.h>
++#include <wx/ffile.h>
++#include <wx/filename.h>
++#include <wx/regex.h>
++#include <wx/wfstream.h>
++#include <wx/zipstrm.h>
++
++#include <algorithm>
++#include <map>
++#include <set>
++
++
++namespace
++{
++
++/// One library the package provides, before it is registered
++struct PACKAGE_LIB
++{
++    LIBRARY_TABLE_TYPE m_Type;
++    wxString           m_Name;    ///< wanted nickname (file or .pretty name)
++    wxString           m_Path;    ///< absolute path of the .kicad_sym / .lib / .pretty
++    wxString           m_IoType;  ///< library table plugin type
++    wxString           m_Nickname; ///< nickname it was registered under
++};
++
++
++wxString sanitizeName( const wxString& aName )
++{
++    wxString out;
++
++    for( wxUniChar c : aName )
++    {
++        if( wxIsalnum( c ) || c == '-' || c == '_' || c == '.' || c == '+' )
++            out += c;
++        else
++            out += '_';
++    }
++
++    out.Trim().Trim( false );
++
++    while( out.StartsWith( wxS( "." ) ) )
++        out = out.Mid( 1 );
++
++    return out.IsEmpty() ? wxString( wxS( "package" ) ) : out;
++}
++
++
++bool readFile( const wxString& aPath, wxString& aText )
++{
++    wxFFile f( aPath, wxS( "rb" ) );
++    return f.IsOpened() && f.ReadAll( &aText, wxConvUTF8 );
++}
++
++
++bool writeFile( const wxString& aPath, const wxString& aText )
++{
++    wxFFile f( aPath, wxS( "wb" ) );
++    return f.IsOpened() && f.Write( aText, wxConvUTF8 ) && f.Close();
++}
++
++
++/// Every regular file under aDir, recursively
++void listFiles( const wxString& aDir, std::vector<wxString>& aFiles )
++{
++    wxDir dir( aDir );
++
++    if( !dir.IsOpened() )
++        return;
++
++    wxString name;
++
++    for( bool ok = dir.GetFirst( &name, wxEmptyString, wxDIR_FILES | wxDIR_HIDDEN ); ok;
++         ok = dir.GetNext( &name ) )
++    {
++        aFiles.push_back( aDir + wxFileName::GetPathSeparator() + name );
++    }
++
++    for( bool ok = dir.GetFirst( &name, wxEmptyString, wxDIR_DIRS | wxDIR_HIDDEN ); ok;
++         ok = dir.GetNext( &name ) )
++    {
++        listFiles( aDir + wxFileName::GetPathSeparator() + name, aFiles );
++    }
++}
++
++
++/// The file name of a path written on any platform (models often carry Windows paths)
++wxString baseName( const wxString& aPath )
++{
++    wxString p = aPath;
++    p.Replace( wxS( "\\" ), wxS( "/" ) );
++    return p.AfterLast( '/' );
++}
++
++
++wxString quoteSexpr( const wxString& aText )
++{
++    wxString out = aText;
++    out.Replace( wxS( "\\" ), wxS( "\\\\" ) );
++    out.Replace( wxS( "\"" ), wxS( "\\\"" ) );
++    return wxS( "\"" ) + out + wxS( "\"" );
++}
++
++
++/// The libraries in a table of the given type and scope that use a path, by nickname
++std::optional<wxString> nicknameForUri( LIBRARY_MANAGER& aManager, LIBRARY_TABLE_TYPE aType,
++                                        LIBRARY_TABLE_SCOPE aScope, const wxString& aUri )
++{
++    for( LIBRARY_TABLE_ROW* row : aManager.Rows( aType, aScope, true ) )
++    {
++        if( row->URI() == aUri )
++            return row->Nickname();
++    }
++
++    return std::nullopt;
++}
++
++
++/// The top-level "(symbol ...)" blocks of a .kicad_sym file's text
++std::vector<wxString> symbolBlocks( const wxString& aLib )
++{
++    std::vector<wxString> blocks;
++    int                   depth = 0;
++    bool                  inString = false;
++    size_t                start = 0;
++
++    for( size_t i = 0; i < aLib.length(); ++i )
++    {
++        wxUniChar c = aLib[i];
++
++        if( inString )
++        {
++            if( c == '\\' )
++                ++i;
++            else if( c == '"' )
++                inString = false;
++
++            continue;
++        }
++
++        if( c == '"' )
++        {
++            inString = true;
++        }
++        else if( c == '(' )
++        {
++            if( ++depth == 2 )
++                start = i;
++        }
++        else if( c == ')' )
++        {
++            if( depth-- == 2 && aLib.Mid( start, 8 ) == wxS( "(symbol " ) )
++                blocks.push_back( aLib.Mid( start, i - start + 1 ) );
++        }
++    }
++
++    return blocks;
++}
++
++
++/// A symbol library as one .kicad_sym text: a file as it is, a .kicad_symdir folder (one file
++/// per symbol, as KiCad 10's own libraries are) merged
++bool readSymbolLibrary( const wxString& aPath, wxString& aText )
++{
++    if( !wxDirExists( aPath ) )
++        return readFile( aPath, aText );
++
++    std::vector<wxString> files;
++    listFiles( aPath, files );
++    std::sort( files.begin(), files.end() );
++
++    wxString header, body;
++
++    for( const wxString& file : files )
++    {
++        wxString text;
++
++        if( !file.Lower().EndsWith( wxS( ".kicad_sym" ) ) || !readFile( file, text ) )
++            continue;
++
++        std::vector<wxString> blocks = symbolBlocks( text );
++
++        if( header.IsEmpty() && !blocks.empty() )
++            header = text.Left( text.Find( blocks.front() ) );
++
++        for( const wxString& block : blocks )
++            body += wxS( "\t" ) + block + wxS( "\n" );
++    }
++
++    if( header.IsEmpty() )
++        return false;
++
++    aText = header.Trim() + wxS( "\n" ) + body + wxS( ")\n" );
++    return true;
++}
++
++
++} // namespace
++
++
++wxString LIBRARY_PACKAGE_RESULT::Summary() const
++{
++    if( !m_Error.IsEmpty() )
++        return m_Error;
++
++    wxString msg;
++
++    auto join = []( const std::vector<wxString>& aList )
++    {
++        wxString s;
++
++        for( const wxString& item : aList )
++            s += ( s.IsEmpty() ? wxString() : wxString( wxS( ", " ) ) ) + item;
++
++        return s;
++    };
++
++    if( !m_SymbolLibs.empty() )
++        msg += wxString::Format( _( "Symbol libraries: %s\n" ), join( m_SymbolLibs ) );
++
++    if( !m_FootprintLibs.empty() )
++        msg += wxString::Format( _( "Footprint libraries: %s (%d footprints)\n" ),
++                                 join( m_FootprintLibs ), m_Footprints );
++
++    if( m_Models )
++        msg += wxString::Format( _( "3D models: %d, linked from %d footprint model references\n" ),
++                                 m_Models, m_ModelLinks );
++
++    if( m_FootprintLinks )
++        msg += wxString::Format( _( "Symbol footprint fields pointed at the imported footprints: %d\n" ),
++                                 m_FootprintLinks );
++
++    msg += wxString::Format( _( "Files are in %s\n" ), m_PackageDir );
++
++    for( const wxString& note : m_Notes )
++        msg += wxS( "\n" ) + note;
++
++    return msg;
++}
++
++
++bool ImportLibraryPackage( KIWAY* aKiway, const wxString& aZipFile, LIBRARY_TABLE_SCOPE aScope,
++                           LIBRARY_PACKAGE_RESULT& aResult )
++{
++    LIBRARY_MANAGER&    manager = Pgm().GetLibraryManager();
++    const ENV_VAR_MAP&  envVars = Pgm().GetLocalEnvVariables();
++    PROJECT*            project = aKiway ? &aKiway->Prj() : nullptr;
++    wxFileName          zipFn( aZipFile );
++
++    if( !zipFn.FileExists() )
++    {
++        aResult.m_Error = wxString::Format( _( "'%s' does not exist." ), aZipFile );
++        return false;
++    }
++
++    if( aScope == LIBRARY_TABLE_SCOPE::PROJECT && ( !project || project->IsNullProject() ) )
++        aScope = LIBRARY_TABLE_SCOPE::GLOBAL;
++
++    // Where the package goes
++    wxFileName rootFn;
++
++    if( aScope == LIBRARY_TABLE_SCOPE::PROJECT )
++    {
++        rootFn.AssignDir( project->GetProjectPath() );
++    }
++    else
++    {
++        std::optional<wxString> thirdParty =
++                ENV_VAR::GetVersionedEnvVarValue( envVars, wxS( "3RD_PARTY" ) );
++        rootFn.AssignDir( thirdParty ? *thirdParty : PATHS::GetDefault3rdPartyPath() );
++    }
++
++    rootFn.AppendDir( wxS( "libraries" ) );
++
++    // Unpack into a staging directory first; PROJECT_ARCHIVER refuses entries that climb out
++    wxFileName staging( PATHS::GetUserCachePath(), wxEmptyString );
++    staging.AppendDir( wxS( "library-import" ) );
++    staging.AppendDir( sanitizeName( zipFn.GetName() ) );
++
++    if( staging.DirExists() )
++        staging.Rmdir( wxPATH_RMDIR_RECURSIVE );
++
++    staging.Mkdir( wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++
++    WX_STRING_REPORTER unzipReport;
++
++    if( !PROJECT_ARCHIVER::Unarchive( aZipFile, staging.GetPath(), unzipReport ) )
++    {
++        aResult.m_Error = wxString::Format( _( "Could not unpack '%s':\n%s" ), aZipFile,
++                                            unzipReport.GetMessages() );
++        staging.Rmdir( wxPATH_RMDIR_RECURSIVE );
++        return false;
++    }
++
++    std::vector<wxString> files;
++    listFiles( staging.GetPath(), files );
++
++    // The package is named after the zip's single top-level folder when it has one (SnapEDA's
++    // "<part>-KiCad.zip" holds "<part>/"), else after the zip
++    wxString packageName = sanitizeName( zipFn.GetName() );
++    {
++        wxDir    top( staging.GetPath() );
++        wxString name, dirName;
++        int      dirs = 0;
++
++        for( bool ok = top.GetFirst( &name, wxEmptyString, wxDIR_DIRS ); ok; ok = top.GetNext( &name ) )
++        {
++            if( name != wxS( "__MACOSX" ) )
++            {
++                dirName = name;
++                dirs++;
++            }
++        }
++
++        if( dirs == 1 && !top.HasFiles() )
++            packageName = sanitizeName( dirName );
++    }
++
++    wxFileName pkgFn( rootFn );
++    pkgFn.AppendDir( packageName );
++    wxString packageDir = pkgFn.GetPath();
++    aResult.m_PackageDir = packageDir;
++
++    // Sort the files by kind
++    std::vector<wxString>                        symbolFiles;   // .kicad_sym and .lib
++    std::map<wxString, std::vector<wxString>>    footprints;    // .pretty name -> .kicad_mod files
++    std::vector<wxString>                        models;
++    std::map<wxString, wxString>                 dcmFiles;      // legacy .lib name -> .dcm
++    int                                          skipped = 0;
++
++    for( const wxString& path : files )
++    {
++        wxFileName fn( path );
++        wxString   ext = fn.GetExt().Lower();
++
++        if( path.Contains( wxS( "__MACOSX" ) ) || fn.GetFullName().StartsWith( wxS( "._" ) ) )
++            continue;
++
++        if( ext == wxS( "kicad_sym" ) || ext == wxS( "lib" ) )
++        {
++            symbolFiles.push_back( path );
++        }
++        else if( ext == wxS( "dcm" ) )
++        {
++            dcmFiles[fn.GetName()] = path;
++        }
++        else if( ext == wxS( "kicad_mod" ) )
++        {
++            wxString parent = fn.GetDirs().IsEmpty() ? wxString() : fn.GetDirs().Last();
++            wxString lib = parent.Lower().EndsWith( wxS( ".pretty" ) )
++                                   ? parent.BeforeLast( '.' )
++                                   : packageName;
++            footprints[sanitizeName( lib )].push_back( path );
++        }
++        else if( ext == wxS( "step" ) || ext == wxS( "stp" ) || ext == wxS( "wrl" )
++                 || ext == wxS( "wrz" ) || ext == wxS( "stpz" ) )
++        {
++            models.push_back( path );
++        }
++        else
++        {
++            skipped++;
++        }
++    }
++
++    if( symbolFiles.empty() && footprints.empty() && models.empty() )
++    {
++        aResult.m_Error = wxString::Format(
++                _( "'%s' has no KiCad symbols, footprints or 3D models in it.  Some parts sites "
++                   "offer several formats; download the KiCad one." ),
++                zipFn.GetFullName() );
++        staging.Rmdir( wxPATH_RMDIR_RECURSIVE );
++        return false;
++    }
++
++    // Replace an earlier import of the same package
++    if( pkgFn.DirExists() )
++        pkgFn.Rmdir( wxPATH_RMDIR_RECURSIVE );
++
++    if( !pkgFn.Mkdir( wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
++    {
++        aResult.m_Error = wxString::Format( _( "Could not create '%s'." ), packageDir );
++        staging.Rmdir( wxPATH_RMDIR_RECURSIVE );
++        return false;
++    }
++
++    const wxString sep = wxFileName::GetPathSeparator();
++    std::vector<PACKAGE_LIB> libs;
++
++    // 3D models, by lower-case file name and by lower-case stem (a footprint may name a .wrl
++    // where the package has the .step)
++    wxString                     modelDir = packageDir + sep + packageName + wxS( ".3dshapes" );
++    std::map<wxString, wxString> modelByName, modelByStem;
++
++    if( !models.empty() )
++        wxFileName::Mkdir( modelDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++
++    for( const wxString& path : models )
++    {
++        wxFileName fn( path );
++        wxString   dest = modelDir + sep + fn.GetFullName();
++
++        if( wxCopyFile( path, dest ) )
++        {
++            aResult.m_Models++;
++            modelByName[fn.GetFullName().Lower()] = dest;
++
++            // Prefer STEP for a stem that has both
++            wxString ext = fn.GetExt().Lower();
++
++            if( !modelByStem.count( fn.GetName().Lower() ) || ext == wxS( "step" )
++                || ext == wxS( "stp" ) )
++            {
++                modelByStem[fn.GetName().Lower()] = dest;
++            }
++        }
++    }
++
++    auto modelRef = [&]( const wxString& aAbsPath ) -> wxString
++    {
++        if( aScope == LIBRARY_TABLE_SCOPE::PROJECT )
++            return NormalizePath( wxFileName( aAbsPath ), &envVars, project );
++
++        return NormalizePath( wxFileName( aAbsPath ), &envVars, wxEmptyString );
++    };
++
++    // Footprints, with their 3D model paths pointed at the unpacked models
++    wxRegEx modelRe( wxS( "\\(model[ \t\r\n]+(\"([^\"\\\\]|\\\\.)*\"|[^ \t\r\n()]+)" ),
++                     wxRE_ADVANCED );
++    std::set<wxString> footprintNames;
++
++    for( const auto& [lib, mods] : footprints )
++    {
++        wxString prettyDir = packageDir + sep + lib + wxS( ".pretty" );
++        wxFileName::Mkdir( prettyDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++
++        for( const wxString& path : mods )
++        {
++            wxString text;
++
++            if( !readFile( path, text ) )
++                continue;
++
++            wxString out, rest = text;
++            int      refs = 0;
++
++            while( modelRe.Matches( rest ) )
++            {
++                size_t start, len;
++                modelRe.GetMatch( &start, &len, 1 );
++
++                wxString ref = rest.Mid( start, len );
++
++                if( ref.StartsWith( wxS( "\"" ) ) )
++                {
++                    ref = ref.Mid( 1, ref.length() - 2 );
++                    ref.Replace( wxS( "\\\"" ), wxS( "\"" ) );
++                    ref.Replace( wxS( "\\\\" ), wxS( "\\" ) );
++                }
++
++                wxString name = baseName( ref ).Lower();
++                wxString stem = name.BeforeLast( '.' );
++                wxString target;
++
++                if( modelByName.count( name ) )
++                    target = modelByName[name];
++                else if( !stem.IsEmpty() && modelByStem.count( stem ) )
++                    target = modelByStem[stem];
++
++                out += rest.Left( start );
++
++                if( !target.IsEmpty() )
++                {
++                    out += quoteSexpr( modelRef( target ) );
++                    aResult.m_ModelLinks++;
++                }
++                else
++                {
++                    out += rest.Mid( start, len );
++                }
++
++                refs++;
++                rest = rest.Mid( start + len );
++            }
++
++            out += rest;
++
++            // A package with one footprint and one model, where the footprint names no model
++            // (some sites leave it out): add it
++            if( refs == 0 && mods.size() == 1 && footprints.size() == 1 && models.size() == 1
++                && !modelByStem.empty() )
++            {
++                int close = out.Find( ')', true );
++
++                if( close != wxNOT_FOUND )
++                {
++                    out = out.Left( close )
++                          + wxS( "\t(model " ) + quoteSexpr( modelRef( modelByStem.begin()->second ) )
++                          + wxS( "\n\t\t(offset (xyz 0 0 0))\n\t\t(scale (xyz 1 1 1))\n"
++                                 "\t\t(rotate (xyz 0 0 0))\n\t)\n" )
++                          + out.Mid( close );
++                    aResult.m_ModelLinks++;
++                    aResult.m_Notes.push_back(
++                            _( "The footprint named no 3D model, so the package's model was "
++                               "added to it.  Check its position in the 3D viewer." ) );
++                }
++            }
++
++            wxFileName fn( path );
++
++            if( writeFile( prettyDir + sep + fn.GetFullName(), out ) )
++            {
++                aResult.m_Footprints++;
++                footprintNames.insert( fn.GetName() );
++            }
++        }
++
++        libs.push_back( { LIBRARY_TABLE_TYPE::FOOTPRINT, lib, prettyDir, wxS( "KiCad" ), wxEmptyString } );
++    }
++
++    // Symbol libraries (copied now, their Footprint fields fixed once nicknames are known)
++    for( const wxString& path : symbolFiles )
++    {
++        wxFileName fn( path );
++        wxString   name = sanitizeName( fn.GetName() );
++        bool       legacy = fn.GetExt().Lower() == wxS( "lib" );
++        wxString   dest = packageDir + sep + name + wxS( "." ) + fn.GetExt();
++
++        if( !wxCopyFile( path, dest ) )
++            continue;
++
++        if( legacy && dcmFiles.count( fn.GetName() ) )
++            wxCopyFile( dcmFiles[fn.GetName()], packageDir + sep + name + wxS( ".dcm" ) );
++
++        aResult.m_Symbols++;
++        libs.push_back( { LIBRARY_TABLE_TYPE::SYMBOL, name, dest,
++                          legacy ? wxS( "Legacy" ) : wxS( "KiCad" ), wxEmptyString } );
++    }
++
++    staging.Rmdir( wxPATH_RMDIR_RECURSIVE );
++
++    // Register the libraries
++    std::set<LIBRARY_TABLE_TYPE> changed;
++
++    for( PACKAGE_LIB& lib : libs )
++    {
++        wxString uri = aScope == LIBRARY_TABLE_SCOPE::PROJECT
++                               ? NormalizePath( wxFileName( lib.m_Path ), &envVars, project )
++                               : NormalizePath( wxFileName( lib.m_Path ), &envVars, wxEmptyString );
++
++        if( std::optional<wxString> existing = nicknameForUri( manager, lib.m_Type, aScope, uri ) )
++        {
++            lib.m_Nickname = *existing;     // imported before; the row is still right
++            continue;
++        }
++
++        std::optional<LIBRARY_TABLE*> table = manager.Table( lib.m_Type, aScope );
++
++        if( !table )
++        {
++            aResult.m_Error = _( "Could not open the library table." );
++            return false;
++        }
++
++        wxString description = wxString::Format( _( "Imported from %s" ), zipFn.GetFullName() );
++        wxString nick = lib.m_Name;
++        LIBRARY_TABLE_ROW* row = nullptr;
++
++        // A row an earlier import of the same zip made is updated rather than duplicated
++        for( LIBRARY_TABLE_ROW* existing : manager.Rows( lib.m_Type, aScope, true ) )
++        {
++            if( existing->Nickname() == nick && existing->Description() == description )
++                row = existing;
++        }
++
++        if( !row )
++        {
++            // A clash with the same package imported for the other scope is fine: the project
++            // row shadows the global one, and the symbols keep the same footprint links
++            auto clashes = [&]( const wxString& aNick )
++            {
++                std::optional<LIBRARY_TABLE_ROW*> other = manager.GetRow( lib.m_Type, aNick );
++                return other && ( *other )->Description() != description;
++            };
++
++            for( int i = 2; clashes( nick ); ++i )
++                nick = wxString::Format( wxS( "%s_%d" ), lib.m_Name, i );
++
++            row = &( *table )->InsertRow();
++            row->SetNickname( nick );
++        }
++
++        row->SetURI( uri );
++        row->SetType( lib.m_IoType );
++        row->SetDescription( description );
++
++        bool saved = true;
++
++        ( *table )->Save().map_error(
++                [&]( const LIBRARY_ERROR& aError )
++                {
++                    aResult.m_Error = _( "Error saving library table:\n\n" ) + aError.message;
++                    saved = false;
++                } );
++
++        if( !saved )
++            return false;
++
++        lib.m_Nickname = nick;
++        changed.insert( lib.m_Type );
++    }
++
++    // Point the symbols' Footprint fields at the imported footprints
++    if( !footprintNames.empty() )
++    {
++        // footprint name -> nickname of the library it is in
++        std::map<wxString, wxString> fpLib;
++
++        for( const PACKAGE_LIB& lib : libs )
++        {
++            if( lib.m_Type != LIBRARY_TABLE_TYPE::FOOTPRINT )
++                continue;
++
++            for( const wxString& path : footprints[lib.m_Name] )
++                fpLib[wxFileName( path ).GetName()] = lib.m_Nickname;
++        }
++
++        wxRegEx fieldRe( wxS( "(\\(property[ \t]+\"Footprint\"[ \t]+)\"([^\"]*)\"" ),
++                         wxRE_ADVANCED );
++
++        for( const PACKAGE_LIB& lib : libs )
++        {
++            if( lib.m_Type != LIBRARY_TABLE_TYPE::SYMBOL || lib.m_IoType != wxS( "KiCad" ) )
++                continue;
++
++            wxString text;
++
++            if( !readFile( lib.m_Path, text ) )
++                continue;
++
++            wxString out, rest = text;
++            int      fixed = 0;
++
++            while( fieldRe.Matches( rest ) )
++            {
++                size_t start, len, vStart, vLen;
++                fieldRe.GetMatch( &start, &len, 0 );
++                fieldRe.GetMatch( &vStart, &vLen, 2 );
++
++                wxString value = rest.Mid( vStart, vLen );
++                wxString name = value.Contains( ':' ) ? value.AfterFirst( ':' ) : value;
++                wxString newValue = value;
++
++                if( fpLib.count( name ) )
++                    newValue = fpLib[name] + wxS( ":" ) + name;
++                else if( fpLib.size() == 1 && value.IsEmpty() && footprintNames.size() == 1 )
++                    newValue = fpLib.begin()->second + wxS( ":" ) + fpLib.begin()->first;
++
++                out += rest.Left( vStart ) + newValue + wxS( "\"" );
++
++                if( newValue != value )
++                    fixed++;
++
++                rest = rest.Mid( vStart + vLen + 1 );
++            }
++
++            out += rest;
++
++            if( fixed && writeFile( lib.m_Path, out ) )
++                aResult.m_FootprintLinks += fixed;
++        }
++    }
++
++    for( const PACKAGE_LIB& lib : libs )
++    {
++        ( lib.m_Type == LIBRARY_TABLE_TYPE::SYMBOL ? aResult.m_SymbolLibs
++                                                   : aResult.m_FootprintLibs )
++                .push_back( lib.m_Nickname );
++    }
++
++    if( skipped )
++    {
++        aResult.m_Notes.push_back( wxString::Format(
++                _( "%d other files in the zip (datasheets, read-me files, other CAD formats) "
++                   "were left out." ),
++                skipped ) );
++    }
++
++    // Reload the tables and tell the open editors
++    if( !changed.empty() )
++    {
++        if( aScope == LIBRARY_TABLE_SCOPE::PROJECT )
++            manager.ProjectChanged();
++        else
++            manager.LoadGlobalTables( { LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_TYPE::FOOTPRINT } );
++    }
++
++    if( aKiway )
++    {
++        // Reloading the tables restarts the background preload of every library
++        if( KIFACE* face = aKiway->KiFACE( KIWAY::FACE_SCH, false ) )
++            face->PreloadLibraries( aKiway );
++
++        if( KIFACE* face = aKiway->KiFACE( KIWAY::FACE_PCB, false ) )
++            face->PreloadLibraries( aKiway );
++    }
++
++    // Load the package's own libraries now, so they can be used as soon as this returns
++    for( const PACKAGE_LIB& lib : libs )
++    {
++        manager.ReloadLibraryEntry( lib.m_Type, lib.m_Nickname );
++        std::optional<LIB_STATUS> status = manager.LoadLibraryEntry( lib.m_Type, lib.m_Nickname );
++
++        if( status && status->load_status == LOAD_STATUS::LOAD_ERROR )
++        {
++            aResult.m_Notes.push_back( wxString::Format( _( "Library '%s' could not be loaded: %s" ),
++                                                         lib.m_Nickname,
++                                                         status->error ? status->error->message
++                                                                       : wxString() ) );
++        }
++    }
++
++    if( aKiway )
++    {
++
++        std::string payload;
++
++        for( FRAME_T frame : { FRAME_SCH, FRAME_SCH_SYMBOL_EDITOR, FRAME_SCH_VIEWER,
++                               FRAME_PCB_EDITOR, FRAME_FOOTPRINT_EDITOR, FRAME_FOOTPRINT_VIEWER,
++                               FRAME_CVPCB } )
++        {
++            if( aKiway->Player( frame, false ) )
++                aKiway->ExpressMail( frame, MAIL_RELOAD_LIB, payload );
++        }
++    }
++
++    return true;
++}
++
++
++bool ExportLibraryPackage( KIWAY* aKiway, const wxString& aSymbolLib, const wxString& aZipFile,
++                           LIBRARY_PACKAGE_RESULT& aResult )
++{
++    LIBRARY_MANAGER& manager = Pgm().GetLibraryManager();
++    PROJECT*         project = aKiway ? &aKiway->Prj() : nullptr;
++
++    std::optional<LIBRARY_TABLE_ROW*> symRow = manager.GetRow( LIBRARY_TABLE_TYPE::SYMBOL, aSymbolLib );
++
++    if( !symRow )
++    {
++        aResult.m_Error = wxString::Format( _( "There is no symbol library '%s'." ), aSymbolLib );
++        return false;
++    }
++
++    wxString symPath = LIBRARY_MANAGER::GetFullURI( *symRow, true, project );
++    wxString symText;
++
++    if( ( *symRow )->Type() != wxS( "KiCad" ) || !readSymbolLibrary( symPath, symText ) )
++    {
++        aResult.m_Error = wxString::Format( _( "'%s' is not a KiCad symbol library file that can "
++                                               "be read (%s)." ),
++                                            aSymbolLib, symPath );
++        return false;
++    }
++
++    wxString name = sanitizeName( aSymbolLib );
++    wxString modelDir = name + wxS( ".3dshapes" );
++
++    // The footprints the symbols name, by library
++    std::map<wxString, std::set<wxString>> wanted;
++    wxRegEx fieldRe( wxS( "\\(property[ \t]+\"Footprint\"[ \t]+\"([^\":]+):([^\"]+)\"" ), wxRE_ADVANCED );
++    wxString rest = symText;
++
++    while( fieldRe.Matches( rest ) )
++    {
++        size_t start, len;
++        wanted[fieldRe.GetMatch( rest, 1 )].insert( fieldRe.GetMatch( rest, 2 ) );
++        fieldRe.GetMatch( &start, &len, 0 );
++        rest = rest.Mid( start + len );
++    }
++
++    wxFFileOutputStream ostream( aZipFile );
++
++    if( !ostream.IsOk() )
++    {
++        aResult.m_Error = wxString::Format( _( "Could not create '%s'." ), aZipFile );
++        return false;
++    }
++
++    wxZipOutputStream zip( ostream, -1, wxConvUTF8 );
++
++    auto add = [&]( const wxString& aEntry, const wxString& aText ) -> bool
++    {
++        wxScopedCharBuffer utf8 = aText.utf8_str();
++        return zip.PutNextEntry( name + wxS( "/" ) + aEntry ) && zip.Write( utf8.data(), utf8.length() ).IsOk()
++               && zip.CloseEntry();
++    };
++
++    auto addFile = [&]( const wxString& aEntry, const wxString& aPath ) -> bool
++    {
++        wxFFileInputStream in( aPath );
++        return in.IsOk() && zip.PutNextEntry( name + wxS( "/" ) + aEntry ) && ( zip.Write( in ), true )
++               && zip.CloseEntry();
++    };
++
++    add( name + wxS( ".kicad_sym" ), symText );
++    aResult.m_SymbolLibs.push_back( aSymbolLib );
++    aResult.m_Symbols = 1;
++
++    std::set<wxString>    modelsAdded;
++    std::vector<wxString> missingModels;
++    wxRegEx modelRe( wxS( "\\(model[ \t\r\n]+(\"([^\"\\\\]|\\\\.)*\"|[^ \t\r\n()]+)" ),
++                     wxRE_ADVANCED );
++
++    for( const auto& [lib, fps] : wanted )
++    {
++        std::optional<LIBRARY_TABLE_ROW*> fpRow = manager.GetRow( LIBRARY_TABLE_TYPE::FOOTPRINT, lib );
++
++        if( !fpRow || ( *fpRow )->Type() != wxS( "KiCad" ) )
++        {
++            aResult.m_Notes.push_back( wxString::Format(
++                    _( "Footprint library '%s' was not found or is not a KiCad .pretty folder; "
++                       "its footprints were left out." ), lib ) );
++            continue;
++        }
++
++        wxString prettyPath = LIBRARY_MANAGER::GetFullURI( *fpRow, true, project );
++        bool     any = false;
++
++        for( const wxString& fp : fps )
++        {
++            wxString text;
++
++            if( !readFile( prettyPath + wxFileName::GetPathSeparator() + fp + wxS( ".kicad_mod" ), text ) )
++            {
++                aResult.m_Notes.push_back( wxString::Format( _( "Footprint '%s:%s' was not found." ),
++                                                             lib, fp ) );
++                continue;
++            }
++
++            // Copy the models in, and point the footprint at the copies
++            wxString out, r = text;
++
++            while( modelRe.Matches( r ) )
++            {
++                size_t start, len;
++                modelRe.GetMatch( &start, &len, 1 );
++
++                wxString ref = r.Mid( start, len );
++
++                if( ref.StartsWith( wxS( "\"" ) ) )
++                {
++                    ref = ref.Mid( 1, ref.length() - 2 );
++                    ref.Replace( wxS( "\\\"" ), wxS( "\"" ) );
++                    ref.Replace( wxS( "\\\\" ), wxS( "\\" ) );
++                }
++
++                wxString file = ExpandEnvVarSubstitutions( ref, project );
++                wxFileName fn( file );
++
++                if( !fn.IsAbsolute() )
++                    fn.MakeAbsolute( prettyPath );
++
++                out += r.Left( start );
++
++                if( fn.FileExists() )
++                {
++                    if( !modelsAdded.count( fn.GetFullName() ) )
++                    {
++                        addFile( modelDir + wxS( "/" ) + fn.GetFullName(), fn.GetFullPath() );
++                        modelsAdded.insert( fn.GetFullName() );
++                        aResult.m_Models++;
++                    }
++
++                    out += quoteSexpr( modelDir + wxS( "/" ) + fn.GetFullName() );
++                    aResult.m_ModelLinks++;
++                }
++                else
++                {
++                    out += r.Mid( start, len );
++                    missingModels.push_back( fn.GetFullName() );
++                }
++
++                r = r.Mid( start + len );
++            }
++
++            out += r;
++            add( lib + wxS( ".pretty/" ) + fp + wxS( ".kicad_mod" ), out );
++            aResult.m_Footprints++;
++            any = true;
++        }
++
++        if( any )
++            aResult.m_FootprintLibs.push_back( lib );
++    }
++
++    if( !missingModels.empty() )
++    {
++        wxString some;
++
++        for( size_t i = 0; i < missingModels.size() && i < 5; ++i )
++            some += ( i ? wxS( ", " ) : wxS( "" ) ) + missingModels[i];
++
++        aResult.m_Notes.push_back( wxString::Format(
++                _( "%d 3D models were not found on this device and were left out (%s%s); the "
++                   "footprints still name them." ),
++                (int) missingModels.size(), some, missingModels.size() > 5 ? wxS( ", ..." ) : wxS( "" ) ) );
++    }
++
++    if( !zip.Close() || !ostream.Close() )
++    {
++        aResult.m_Error = wxString::Format( _( "Could not write '%s'." ), aZipFile );
++        return false;
++    }
++
++    aResult.m_PackageDir = aZipFile;
++    return true;
++}
+diff --git a/kicad/library_package_import.h b/kicad/library_package_import.h
+new file mode 100644
+index 00000000..6738a4d6
+--- /dev/null
++++ b/kicad/library_package_import.h
+@@ -0,0 +1,79 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#pragma once
++
++#include <libraries/library_table.h>
++#include <wx/string.h>
++#include <vector>
++
++class KIWAY;
++class PROJECT;
++
++/**
++ * What ImportLibraryPackage() did, for the summary shown to the user (or an MCP client).
++ */
++struct LIBRARY_PACKAGE_RESULT
++{
++    wxString              m_PackageDir;      ///< where the package's files now live
++    std::vector<wxString> m_SymbolLibs;      ///< symbol library nicknames added or updated
++    std::vector<wxString> m_FootprintLibs;   ///< footprint library nicknames added or updated
++    int                   m_Symbols = 0;     ///< symbol library files found
++    int                   m_Footprints = 0;  ///< footprints found
++    int                   m_Models = 0;      ///< 3D model files found
++    int                   m_ModelLinks = 0;  ///< footprint 3D model references pointed at them
++    int                   m_FootprintLinks = 0; ///< symbol Footprint fields pointed at them
++    std::vector<wxString> m_Notes;           ///< things the user should know (skipped files...)
++    wxString              m_Error;           ///< set when the import failed
++
++    wxString Summary() const;
++};
++
++/**
++ * Import a part downloaded from a parts site (SnapEDA, Ultra Librarian, SamacSys / Component
++ * Search Engine, Digi-Key, Mouser...) as a zip of KiCad files.
++ *
++ * The symbol libraries (.kicad_sym, or legacy .lib with .dcm), footprints (.kicad_mod, grouped
++ * into .pretty libraries) and 3D models (.step, .stp, .wrl) in the zip are unpacked into
++ * <root>/<package name>, where root is ${KICAD*_3RD_PARTY}/libraries for all projects or
++ * <project>/libraries for the open project.  Then:
++ *  - the footprints' 3D model paths, which usually point into the author's own disk, are
++ *    pointed at the unpacked models;
++ *  - the symbols' Footprint fields are pointed at the unpacked footprint libraries;
++ *  - the libraries are added to the global or project library tables (an existing row for the
++ *    same file is kept, a nickname clash gets a suffix), and the open editors reload them.
++ *
++ * Importing the same zip again replaces the package's files.  Entries that would land outside
++ * the package directory are refused.
++ */
++bool ImportLibraryPackage( KIWAY* aKiway, const wxString& aZipFile, LIBRARY_TABLE_SCOPE aScope,
++                           LIBRARY_PACKAGE_RESULT& aResult );
++
++
++/**
++ * Write a symbol library as a library package zip, the reverse of ImportLibraryPackage():
++ *   <name>/<name>.kicad_sym              the symbol library
++ *   <name>/<fp lib>.pretty/*.kicad_mod   the footprints its symbols' Footprint fields name
++ *   <name>/<name>.3dshapes/*             the 3D models those footprints use
++ * The footprints' model paths are rewritten to the packaged models, so the zip imports anywhere
++ * (with this KiCad or by hand).  Footprints or models that cannot be found are listed in
++ * aResult.m_Notes.  Only KiCad-format (.kicad_sym) symbol libraries can be exported.
++ */
++bool ExportLibraryPackage( KIWAY* aKiway, const wxString& aSymbolLib, const wxString& aZipFile,
++                           LIBRARY_PACKAGE_RESULT& aResult );
+diff --git a/kicad/menubar.cpp b/kicad/menubar.cpp
+index f77dfcad..7ab92083 100644
+--- a/kicad/menubar.cpp
++++ b/kicad/menubar.cpp
+@@ -177,6 +177,8 @@ void KICAD_MANAGER_FRAME::doReCreateMenuBar()
+                      BITMAPS::import_project );
+ 
+     fileMenu->Add( importMenu );
++    fileMenu->Add( KICAD_MANAGER_ACTIONS::importLibraryPackage );
++    fileMenu->Add( KICAD_MANAGER_ACTIONS::exportLibraryPackage );
+ 
+     fileMenu->AppendSeparator();
+     fileMenu->Add( KICAD_MANAGER_ACTIONS::archiveProject );
+diff --git a/kicad/tools/kicad_manager_actions.cpp b/kicad/tools/kicad_manager_actions.cpp
+index 42d35a50..1b9e1558 100644
+--- a/kicad/tools/kicad_manager_actions.cpp
++++ b/kicad/tools/kicad_manager_actions.cpp
+@@ -213,6 +213,22 @@ TOOL_ACTION KICAD_MANAGER_ACTIONS::unarchiveProject( TOOL_ACTION_ARGS()
+         .Tooltip( _( "Unarchive project files from zip archive" ) )
+         .Icon( BITMAPS::unzip ) );
+ 
++TOOL_ACTION KICAD_MANAGER_ACTIONS::importLibraryPackage( TOOL_ACTION_ARGS()
++        .Name( "kicad.Control.importLibraryPackage" )
++        .Scope( AS_GLOBAL )
++        .FriendlyName( _( "Import Library Package..." ) )
++        .Tooltip( _( "Add the symbols, footprints and 3D models in a part's zip from a parts site "
++                     "(SnapEDA, Ultra Librarian, SamacSys and others) to your libraries" ) )
++        .Icon( BITMAPS::library ) );
++
++TOOL_ACTION KICAD_MANAGER_ACTIONS::exportLibraryPackage( TOOL_ACTION_ARGS()
++        .Name( "kicad.Control.exportLibraryPackage" )
++        .Scope( AS_GLOBAL )
++        .FriendlyName( _( "Export Library Package..." ) )
++        .Tooltip( _( "Save a symbol library, the footprints its symbols use and their 3D models "
++                     "as one zip, to share or to move to another computer" ) )
++        .Icon( BITMAPS::library_archive ) );
++
+ TOOL_ACTION KICAD_MANAGER_ACTIONS::openProjectDirectory( TOOL_ACTION_ARGS()
+         .Name( "kicad.Control.OpenProjectDirectory" )
+         .Scope( AS_GLOBAL )
+diff --git a/kicad/tools/kicad_manager_actions.h b/kicad/tools/kicad_manager_actions.h
+index e6d86fea..51e6f40f 100644
+--- a/kicad/tools/kicad_manager_actions.h
++++ b/kicad/tools/kicad_manager_actions.h
+@@ -53,6 +53,8 @@ public:
+ 
+     static TOOL_ACTION archiveProject;
+     static TOOL_ACTION unarchiveProject;
++    static TOOL_ACTION importLibraryPackage;
++    static TOOL_ACTION exportLibraryPackage;
+     static TOOL_ACTION openProjectDirectory;
+     static TOOL_ACTION restoreLocalHistory;
+     static TOOL_ACTION showLocalHistory;
+diff --git a/kicad/tools/kicad_manager_control.cpp b/kicad/tools/kicad_manager_control.cpp
+index 5c993309..28c6c15a 100644
+--- a/kicad/tools/kicad_manager_control.cpp
++++ b/kicad/tools/kicad_manager_control.cpp
+@@ -27,6 +27,11 @@
+ #include <policy_keys.h>
+ #include <kiway.h>
+ #include <kicad_manager_frame.h>
++#include <library_package_import.h>
++#include <libraries/library_manager.h>
++#include <wx/choicdlg.h>
++#include <kiplatform/environment.h>
++#include <libraries/library_table.h>
+ #include <core/json_serializers.h> // must precede any json+wxString use (job.h) in this TU
+ #include <downgrade_target.h>
+ #include <project_downgrade.h>
+@@ -700,6 +705,125 @@ int KICAD_MANAGER_CONTROL::UnarchiveProject( const TOOL_EVENT& aEvent )
+ }
+ 
+ 
++/// Where a browser saves downloads: parts arrive there as zips
++static wxString downloadsDir()
++{
++    wxFileName docs( KIPLATFORM::ENV::GetDocumentsPath(), wxEmptyString );
++
++    // Documents and Download(s) are siblings on Android, macOS, Linux and Windows
++    if( docs.GetDirCount() > 0 )
++    {
++        docs.RemoveLastDir();
++
++        for( const wxString& name : { wxS( "Download" ), wxS( "Downloads" ) } )
++        {
++            wxFileName dl( docs.GetPath(), wxEmptyString );
++            dl.AppendDir( name );
++
++            if( dl.DirExists() )
++                return dl.GetPath();
++        }
++    }
++
++    return KIPLATFORM::ENV::GetDocumentsPath();
++}
++
++
++int KICAD_MANAGER_CONTROL::ImportLibraryPackage( const TOOL_EVENT& aEvent )
++{
++    wxString defaultDir = downloadsDir();
++
++    wxFileDialog dlg( m_frame, _( "Import Library Package" ), defaultDir, wxEmptyString,
++                      FILEEXT::ZipFileWildcard(), wxFD_OPEN | wxFD_FILE_MUST_EXIST );
++
++    if( dlg.ShowModal() == wxID_CANCEL )
++        return 0;
++
++    LIBRARY_TABLE_SCOPE scope = LIBRARY_TABLE_SCOPE::GLOBAL;
++
++    if( !Prj().IsNullProject() )
++    {
++        wxMessageDialog ask( m_frame,
++                             _( "Add the libraries for all projects, or only for the open "
++                                "project?  Libraries for this project are copied into its "
++                                "folder, so they travel with it." ),
++                             _( "Import Library Package" ),
++                             wxYES_NO | wxCANCEL | wxICON_QUESTION );
++        ask.SetYesNoCancelLabels( _( "All Projects" ), _( "This Project" ), _( "Cancel" ) );
++
++        int answer = ask.ShowModal();
++
++        if( answer == wxID_CANCEL )
++            return 0;
++
++        scope = answer == wxID_NO ? LIBRARY_TABLE_SCOPE::PROJECT : LIBRARY_TABLE_SCOPE::GLOBAL;
++    }
++
++    LIBRARY_PACKAGE_RESULT result;
++    wxBusyCursor           busy;
++    bool                   ok = ::ImportLibraryPackage( &m_frame->Kiway(), dlg.GetPath(), scope, result );
++
++    wxMessageBox( result.Summary(), _( "Import Library Package" ),
++                  wxOK | ( ok ? wxICON_INFORMATION : wxICON_ERROR ), m_frame );
++    return 0;
++}
++
++
++int KICAD_MANAGER_CONTROL::ExportLibraryPackage( const TOOL_EVENT& aEvent )
++{
++    // The user's own libraries first, then KiCad's stock ones
++    LIBRARY_MANAGER& manager = Pgm().GetLibraryManager();
++    wxArrayString    own, stock;
++    wxString         stockPrefix = wxS( "${" ) + ENV_VAR::GetVersionedEnvVarName( wxS( "SYMBOL_DIR" ) );
++
++    for( LIBRARY_TABLE_ROW* row : manager.Rows( LIBRARY_TABLE_TYPE::SYMBOL ) )
++    {
++        if( row->Type() != wxS( "KiCad" ) || row->Hidden() )
++            continue;
++
++        ( row->URI().StartsWith( stockPrefix ) ? stock : own ).Add( row->Nickname() );
++    }
++
++    own.Sort();
++    stock.Sort();
++    WX_APPEND_ARRAY( own, stock );
++
++    if( own.IsEmpty() )
++        return 0;
++
++    wxSingleChoiceDialog choose( m_frame,
++                                 _( "Symbol library to export, with its footprints and 3D models:" ),
++                                 _( "Export Library Package" ), own );
++
++    if( choose.ShowModal() != wxID_OK )
++        return 0;
++
++    wxString lib = choose.GetStringSelection();
++
++    wxFileDialog dlg( m_frame, _( "Export Library Package" ), downloadsDir(), lib + wxS( ".zip" ),
++                      FILEEXT::ZipFileWildcard(), wxFD_SAVE | wxFD_OVERWRITE_PROMPT );
++
++    if( dlg.ShowModal() == wxID_CANCEL )
++        return 0;
++
++    LIBRARY_PACKAGE_RESULT result;
++    wxBusyCursor           busy;
++    bool                   ok = ::ExportLibraryPackage( &m_frame->Kiway(), lib, dlg.GetPath(), result );
++
++    wxString notes;
++
++    for( const wxString& note : result.m_Notes )
++        notes += wxS( "\n\n" ) + note;
++
++    wxMessageBox( ok ? wxString::Format( _( "Saved %s with %d footprints and %d 3D models.%s" ),
++                                         dlg.GetPath(), result.m_Footprints, result.m_Models, notes )
++                     : result.Summary(),
++                  _( "Export Library Package" ), wxOK | ( ok ? wxICON_INFORMATION : wxICON_ERROR ),
++                  m_frame );
++    return 0;
++}
++
++
+ int KICAD_MANAGER_CONTROL::ExportForOlderVersion( const TOOL_EVENT& aEvent )
+ {
+     wxFileName proFn( Prj().GetProjectFullName() );
+@@ -1208,6 +1332,8 @@ void KICAD_MANAGER_CONTROL::setTransitions()
+ 
+     Go( &KICAD_MANAGER_CONTROL::ArchiveProject,     KICAD_MANAGER_ACTIONS::archiveProject.MakeEvent() );
+     Go( &KICAD_MANAGER_CONTROL::UnarchiveProject,   KICAD_MANAGER_ACTIONS::unarchiveProject.MakeEvent() );
++    Go( &KICAD_MANAGER_CONTROL::ImportLibraryPackage, KICAD_MANAGER_ACTIONS::importLibraryPackage.MakeEvent() );
++    Go( &KICAD_MANAGER_CONTROL::ExportLibraryPackage, KICAD_MANAGER_ACTIONS::exportLibraryPackage.MakeEvent() );
+     Go( &KICAD_MANAGER_CONTROL::ExportForOlderVersion, KICAD_MANAGER_ACTIONS::exportForOlderVersion.MakeEvent() );
+     Go( &KICAD_MANAGER_CONTROL::ExploreProject,     KICAD_MANAGER_ACTIONS::openProjectDirectory.MakeEvent() );
+     Go( &KICAD_MANAGER_CONTROL::RestoreLocalHistory, KICAD_MANAGER_ACTIONS::restoreLocalHistory.MakeEvent() );
+diff --git a/kicad/tools/kicad_manager_control.h b/kicad/tools/kicad_manager_control.h
+index 721591a0..ac492cde 100644
+--- a/kicad/tools/kicad_manager_control.h
++++ b/kicad/tools/kicad_manager_control.h
+@@ -53,6 +53,8 @@ public:
+ 
+     int ArchiveProject( const TOOL_EVENT& aEvent );
+     int UnarchiveProject( const TOOL_EVENT& aEvent );
++    int ImportLibraryPackage( const TOOL_EVENT& aEvent );
++    int ExportLibraryPackage( const TOOL_EVENT& aEvent );
+     int ExportForOlderVersion( const TOOL_EVENT& aEvent );
+     int ExploreProject( const TOOL_EVENT& aEvent );
+     int RestoreLocalHistory( const TOOL_EVENT& aEvent );
+-- 
+2.54.0 (Apple Git-157)
+

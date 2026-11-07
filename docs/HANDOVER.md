@@ -140,6 +140,37 @@ order is in docs/CONTINUE.md:
    Vulkan here, check what Preferences > Graphics offers), anything using HIDPI_GL_CANVAS,
    3D viewer screenshot/copy (glReadPixels, FBO save/restore at eda_3d_canvas.cpp:730).
 
+## Library packages: import and export (P9, 10.99ah)
+Project manager **File > Import Library Package...** / **Export Library Package...**, and MCP
+tools kicad_import_library_package / kicad_export_library_package (kicad patch 0033,
+kicad/library_package_import.{h,cpp}).
+- **Import:**
+  - **Unpacking:** PROJECT_ARCHIVER::Unarchive unpacks into a staging folder in the user cache dir. WX_FILENAME::ResolveArchiveEntryPath refuses entries that would land outside it (zip slip).
+  - **Sorting the files:**
+    - `.kicad_sym`, and `.lib` with its `.dcm` (Legacy), become symbol libraries.
+    - `.kicad_mod` files are grouped by their parent `.pretty` folder, or under the package name if loose.
+    - `.step`, `.stp`, `.wrl` and `.wrz` go to `<pkg>.3dshapes`.
+    - Anything else (datasheets, other CAD formats) is counted and left out.
+  - **Package name:** the zip's single top-level folder (SnapEDA's `<part>-KiCad.zip` holds `<part>/`), else the zip name.
+  - **Destination:** `${KICAD10_3RD_PARTY}/libraries/<pkg>` for all projects (Documents/KiCad/10.99/3rdparty on Android), or `<project>/libraries/<pkg>` for this project. URIs and model paths are normalized to `${KICAD10_3RD_PARTY}` or `${KIPRJMOD}`.
+  - **Model paths:** each footprint's `(model "...")` is matched against the package's models, first by file name, then by stem (a `.wrl` reference finds the `.step`). A package with one footprint and one model, where the footprint names no model, gets one added, with a note.
+  - **Footprint fields:** symbols' Footprint fields are rewritten to the nickname each footprint library actually got (nickname clashes get `_2` and so on).
+  - **Re-import:** a row whose description is "Imported from <zip>" is updated, not duplicated. A same-zip row in the other scope keeps the same nickname, since the project row shadows the global one.
+  - **Reloading:**
+    1. LoadGlobalTables or ProjectChanged.
+    2. PreloadLibraries on the sch and pcb kifaces.
+    3. ReloadLibraryEntry plus a **synchronous** LoadLibraryEntry for the package's own libraries. Otherwise an MCP client that places the symbol right away races the background preload ("symbol not found").
+    4. MAIL_RELOAD_LIB to the open library frames.
+- **Export:** a symbol library (KiCad's own 10.x libraries are `.kicad_symdir` folders of one-symbol files, which are merged into one `.kicad_sym`), plus every footprint its symbols' Footprint fields name (only from KiCad `.pretty` libraries), plus their models. Model paths are resolved with the project's variables and rewritten to `<name>.3dshapes/<file>` inside the zip. Models not on the device are summed up in one note.
+- **Tested on the tablet (work/library-packages/test_import.py, over MCP):**
+  - **SnapEDA ESP32-S31-WROOM-1-N16R16V, imported:** symbol (61 pins), footprint (69 pads) and STEP model all loaded, and the 3D render shows the module on its pads. The footprint's model path pointed at /Users/dstein/dev/...; it is rewritten.
+  - **Scopes:** global and project.
+  - **Round trips:** S31 export, and stock RF_Module export (85 symbols merged from the symdir, 43 footprints), each re-imported with all libraries loaded.
+  - **GUI menus:** the Android file picker (SAF) for open and save, and the scope question.
+- **Known:**
+  - The GUI has no handler for the IPC API's DeleteLibraryTableEntry. To remove a test row, edit the table file.
+  - The wxSingleChoiceDialog (export library list) draws without a title bar (P10).
+
 ## RP2350 board experiment
 - Project on the tablet: files/RP2350A-DevBoard (the user is building it by hand).
 - Scripted version on the emulator: work/rp2350 (gen_sch.py, place_pcb.py with R=8 mm rounded

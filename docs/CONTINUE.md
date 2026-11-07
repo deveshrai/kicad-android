@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ag; next: ah).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ah; next: ai).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -41,9 +41,12 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
      calls during progress yields and stale DRC rules.
    - Follow-ups: schematic tools (ERC, annotate, update PCB), a board-picture tool, Windows sockets;
      the GUI DRC dialog still uses stale rules after API rule changes (reinit on API change).
-4. **P9: import and export third-party symbols, footprints and 3D models.**
-   - Test with SnapEDA's ESP32-S31-WROOM-1-N16R16V, including its 3D model.  The user's download
-     is in work/snapeda-esp32-s31/download (gitignored; SnapEDA licence).
+4. **P9: import and export third-party symbols, footprints and 3D models. Done in 10.99ah**
+   (File > Import / Export Library Package, plus MCP tools; see HANDOVER).  Tested with SnapEDA's
+   ESP32-S31-WROOM-1-N16R16V (download in work/snapeda-esp32-s31, gitignored).
+   - Follow-ups: try Ultra Librarian / SamacSys / Digi-Key zips (their layouts differ; the
+     importer sorts by extension, so they should work); a "library package" entry in the symbol
+     and footprint editors' library context menus; delete a package again.
 5. **P10: UI sweep.** Fields too big, too small, or not scaling.  Check at the Fold's 2.625 scale.
    Known so far:
    - The Plot dialog sits under the status bar, and its buttons are clipped.
