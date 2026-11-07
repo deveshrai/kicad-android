@@ -34,7 +34,8 @@ upstream KiCad sources.
   You watch the routes appear on the board, then keep them or undo them in one step.
 - **Built-in MCP server.**  Turn it on in **Preferences > MCP Server** and Claude Code (on the
   tablet in Termux, or on a computer on the same Wi-Fi) can read and edit your design, route it
-  and run DRC while you watch.
+  and run DRC while you watch.  It has designed [a whole board](#a-whole-board-over-mcp-esp32-s3-in-uno-format)
+  this way, from an empty schematic to Gerbers.
 - **3D viewer** with STEP component models, through [gl4es](https://github.com/ptitSeb/gl4es).
 - **Desktop-identical output.**  Gerbers and drill files match the macOS build of the same sources
   byte for byte.  [How we checked](docs/CHANGES.md#how-it-was-checked).
@@ -96,14 +97,50 @@ What a client can do:
 
 ### A whole board over MCP: ESP32-S3 in Uno format
 
-Claude Code designed [this board](work/esp32s3-uno) on the tablet through the MCP server alone:
-- **Schematic:** an ESP32-S3-WROOM-1, every IO on Uno-style shield headers plus a 2x8 header, USB-B and a 7-12 V jack with 5 V and 3.3 V regulators, and RESET and BOOT buttons.
-- **Board:** net classes for each kind of line, so power gets 0.8/0.6 mm tracks, USB is a 0.3 mm pair, and signals get 0.25 mm. Then placement, the autorouter, GND pours on both layers, a clean DRC, Gerbers and a 3D render.
+Claude Code designed [this board](work/esp32s3-uno) on the tablet through the MCP server alone.
+No tap or keystroke was made on the tablet; adb was used only to record the screen.
 
-The scripts and the full MCP log are in `work/esp32s3-uno`.
+- **Schematic:**
+  - an ESP32-S3-WROOM-1 with every IO on Uno-style shield headers plus a 2x8 header
+  - USB-B like an Uno, and a 7-12 V jack with 5 V and 3.3 V regulators
+  - RESET and BOOT buttons, and ON and L LEDs
+- **Net classes for each kind of line:**
 
-<img src="docs/media/esp32s3-uno-route.gif" alt="The autorouter routing the ESP32-S3 Uno board on the tablet, started over MCP, then the GND pours filling (10x speed)" width="640">
-<img src="docs/media/esp32s3-uno-3d.png" alt="3D render of the routed ESP32-S3 Uno board, exported over MCP" width="640">
+  | Class | Track | Clearance |
+  |---|---|---|
+  | Input power (VBUS, VIN) | 0.8 mm | 0.3 mm |
+  | 5 V and 3.3 V rails | 0.6 mm | 0.25 mm |
+  | GND (plus pours on both layers) | 0.5 mm | 0.2 mm |
+  | USB differential pair | 0.3 mm | 0.2 mm |
+  | Analog | 0.25 mm | 0.3 mm |
+  | Digital, I2C, UART, GPIO | 0.25 mm | 0.2 mm |
+
+- **Board:**
+  - Placement, design rules, the built-in autorouter (107 of 107 connections) and GND pours.
+  - DRC with no errors.
+  - Gerbers, drill files and 3D renders, all exported over MCP.
+
+The scripts, the finished project with its fab files, and the full log of the 465 MCP calls are
+in [`work/esp32s3-uno`](work/esp32s3-uno).
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/esp32s3-uno-route.gif" alt="The autorouter routing the ESP32-S3 Uno board on the tablet, started over MCP, then the GND pours filling (10x speed)"></td>
+<td width="50%"><img src="docs/media/esp32s3-uno-tablet.png" alt="KiCad's board editor on the tablet showing the routed ESP32-S3 Uno board with GND pours, 0 unrouted"></td>
+</tr>
+<tr>
+<td>Autorouting over MCP, then the GND pours (10x speed; <a href="https://github.com/deveshrai/kicad-android/releases/download/android-10.99ag/esp32s3-uno-route.mp4">MP4</a>)</td>
+<td>The finished board in the board editor</td>
+</tr>
+<tr>
+<td><img src="docs/media/esp32s3-uno-3d.png" alt="3D render of the top of the ESP32-S3 Uno board, exported over MCP"></td>
+<td><img src="docs/media/esp32s3-uno-3d-bottom.png" alt="3D render of the bottom of the ESP32-S3 Uno board, exported over MCP"></td>
+</tr>
+<tr>
+<td>3D render, top (exported over MCP)</td>
+<td>3D render, bottom</td>
+</tr>
+</table>
 
 ## See it run
 
