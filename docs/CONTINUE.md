@@ -34,10 +34,16 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
      "Integrated autorouter").  The blinker routes in under a second, with DRC clean.
    - Possible follow-ups: route only the selected nets, a passes or time limit, a progress
      notification when the app is in the background.
+   - Pour-aware routing: filled pours currently reach the router as copper over the layer (84/107
+     routed instead of 107/107 on the ESP32-S3 board); unfill or ignore pours while routing.
 3. **P8: integrated MCP server. Done in 10.99af** (Preferences > MCP Server; see HANDOVER).
-   - Follow-ups: schematic tools (ERC, annotate, update PCB), a board-picture tool, Windows sockets.
+   - 10.99ag: a whole board designed over MCP (work/esp32s3-uno), with fixes for re-entrant tool
+     calls during progress yields and stale DRC rules.
+   - Follow-ups: schematic tools (ERC, annotate, update PCB), a board-picture tool, Windows sockets;
+     the GUI DRC dialog still uses stale rules after API rule changes (reinit on API change).
 4. **P9: import and export third-party symbols, footprints and 3D models.**
-   - Test with SnapEDA's ESP32-S31-WROOM-1-N16R16V, including its 3D model.
+   - Test with SnapEDA's ESP32-S31-WROOM-1-N16R16V, including its 3D model.  The user's download
+     is in work/snapeda-esp32-s31/download (gitignored; SnapEDA licence).
 5. **P10: UI sweep.** Fields too big, too small, or not scaling.  Check at the Fold's 2.625 scale.
    Known so far:
    - The Plot dialog sits under the status bar, and its buttons are clipped.
@@ -53,7 +59,8 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 7. **Later:**
    - touch gestures in the 3D viewer
    - long-press as right click
-   - downloading 3D models on demand
+   - downloading 3D models on demand (now more pressing: Configure Paths is broken, and the
+     ESP32-S3 board needed its models copied in by hand plus a project text variable)
 
 Start by giving the user a short status summary and asking which item to take, unless they have
 already said.
