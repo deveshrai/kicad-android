@@ -87,14 +87,18 @@ connected and what it last did.
 <img src="docs/media/mcp-preferences.png" alt="Preferences > MCP Server: the on switch, This device or Another computer, the address and the claude --mcp-config command with Copy buttons, and the status line" width="860">
 
 What a client can do:
-- **See the design:** `kicad_status`, `kicad_open_editor`, `pcb_board_summary` (every footprint, its position, and the
-  unrouted count).
+- **See the design:** `kicad_status`, `kicad_open_project`, `kicad_open_editor`, `pcb_board_summary` (every footprint, its position, and the
+  unrouted count), and `kicad_screenshot`, a picture of what the app shows, canvas and dialogs included.
 - **Change it:** `pcb_move_footprint`, `pcb_autoroute`, `pcb_run_drc`.  The changes appear on the
   board as they happen, and each one is an undo step.
 - **Do anything else KiCad's IPC API can:** `kicad_api` runs any API command (the API
   kicad-python uses), with `kicad_api_commands` and `kicad_api_describe` to find your way around.
   That covers creating tracks and zones, placing footprints and symbols from the libraries, net
-  classes, design rules, and Gerber, drill and PDF exports.
+  classes, design rules, and Gerber, drill and PDF exports.  The open project and document are
+  filled in when a request leaves them out, so schematic commands such as `GetSchematicNetlist`
+  need no arguments.
+- **Edit the files directly** if you'd rather: an open schematic or board reloads by itself when
+  its file changes on disk, and asks first if there are unsaved edits.
 
 ### A whole board over MCP: ESP32-S3 in Uno format
 

@@ -1,0 +1,924 @@
+From 3d5cd6f41cd15564a4580e118deea65f351fc3af Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 9 Nov 2026 13:31:52 +0530
+Subject: [PATCH 37/37] MCP server: fill in documents, screenshots, open
+ projects, render lights
+
+- kicad_api completes a request's document specifiers (top level or in an ItemHeader) from the
+  open editors: the type from the command's package, the project name and path, the board file
+  name.  A common command naming no type goes to each open editor until one handles it.  An
+  agent calling GetSchematicNetlist or SaveDocumentToString without a document got a bare
+  AS_UNHANDLED (and RevertDocument "the requested project  is not open"); now they work, and
+  AS_UNHANDLED says what is missing.
+- kicad_screenshot: a PNG of what the app shows, GPU canvases included (TextureView.getBitmap
+  on Android, over a Qt grab of the frame and its dialogs).  KIPLATFORM::UI::GrabAppImage();
+  only the Qt port implements it.
+- kicad_open_project opens a project (file or folder) in the project manager.
+- RunBoardJobExportRender keeps the job's default lights and zoom for fields a request leaves
+  out; all-zero lights rendered black.
+- The instructions mention the above and that open files changed on disk are reloaded.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ api/src/kiapi_json.cpp                  | 156 ++++++++++++++++++-
+ common/api/mcp_server.cpp               | 187 ++++++++++++++++++++--
+ include/api/kiapi_json.h                |  35 +++++
+ kicad/kicad.cpp                         |  33 ++++
+ libs/kiplatform/include/kiplatform/ui.h |   8 +
+ libs/kiplatform/port/wxgtk/ui.cpp       |   6 +
+ libs/kiplatform/port/wxmsw/ui.cpp       |   6 +
+ libs/kiplatform/port/wxosx/ui.mm        |   6 +
+ libs/kiplatform/port/wxqt/ui.cpp        | 199 ++++++++++++++++++++++++
+ pcbnew/api/api_handler_pcb.cpp          |  23 ++-
+ 10 files changed, 639 insertions(+), 20 deletions(-)
+
+diff --git a/api/src/kiapi_json.cpp b/api/src/kiapi_json.cpp
+index 09d8beb8..603df461 100644
+--- a/api/src/kiapi_json.cpp
++++ b/api/src/kiapi_json.cpp
+@@ -30,6 +30,8 @@
+ #include <schematic/schematic_commands.pb.h>
+ #include <schematic/schematic_jobs.pb.h>
+ 
++#include <common/types/base_types.pb.h>
++
+ #include <google/protobuf/any.pb.h>
+ #include <google/protobuf/descriptor.h>
+ #include <google/protobuf/message.h>
+@@ -81,10 +83,121 @@ static const gpb::Descriptor* findMessage( const std::string& aName )
+ }
+ 
+ 
+-bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
+-                         std::string& aTypeUrl, std::string& aBytes, std::string& aError )
++namespace
++{
++using kiapi::common::types::DocumentSpecifier;
++using kiapi::common::types::DocumentType;
++
++
++const DocumentSpecifier* findOpen( const std::vector<DocumentSpecifier>& aOpen, DocumentType aType )
++{
++    for( const DocumentSpecifier& doc : aOpen )
++    {
++        if( doc.type() == aType )
++            return &doc;
++    }
++
++    return nullptr;
++}
++
++
++void fillDocument( DocumentSpecifier& aDoc, DocumentType aPackageType,
++                   const std::vector<DocumentSpecifier>& aOpen,
++                   const KIAPI_DOCUMENT_DEFAULTS& aDefaults, int& aAssumedType )
++{
++    DocumentType type = aDoc.type();
++
++    if( type == kiapi::common::types::DOCTYPE_UNKNOWN )
++    {
++        type = aPackageType;
++
++        if( type == kiapi::common::types::DOCTYPE_UNKNOWN )
++        {
++            type = static_cast<DocumentType>( aDefaults.commonType );
++            aAssumedType = aDefaults.commonType;
++        }
++
++        if( type == kiapi::common::types::DOCTYPE_UNKNOWN )
++            return;
++
++        aDoc.set_type( type );
++    }
++
++    if( type == kiapi::common::types::DOCTYPE_PROJECT )
++    {
++        if( aDoc.project().name().empty() )
++            aDoc.mutable_project()->set_name( aDefaults.projectName );
++
++        if( aDoc.project().path().empty() && aDoc.project().name() == aDefaults.projectName )
++            aDoc.mutable_project()->set_path( aDefaults.projectPath );
++
++        return;
++    }
++
++    if( type != kiapi::common::types::DOCTYPE_SCHEMATIC && type != kiapi::common::types::DOCTYPE_PCB )
++        return;
++
++    const DocumentSpecifier* open = findOpen( aOpen, type );
++
++    if( !open )
++        return;
++
++    if( aDoc.project().name().empty() )
++        aDoc.mutable_project()->set_name( open->project().name() );
++
++    if( aDoc.project().path().empty() && aDoc.project().name() == open->project().name() )
++        aDoc.mutable_project()->set_path( open->project().path() );
++
++    // A schematic's sheet path narrows some commands to one sheet, so it is never assumed
++    if( type == kiapi::common::types::DOCTYPE_PCB && aDoc.board_filename().empty() )
++        aDoc.set_board_filename( open->board_filename() );
++}
++
++
++// Fill the document specifiers of aMsg, and of its ItemHeader, at most a level down
++void fillDocuments( gpb::Message& aMsg, DocumentType aPackageType,
++                    const std::vector<DocumentSpecifier>& aOpen,
++                    const KIAPI_DOCUMENT_DEFAULTS& aDefaults, int aDepth, int& aAssumedType )
++{
++    const gpb::Descriptor* desc = aMsg.GetDescriptor();
++    const gpb::Reflection* refl = aMsg.GetReflection();
++
++    for( int i = 0; i < desc->field_count(); ++i )
++    {
++        const gpb::FieldDescriptor* f = desc->field( i );
++
++        if( !f->message_type() || f->is_repeated() )
++            continue;
++
++        if( f->message_type() == DocumentSpecifier::descriptor() )
++        {
++            gpb::Message* doc = refl->MutableMessage( &aMsg, f );
++            fillDocument( *static_cast<DocumentSpecifier*>( doc ), aPackageType, aOpen, aDefaults,
++                          aAssumedType );
++        }
++        else if( aDepth == 0 && f->message_type() == kiapi::common::types::ItemHeader::descriptor() )
++        {
++            fillDocuments( *refl->MutableMessage( &aMsg, f ), aPackageType, aOpen, aDefaults, 1,
++                           aAssumedType );
++        }
++    }
++}
++} // namespace
++
++
++std::string KiapiCommandPackage( const std::string& aName )
+ {
+     const gpb::Descriptor* desc = findMessage( aName );
++    return desc ? std::string( desc->file()->package() ) : std::string();
++}
++
++
++static bool jsonToMessage( const std::string& aName, const std::string& aJson,
++                           const KIAPI_DOCUMENT_DEFAULTS* aDefaults, std::string& aTypeUrl,
++                           std::string& aBytes, int& aAssumedType, std::string& aError )
++{
++    aAssumedType = 0;
++    const gpb::Descriptor* desc = findMessage( aName );
+ 
+     if( !desc )
+     {
+@@ -110,12 +223,51 @@ bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
+         return false;
+     }
+ 
++    if( aDefaults )
++    {
++        std::vector<DocumentSpecifier> open;
++
++        for( const std::string& bytes : aDefaults->openDocuments )
++        {
++            DocumentSpecifier doc;
++
++            if( doc.ParseFromString( bytes ) )
++                open.push_back( doc );
++        }
++
++        std::string  package( desc->file()->package() );
++        DocumentType packageType = kiapi::common::types::DOCTYPE_UNKNOWN;
++
++        if( package.rfind( "kiapi.board", 0 ) == 0 )
++            packageType = kiapi::common::types::DOCTYPE_PCB;
++        else if( package.rfind( "kiapi.schematic", 0 ) == 0 )
++            packageType = kiapi::common::types::DOCTYPE_SCHEMATIC;
++
++        fillDocuments( *msg, packageType, open, *aDefaults, 0, aAssumedType );
++    }
++
+     aTypeUrl = "type.googleapis.com/" + std::string( desc->full_name() );
+     aBytes = msg->SerializeAsString();
+     return true;
+ }
+ 
+ 
++bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
++                         std::string& aTypeUrl, std::string& aBytes, std::string& aError )
++{
++    int assumed = 0;
++    return jsonToMessage( aName, aJson, nullptr, aTypeUrl, aBytes, assumed, aError );
++}
++
++
++bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
++                         const KIAPI_DOCUMENT_DEFAULTS& aDefaults, std::string& aTypeUrl,
++                         std::string& aBytes, int& aAssumedType, std::string& aError )
++{
++    return jsonToMessage( aName, aJson, &aDefaults, aTypeUrl, aBytes, aAssumedType, aError );
++}
++
++
+ bool KiapiMessageToJson( const std::string& aTypeUrl, const std::string& aBytes,
+                          std::string& aJson, std::string& aError )
+ {
+diff --git a/common/api/mcp_server.cpp b/common/api/mcp_server.cpp
+index e7c994f7..81481792 100644
+--- a/common/api/mcp_server.cpp
++++ b/common/api/mcp_server.cpp
+@@ -21,6 +21,7 @@
+ 
+ #include <api/api_server.h>
+ #include <api/common/envelope.pb.h>
++#include <api/common/types/base_types.pb.h>
+ #include <build_version.h>
+ #include <pgm_base.h>
+ #include <project.h>
+@@ -29,7 +30,11 @@
+ 
+ #include <api/kiapi_json.h>
+ 
++#include <kiplatform/ui.h>
++
+ #include <wx/app.h>
++#include <wx/image.h>
++#include <wx/mstream.h>
+ #include <wx/base64.h>
+ #include <wx/evtloop.h>
+ #include <wx/log.h>
+@@ -61,15 +66,23 @@ static const char* const traceMcp = "KICAD_MCP";
+ static const char* const SERVER_INSTRUCTIONS =
+         "This is KiCad, the electronics design suite, running on the user's device. The user "
+         "watches every change happen in the open editor, and can undo it.\n"
+-        "- Start with kicad_status to see the open project and editors.\n"
++        "- Start with kicad_status to see the open project and editors. kicad_screenshot shows "
++        "what KiCad shows, to check your work.\n"
+         "- The pcb_* tools (summary, move footprints, DRC, autoroute) need the board editor "
+-        "open; kicad_open_editor opens it. For the schematic, use kicad_api "
+-        "(GetSchematicNetlist, GetItems, PlaceSymbolFromLibrary, CreateItems...).\n"
++        "open; kicad_open_editor opens it. For the schematic, open the schematic editor and use "
++        "kicad_api (GetSchematicNetlist, GetItems, SaveDocumentToString, "
++        "PlaceSymbolFromLibrary, CreateItems...).\n"
+         "- kicad_api runs any command of KiCad's IPC API (the API kicad-python uses). Use "
+         "kicad_api_commands to list them and kicad_api_describe to see a message's fields. "
+-        "Lengths are in nanometres; angles are in degrees.\n"
++        "Lengths are in nanometres; angles are in degrees. A document (or header.document) left "
++        "out or partly filled is completed from the open editor: just pass "
++        "{\"type\": \"DOCTYPE_SCHEMATIC\"} or {\"type\": \"DOCTYPE_PCB\"}, or nothing for board "
++        "and schematic commands.\n"
+         "- Edits through kicad_api should be wrapped in BeginCommit / EndCommit so they become "
+-        "one undo step.";
++        "one undo step.\n"
++        "- Prefer kicad_api to editing files. If you do write a .kicad_sch or .kicad_pcb that is "
++        "open, the editor reloads it within a few seconds (it asks the user first if they have "
++        "unsaved edits); RevertDocument reloads it at once.";
+ 
+ 
+ MCP_RESULT MCP_RESULT::Text( const std::string& aText )
+@@ -338,15 +351,23 @@ bool MCP_SERVER::RunOnMainThread( std::function<void()> aFunc, int aTimeoutMs )
+ }
+ 
+ 
+-json MCP_SERVER::CallApi( const std::string& aCommand, const json& aArgs, std::string& aError )
++// One API request.  aStatus is the response's status code, or -1 if the request was not sent.
++static json callApiOnce( const std::string& aCommand, const json& aArgs,
++                         const KIAPI_DOCUMENT_DEFAULTS* aDefaults, int& aAssumedType,
++                         int& aStatus, std::string& aError )
+ {
+     std::string typeUrl, bytes;
++    std::string args = aArgs.is_null() ? std::string( "{}" ) : aArgs.dump();
+ 
+-    if( !KiapiJsonToMessage( aCommand, aArgs.is_null() ? std::string( "{}" ) : aArgs.dump(),
+-                             typeUrl, bytes, aError ) )
+-    {
++    aStatus = -1;
++    aAssumedType = 0;
++
++    bool ok = aDefaults ? KiapiJsonToMessage( aCommand, args, *aDefaults, typeUrl, bytes,
++                                              aAssumedType, aError )
++                        : KiapiJsonToMessage( aCommand, args, typeUrl, bytes, aError );
++
++    if( !ok )
+         return json();
+-    }
+ 
+     kiapi::common::ApiRequest request;
+     request.mutable_header()->set_client_name( "kicad-mcp" );
+@@ -354,6 +375,7 @@ json MCP_SERVER::CallApi( const std::string& aCommand, const json& aArgs, std::s
+     request.mutable_message()->set_value( bytes );
+ 
+     kiapi::common::ApiResponse response = Pgm().GetApiServer().HandleRequest( request );
++    aStatus = response.status().status();
+ 
+     if( response.status().status() != kiapi::common::ApiStatusCode::AS_OK )
+     {
+@@ -375,6 +397,98 @@ json MCP_SERVER::CallApi( const std::string& aCommand, const json& aArgs, std::s
+ }
+ 
+ 
++/// The documents open in the editors, as GetOpenDocuments lists them
++static std::vector<json> openDocuments()
++{
++    std::vector<json> docs;
++
++    for( const char* type : { "DOCTYPE_PCB", "DOCTYPE_SCHEMATIC" } )
++    {
++        int         assumed = 0, status = 0;
++        std::string err;
++        json        r = callApiOnce( "GetOpenDocuments", { { "type", type } }, nullptr, assumed,
++                                     status, err );
++
++        if( r.contains( "documents" ) )
++        {
++            for( const json& d : r["documents"] )
++                docs.push_back( d );
++        }
++    }
++
++    return docs;
++}
++
++
++json MCP_SERVER::CallApi( const std::string& aCommand, const json& aArgs, std::string& aError )
++{
++    int assumed = 0, status = 0;
++
++    if( aCommand == "GetOpenDocuments" )
++        return callApiOnce( aCommand, aArgs, nullptr, assumed, status, aError );
++
++    // A client would otherwise have to repeat the project and board in every request, and a
++    // request naming no document reaches no editor (AS_UNHANDLED)
++    KIAPI_DOCUMENT_DEFAULTS defaults;
++    std::vector<int>        openTypes;
++    PROJECT&                prj = Pgm().GetSettingsManager().Prj();
++
++    defaults.projectName = prj.GetProjectName().ToStdString();
++    defaults.projectPath = prj.GetProjectPath().ToStdString();
++
++    for( const json& doc : openDocuments() )
++    {
++        std::string typeUrl, bytes, err;
++
++        if( KiapiJsonToMessage( "kiapi.common.types.DocumentSpecifier", doc.dump(), typeUrl, bytes,
++                                err ) )
++        {
++            defaults.openDocuments.push_back( bytes );
++        }
++
++        std::string type = doc.value( "type", std::string() );
++
++        if( type == "DOCTYPE_PCB" )
++            openTypes.push_back( kiapi::common::types::DOCTYPE_PCB );
++        else if( type == "DOCTYPE_SCHEMATIC" )
++            openTypes.push_back( kiapi::common::types::DOCTYPE_SCHEMATIC );
++    }
++
++    if( openTypes.empty() )
++        openTypes.push_back( 0 );
++
++    json result;
++
++    // A common command (SaveDocumentToString, GetItems...) naming no document type goes to each
++    // open editor in turn, until one handles it
++    for( int type : openTypes )
++    {
++        aError.clear();
++        defaults.commonType = type;
++        result = callApiOnce( aCommand, aArgs, &defaults, assumed, status, aError );
++
++        if( status != kiapi::common::ApiStatusCode::AS_UNHANDLED || !assumed )
++            break;
++    }
++
++    if( status == kiapi::common::ApiStatusCode::AS_UNHANDLED )
++    {
++        std::string package = KiapiCommandPackage( aCommand );
++        std::string editor = package.rfind( "kiapi.schematic", 0 ) == 0 ? "schematic editor"
++                             : package.rfind( "kiapi.board", 0 ) == 0   ? "board editor"
++                                                                        : "editor";
++
++        aError = "AS_UNHANDLED: nothing handled " + aCommand + ". The " + editor
++                 + " that runs it must be open (kicad_status lists the open documents; "
++                   "kicad_open_editor opens one), and a document's type must match it: "
++                   "DOCTYPE_SCHEMATIC or DOCTYPE_PCB. The open project and board are filled "
++                   "in when left out.";
++    }
++
++    return result;
++}
++
++
+ void MCP_SERVER::registerBuiltinTools()
+ {
+     MCP_TOOL status;
+@@ -407,8 +521,8 @@ void MCP_SERVER::registerBuiltinTools()
+         out["open_documents"] = docs;
+ 
+         if( docs.empty() )
+-            out["hint"] = "No editor is open. Open the project's board or schematic in the app, "
+-                          "or use kicad_api with OpenDocument.";
++            out["hint"] = "No editor is open. Open the board or schematic with "
++                          "kicad_open_editor, or another project with kicad_open_project.";
+ 
+         return MCP_RESULT::Json( out );
+     };
+@@ -472,6 +586,46 @@ void MCP_SERVER::registerBuiltinTools()
+     };
+     RegisterTool( describe, this );
+ 
++    MCP_TOOL screenshot;
++    screenshot.name = "kicad_screenshot";
++    screenshot.description = "A picture of what KiCad shows right now: the active editor with its "
++                             "canvas, and any dialog open over it. Use it to check your changes "
++                             "and to see what the user is doing. max_width scales the picture "
++                             "down (default 1400 pixels; 0 for the full size).";
++    screenshot.inputSchema = {
++        { "type", "object" },
++        { "properties", { { "max_width", { { "type", "integer" } } } } }
++    };
++    screenshot.handler = []( const json& aArgs ) -> MCP_RESULT
++    {
++        wxImage image;
++
++        if( !KIPLATFORM::UI::GrabAppImage( image ) || !image.IsOk() )
++            return MCP_RESULT::Error( "This build of KiCad cannot take screenshots." );
++
++        int maxWidth = aArgs.value( "max_width", 1400 );
++
++        if( maxWidth > 0 && image.GetWidth() > maxWidth )
++        {
++            int height = std::max( 1, image.GetHeight() * maxWidth / image.GetWidth() );
++            image.Rescale( maxWidth, height, wxIMAGE_QUALITY_HIGH );
++        }
++
++        wxMemoryOutputStream out;
++
++        if( !image.SaveFile( out, wxBITMAP_TYPE_PNG ) )
++            return MCP_RESULT::Error( "Could not encode the screenshot." );
++
++        std::string bytes( out.GetLength(), '\0' );
++        out.CopyTo( bytes.data(), bytes.size() );
++
++        MCP_RESULT r = MCP_RESULT::Text( fmt::format( "{} x {} pixels", image.GetWidth(),
++                                                      image.GetHeight() ) );
++        r.AddPng( bytes );
++        return r;
++    };
++    RegisterTool( screenshot, this );
++
+     // Implemented by the project manager and the board editor; see SetToolHandler()
+     const std::string noPcb = "The board editor is not open. Open it with kicad_open_editor (editor: pcb), or in the app.";
+ 
+@@ -485,6 +639,15 @@ void MCP_SERVER::registerBuiltinTools()
+                    { "required", { "editor" } } },
+                  "The project manager is not available." );
+ 
++    declareTool( "kicad_open_project",
++                 "Open a KiCad project (its .kicad_pro file, or the folder holding it) in the "
++                 "project manager, closing the current one. The user is asked first if an "
++                 "editor has unsaved changes.",
++                 { { "type", "object" },
++                   { "properties", { { "path", { { "type", "string" } } } } },
++                   { "required", { "path" } } },
++                 "The project manager is not available." );
++
+     declareTool( "kicad_import_library_package",
+                  "Import a part downloaded from a parts site (SnapEDA, Ultra Librarian, SamacSys, "
+                  "Digi-Key, Mouser...) as a zip of KiCad files: its symbols, footprints and 3D "
+diff --git a/include/api/kiapi_json.h b/include/api/kiapi_json.h
+index cc5295ea..b5647e67 100644
+--- a/include/api/kiapi_json.h
++++ b/include/api/kiapi_json.h
+@@ -21,11 +21,31 @@
+ #define KIAPI_JSON_H
+ 
+ #include <string>
++#include <vector>
+ 
+ // JSON access to the API messages.  These live in the kiapi library because the message
+ // descriptors are registered with the protobuf copy linked into it; other libraries can only
+ // pass serialized messages across.
+ 
++/**
++ * What KiapiJsonToMessage() may fill into a request's document specifiers when the caller left
++ * them out or left parts empty.  An API client must otherwise repeat the project's name and path
++ * and the board's file name in every request, and a handler told nothing answers AS_UNHANDLED.
++ */
++struct KIAPI_DOCUMENT_DEFAULTS
++{
++    /// The open documents as serialized kiapi.common.types.DocumentSpecifier messages, as
++    /// GetOpenDocuments returns them
++    std::vector<std::string> openDocuments;
++
++    std::string projectName;    ///< for DOCTYPE_PROJECT documents
++    std::string projectPath;
++
++    /// The DocumentType to assume for a command of the common package that names none
++    /// (DOCTYPE_UNKNOWN to leave such a document alone)
++    int commonType = 0;
++};
++
+ /**
+  * Convert JSON to an API message.  @a aName may be a full name (kiapi.board.commands.GetItems)
+  * or a short one (GetItems).  On success, @a aTypeUrl and @a aBytes are what goes into a
+@@ -35,6 +55,21 @@ KIAPI_IMPORTEXPORT bool KiapiJsonToMessage( const std::string& aName, const std:
+                                             std::string& aTypeUrl, std::string& aBytes,
+                                             std::string& aError );
+ 
++/**
++ * As above, filling the request's document specifiers (top level, or in an ItemHeader) from
++ * @a aDefaults: the type from the command's package (board or schematic) or
++ * aDefaults.commonType, then the project, and the board file name, of the open document of that
++ * type.  Parts the caller set are kept.  @a aAssumedType is set to the type the conversion chose
++ * for a document that named none, or 0.
++ */
++KIAPI_IMPORTEXPORT bool KiapiJsonToMessage( const std::string& aName, const std::string& aJson,
++                                            const KIAPI_DOCUMENT_DEFAULTS& aDefaults,
++                                            std::string& aTypeUrl, std::string& aBytes,
++                                            int& aAssumedType, std::string& aError );
++
++/// The package of an API command (kiapi.board.commands...), or empty if it is unknown
++KIAPI_IMPORTEXPORT std::string KiapiCommandPackage( const std::string& aName );
++
+ /// Convert a serialized message (as found in an Any) to JSON, with the .proto field names.
+ KIAPI_IMPORTEXPORT bool KiapiMessageToJson( const std::string& aTypeUrl, const std::string& aBytes,
+                                             std::string& aJson, std::string& aError );
+diff --git a/kicad/kicad.cpp b/kicad/kicad.cpp
+index 96d9a166..1f93d6d6 100644
+--- a/kicad/kicad.cpp
++++ b/kicad/kicad.cpp
+@@ -509,6 +509,39 @@ bool PGM_KICAD::OnPgmInit()
+                     managerFrame );
+         }
+ 
++        if( managerFrame )
++        {
++            MCP_SERVER::Instance().SetToolHandler(
++                    "kicad_open_project",
++                    [managerFrame]( const nlohmann::json& aArgs ) -> MCP_RESULT
++                    {
++                        wxFileName fn( wxString::FromUTF8( aArgs.value( "path", std::string() ) ) );
++
++                        // A project folder names the project file in it
++                        if( fn.GetExt().IsEmpty() && wxFileName::DirExists( fn.GetFullPath() ) )
++                        {
++                            wxFileName dir = wxFileName::DirName( fn.GetFullPath() );
++                            fn = wxFileName( dir.GetPath(), dir.GetDirs().empty() ? wxString()
++                                                                                  : dir.GetDirs().Last(),
++                                             FILEEXT::ProjectFileExtension );
++                        }
++
++                        if( !fn.FileExists() )
++                            return MCP_RESULT::Error( "no project file at "
++                                                      + fn.GetFullPath().ToStdString( wxConvUTF8 ) );
++
++                        // Asks the user first if an editor has unsaved changes
++                        if( !managerFrame->LoadProject( fn ) )
++                            return MCP_RESULT::Error( "the project was not opened (the user may "
++                                                      "have cancelled)" );
++
++                        return MCP_RESULT::Text( "Opened "
++                                                 + managerFrame->Prj().GetProjectFullName().ToStdString( wxConvUTF8 )
++                                                 + ". Open its editors with kicad_open_editor." );
++                    },
++                    managerFrame );
++        }
++
+         MCP_SERVER::Instance().SetToolHandler(
+                 "kicad_import_library_package",
+                 [managerFrame]( const nlohmann::json& aArgs ) -> MCP_RESULT
+diff --git a/libs/kiplatform/include/kiplatform/ui.h b/libs/kiplatform/include/kiplatform/ui.h
+index e2c1413f..712b451d 100644
+--- a/libs/kiplatform/include/kiplatform/ui.h
++++ b/libs/kiplatform/include/kiplatform/ui.h
+@@ -26,6 +26,7 @@
+ class wxChoice;
+ class wxDataViewCtrl;
+ class wxDialog;
++class wxImage;
+ class wxNonOwnedWindow;
+ class wxTopLevelWindow;
+ class wxWindow;
+@@ -337,6 +338,13 @@ namespace KIPLATFORM
+          */
+         void KeepAboveExternalRendering( wxWindow* aChild );
+ 
++/**
++         * Take a picture of what the app shows: the active frame, the canvases and other GPU
++         * windows in it, and any dialogs or popups over it, in device pixels.  Only the Qt port
++         * implements it; elsewhere it returns false.
++         */
++        bool GrabAppImage( wxImage& aImage );
++
+ #ifdef __ANDROID__
+         /**
+          * Create the Vulkan surface for a DISPLAY_ANDROID handle from GetNativeWindowHandles().
+diff --git a/libs/kiplatform/port/wxgtk/ui.cpp b/libs/kiplatform/port/wxgtk/ui.cpp
+index f0b48d97..e8341e43 100644
+--- a/libs/kiplatform/port/wxgtk/ui.cpp
++++ b/libs/kiplatform/port/wxgtk/ui.cpp
+@@ -1176,3 +1176,9 @@ void KIPLATFORM::UI::KeepAboveExternalRendering( wxWindow* aChild )
+         wxLogTrace( traceRhi, wxS( "KeepAboveExternalRendering: gdk_window_ensure_native failed" ) );
+ #endif
+ }
++
++
++bool KIPLATFORM::UI::GrabAppImage( wxImage& aImage )
++{
++    return false;
++}
+diff --git a/libs/kiplatform/port/wxmsw/ui.cpp b/libs/kiplatform/port/wxmsw/ui.cpp
+index a573c849..c2a90896 100644
+--- a/libs/kiplatform/port/wxmsw/ui.cpp
++++ b/libs/kiplatform/port/wxmsw/ui.cpp
+@@ -282,3 +282,9 @@ void KIPLATFORM::UI::KeepAboveExternalRendering( wxWindow* aChild )
+ {
+     // Child windows are native and clip their parent's surface
+ }
++
++
++bool KIPLATFORM::UI::GrabAppImage( wxImage& aImage )
++{
++    return false;
++}
+diff --git a/libs/kiplatform/port/wxosx/ui.mm b/libs/kiplatform/port/wxosx/ui.mm
+index b233f4c0..dcda46ba 100644
+--- a/libs/kiplatform/port/wxosx/ui.mm
++++ b/libs/kiplatform/port/wxosx/ui.mm
+@@ -338,3 +338,9 @@
+ {
+     // Child views are composited above the Metal layer of their parent
+ }
++
++
++bool KIPLATFORM::UI::GrabAppImage( wxImage& aImage )
++{
++    return false;
++}
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index a7123eba..f7911c12 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -42,6 +42,7 @@
+ #include <QExposeEvent>
+ #include <QJniEnvironment>
+ #include <QJniObject>
++#include <QtCore/qcoreapplication_platform.h>
+ #include <QSet>
+ #define VK_USE_PLATFORM_ANDROID_KHR
+ #include <QVulkanInstance>
+@@ -57,9 +58,18 @@
+ #include <QPalette>
+ #include <QScreen>
+ #include <QStyleHints>
++#include <QApplication>
++#include <QImage>
++#include <QPainter>
+ #include <QWidget>
+ #include <QWindow>
+ 
++#include <wx/image.h>
++
++#include <cstring>
++#include <future>
++#include <memory>
++
+ #ifdef __ANDROID__
+ #include <QGuiApplication>
+ #include <qpa/qwindowsysteminterface.h>
+@@ -822,3 +832,192 @@ void KIPLATFORM::UI::KeepAboveExternalRendering( wxWindow* aChild )
+     if( QWidget* w = qtWidget( aChild ) )
+         w->setAttribute( Qt::WA_NativeWindow );
+ }
++
++
++#ifdef __ANDROID__
++// What a GPU window (a canvas, the 3D viewer) shows.  Qt cannot grab these: they draw into an
++// Android TextureView (see CreateVulkanSurface), whose picture TextureView.getBitmap() copies
++// out, on the Android UI thread that owns the view.
++static QImage grabTextureView( QWindow* aWindow )
++{
++    if( !aWindow->handle() )
++        return {};
++
++    QJniObject qtWindow( reinterpret_cast<jobject>( aWindow->winId() ) );
++
++    if( !qtWindow.isValid() )
++        return {};
++
++    auto        result = std::make_shared<std::promise<QImage>>();
++    std::future<QImage> future = result->get_future();
++    QJniObject  window = qtWindow;
++
++    QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
++            [window, result]()
++            {
++                QJniEnvironment env;
++                QImage          image;
++                QJniObject      container = window.getObjectField( "m_surfaceContainer",
++                                                                   "Landroid/view/View;" );
++                env.checkAndClearExceptions();
++                jclass textureView = env->FindClass( "android/view/TextureView" );
++
++                if( container.isValid() && textureView
++                    && env->IsInstanceOf( container.object(), textureView ) )
++                {
++                    QJniObject bitmap = container.callObjectMethod( "getBitmap",
++                                                                    "()Landroid/graphics/Bitmap;" );
++                    env.checkAndClearExceptions();
++
++                    if( bitmap.isValid() )
++                    {
++                        int w = bitmap.callMethod<jint>( "getWidth" );
++                        int h = bitmap.callMethod<jint>( "getHeight" );
++
++                        if( w > 0 && h > 0 )
++                        {
++                            // ARGB_8888 is laid out as R, G, B, A bytes
++                            image = QImage( w, h, QImage::Format_RGBA8888 );
++                            jobject buffer = env->NewDirectByteBuffer( image.bits(),
++                                                                       image.sizeInBytes() );
++                            bitmap.callMethod<void>( "copyPixelsToBuffer", "(Ljava/nio/Buffer;)V",
++                                                     buffer );
++                            env->DeleteLocalRef( buffer );
++
++                            if( env.checkAndClearExceptions() )
++                                image = QImage();
++                        }
++
++                        bitmap.callMethod<void>( "recycle" );
++                        env.checkAndClearExceptions();
++                    }
++                }
++
++                if( textureView )
++                    env->DeleteLocalRef( textureView );
++
++                result->set_value( image );
++            } );
++
++    // The UI thread can be waiting on this one (a surface change); then go without the picture
++    if( future.wait_for( std::chrono::seconds( 2 ) ) != std::future_status::ready )
++        return {};
++
++    return future.get();
++}
++
++
++static bool isInside( QWindow* aWindow, QWindow* aTop )
++{
++    for( QWindow* w = aWindow; w; w = w->parent() )
++    {
++        if( w == aTop )
++            return true;
++    }
++
++    return false;
++}
++#endif
++
++
++bool KIPLATFORM::UI::GrabAppImage( wxImage& aImage )
++{
++    QWidget* active = QApplication::activeWindow();
++
++    if( !active )
++        active = QApplication::activeModalWidget();
++
++    // The frame under the active dialog, if a dialog is active
++    QWidget* base = active;
++
++    while( base && base->parentWidget() && ( base->windowType() == Qt::Dialog
++                                             || base->windowType() == Qt::Popup
++                                             || base->windowType() == Qt::Tool ) )
++    {
++        base = base->parentWidget()->window();
++    }
++
++    if( !base )
++    {
++        for( QWidget* w : QApplication::topLevelWidgets() )
++        {
++            if( w->isVisible() && ( !base || w->width() * w->height() > base->width() * base->height() ) )
++                base = w;
++        }
++    }
++
++    if( !base )
++        return false;
++
++    const qreal  dpr = base->devicePixelRatioF();
++    const QPoint origin = base->mapToGlobal( QPoint( 0, 0 ) );
++    QImage       image = base->grab().toImage().convertToFormat( QImage::Format_RGB888 );
++
++    image.setDevicePixelRatio( 1.0 );
++
++    QPainter painter( &image );
++
++    auto drawWidget = [&]( QWidget* aWidget )
++    {
++        QImage part = aWidget->grab().toImage();
++        part.setDevicePixelRatio( 1.0 );
++        QPoint at = ( aWidget->mapToGlobal( QPoint( 0, 0 ) ) - origin ) * dpr;
++        painter.drawImage( at, part );
++    };
++
++    auto drawSurfaces = [&]( QWidget* aTop )
++    {
++#ifdef __ANDROID__
++        QWindow* topWindow = aTop->windowHandle();
++
++        for( QWindow* win : QGuiApplication::allWindows() )
++        {
++            if( win == topWindow || !win->isVisible() || !isInside( win, topWindow ) )
++                continue;
++
++            QImage picture = grabTextureView( win );
++
++            if( picture.isNull() )
++                continue;
++
++            QRect at( ( win->mapToGlobal( QPoint( 0, 0 ) ) - origin ) * dpr,
++                      win->size() * dpr );
++            painter.drawImage( at, picture );
++        }
++#endif
++    };
++
++    drawSurfaces( base );
++
++    // Dialogs and popups over the frame, the active one last
++    std::vector<QWidget*> above;
++
++    for( QWidget* w : QApplication::topLevelWidgets() )
++    {
++        if( w != base && w != active && w->isVisible() && w->window() == w
++            && ( w->windowType() == Qt::Dialog || w->windowType() == Qt::Popup
++                 || w->windowType() == Qt::Tool || w->windowType() == Qt::ToolTip ) )
++        {
++            above.push_back( w );
++        }
++    }
++
++    if( active && active != base )
++        above.push_back( active );
++
++    for( QWidget* w : above )
++    {
++        drawWidget( w );
++        drawSurfaces( w );
++    }
++
++    painter.end();
++
++    aImage.Create( image.width(), image.height(), false );
++    unsigned char* dst = aImage.GetData();
++
++    for( int y = 0; y < image.height(); ++y )
++        memcpy( dst + size_t( y ) * image.width() * 3, image.constScanLine( y ), image.width() * 3 );
++
++    return true;
++}
+diff --git a/pcbnew/api/api_handler_pcb.cpp b/pcbnew/api/api_handler_pcb.cpp
+index 6e9054e4..1971266d 100644
+--- a/pcbnew/api/api_handler_pcb.cpp
++++ b/pcbnew/api/api_handler_pcb.cpp
+@@ -2384,7 +2384,8 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportRe
+ 
+     job.m_side = FromProtoEnum<JOB_PCB_RENDER::SIDE>( aCtx.Request.side() );
+ 
+-    job.m_zoom = aCtx.Request.zoom();
++    if( aCtx.Request.zoom() > 0.0 )
++        job.m_zoom = aCtx.Request.zoom();
+     job.m_perspective = aCtx.Request.perspective();
+ 
+     job.m_rotation = UnpackVector3D( aCtx.Request.rotation() );
+@@ -2396,11 +2397,21 @@ HANDLER_RESULT<types::RunJobResponse> API_HANDLER_PCB::handleRunBoardJobExportRe
+     job.m_antiAlias = aCtx.Request.anti_alias();
+     job.m_postProcess = aCtx.Request.post_process();
+ 
+-    job.m_lightTopIntensity = UnpackVector3D( aCtx.Request.light_top_intensity() );
+-    job.m_lightBottomIntensity = UnpackVector3D( aCtx.Request.light_bottom_intensity() );
+-    job.m_lightCameraIntensity = UnpackVector3D( aCtx.Request.light_camera_intensity() );
+-    job.m_lightSideIntensity = UnpackVector3D( aCtx.Request.light_side_intensity() );
+-    job.m_lightSideElevation = aCtx.Request.light_side_elevation();
++    // Lights a request leaves out keep the job's defaults: all of them zero renders black
++    if( aCtx.Request.has_light_top_intensity() )
++        job.m_lightTopIntensity = UnpackVector3D( aCtx.Request.light_top_intensity() );
++
++    if( aCtx.Request.has_light_bottom_intensity() )
++        job.m_lightBottomIntensity = UnpackVector3D( aCtx.Request.light_bottom_intensity() );
++
++    if( aCtx.Request.has_light_camera_intensity() )
++        job.m_lightCameraIntensity = UnpackVector3D( aCtx.Request.light_camera_intensity() );
++
++    if( aCtx.Request.has_light_side_intensity() )
++        job.m_lightSideIntensity = UnpackVector3D( aCtx.Request.light_side_intensity() );
++
++    if( aCtx.Request.light_side_elevation() != 0 )
++        job.m_lightSideElevation = aCtx.Request.light_side_elevation();
+ 
+     return ExecuteBoardJob( pcbContext(), job );
+ }
+-- 
+2.54.0 (Apple Git-157)
+

@@ -171,6 +171,36 @@ kicad/library_package_import.{h,cpp}).
   - The GUI has no handler for the IPC API's DeleteLibraryTableEntry. To remove a test row, edit the table file.
   - The wxSingleChoiceDialog (export library list) draws without a title bar (P10).
 
+## Agent feedback fixes (10.99aj, 2026-11-09)
+Another Claude Code session working on the user's RP2350A schematic over MCP wrote up what failed. The user also reported a grainy schematic and a black 3D viewer. KiCad patches 0034-0037.
+- **Schematic API "missing" (AS_UNHANDLED):**
+  - The eeschema handlers were all there. Requests without a full `document` reached no handler: the schematic handler wants type, project name and path, the board handler wants the board file name. "the requested project  is not open" was the same thing.
+  - `kicad_api` now fills document specifiers from the open editors, at the top level or in `header`. The type comes from the command's package. A common command naming no type is tried on each open editor.
+  - AS_UNHANDLED errors now say what's missing. Code: `KiapiJsonToMessage(..., KIAPI_DOCUMENT_DEFAULTS, ...)` in api/src/kiapi_json.cpp, called from MCP_SERVER::CallApi.
+- **Edits on disk not shown:**
+  - `DOCUMENT_FILE_WATCHER` (common/document_file_watcher.cpp) polls the editor's files every second and reports a change once it has held for two polls. It waits while a modal dialog or interactive tool is up.
+  - The editor reloads (ReloadFromDisk) and shows an info bar. With unsaved edits it asks Reload / Keep My Edits first.
+  - Saves and ReloadFromDisk take a new baseline, so neither is reported.
+  - Tested on the tablet: a pushed edit shows up within 4 s, the dialog works, and our own SaveDocument isn't reloaded.
+  - `RevertDocument` works too now, since it's no longer missing its document.
+- **New MCP tools:**
+  - `kicad_screenshot`: a PNG of the app, about 1 s. It's a Qt grab of the active frame and its dialogs, with each TextureView GPU window drawn in from `TextureView.getBitmap()` on the Android UI thread (KIPLATFORM::UI::GrabAppImage). `max_width` defaults to 1400.
+  - `kicad_open_project`: takes a .kicad_pro or its folder. KICAD_MANAGER_FRAME::LoadProject asks about unsaved editors itself.
+- **Black RunBoardJobExportRender:** fields left out of the request (lights, zoom) now keep the job's defaults. They used to be zeroed.
+- **Grainy schematic (not new; it's the modern GAL at 1.75x):**
+  - The canvas renders at full resolution (swapchain 2142x1391 = 1224x795 x 1.75) with High Quality AA, i.e. 2x supersampled layer targets.
+  - The SDF shaders cut edges hard in a supersampled target, so pixels only had 5 coverage levels; a screencap had exactly 70/115/159/203/248. Stroke text one device pixel wide looked stepped.
+  - Fix: the fragment shaders ramp edges over one target texel (dFdx/dFdy, `edgeRamp()`), never wider than before. After the fix the same crop has about 50 levels and axis-aligned strokes are still crisp.
+  - Not changed: the minimum stroke width is one device pixel (0.57 logical px at 1.75x), as on desktop. A logical-pixel minimum would make text bolder; consider it if the user still finds it faint.
+- **3D viewer black when opened a second time (per app run, board change or not):**
+  - gl4es keeps one global GL state and can't see EGL context switches made outside it (NOX11; its NewGLState/ActivateGLState aren't exported, and EGL_WRAPPER doesn't track state either).
+  - GL_CONTEXT_MANAGER now gives every context after the first its own gl4es instance: `android_dlopen_ext(path from dladdr, ANDROID_DLEXT_FORCE_LOAD)` on the same libGL.so in the APK.
+  - It points glad at that instance on LockCtx and in the new `LoadGL()`. The three gladLoaderLoadGL() call sites use LoadGL().
+  - Copies of the .so in app storage aren't an option: Android 10+ blocks dlopen from app data.
+  - About 2.5 MB per opening; instances are never unloaded.
+  - The footprint properties 3D preview gets its own instance the same way; untested.
+- **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
+
 ## Crash fix: tree item data on wxQt (10.99ai)
 The user hit a crash on 2026-11-07 (10.99ah) in the PCB editor's Tools > DRC Rule Editor.
 - **Stack:** SIGSEGV in `__dynamic_cast`, from RULE_EDITOR_DIALOG_BASE::saveRuleTreeState, from onRuleTreeItemLeftUp (the end of a drag in the rule tree).

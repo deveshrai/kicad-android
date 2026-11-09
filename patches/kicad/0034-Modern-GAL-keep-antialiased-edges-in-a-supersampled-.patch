@@ -1,0 +1,164 @@
+From 1ae0abb01cda074b7723787a2f549c93e80da5fb Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 9 Nov 2026 13:31:52 +0530
+Subject: [PATCH 34/37] Modern GAL: keep antialiased edges in a supersampled
+ target
+
+With High Quality antialiasing the layer targets are drawn at twice the size and averaged,
+and every SDF edge was cut hard in them, so a pixel could only be 0, 1/4, 1/2, 3/4 or fully
+covered.  On a high density screen (a 1.75x tablet) stroke text is one device pixel wide at
+normal zoom, and its diagonals came out stepped: the schematic looked grainy.
+
+The fragment shaders now ramp edges over one texel of the target they draw into (measured
+with dFdx/dFdy, so no new uniforms), never more than the pixel ramp they used before.  The
+average then gives a continuous coverage; horizontal and vertical strokes stay as sharp as
+before, since the texel centres sit a quarter pixel either side of the snapped axis.  Hard
+edges remain for RHI_INSTANCE_HARD_EDGE.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/rhi/shaders/pcb_arc.frag   | 12 +++++++++++-
+ common/rhi/shaders/pcb_pad.frag   | 12 +++++++++++-
+ common/rhi/shaders/pcb_track.frag | 12 +++++++++++-
+ common/rhi/shaders/sch_wire.frag  | 12 +++++++++++-
+ common/rhi/shaders/sdf_quad.glsl  |  6 ++++--
+ 5 files changed, 48 insertions(+), 6 deletions(-)
+
+diff --git a/common/rhi/shaders/pcb_arc.frag b/common/rhi/shaders/pcb_arc.frag
+index d7eabdbe..3c6cea48 100644
+--- a/common/rhi/shaders/pcb_arc.frag
++++ b/common/rhi/shaders/pcb_arc.frag
+@@ -82,12 +82,22 @@ float sdArc( vec2 p, float radius, float startAngle, float sweepAngle, float hal
+     return min( distA, distB );
+ }
+ 
++// Half the edge ramp: a pixel, or a texel of a supersampled target, whose average then smooths
++// the edge further. aPixelSize is a pixel in local units, negative for a hard edge.
++float edgeRamp( float aPixelSize, vec2 aLocalPos )
++{
++    float texel = length( vec2( dFdx( aLocalPos.x ), dFdy( aLocalPos.x ) ) );
++    float pixel = abs( aPixelSize );
++
++    return 0.5 * ( texel > 0.0 ? min( pixel, texel ) : pixel );
++}
++
+ void main()
+ {
+     float minHalfWidth = max( fragHalfWidth, abs( fragAAPixelSize ) * 0.5 );
+     float dist = sdArc( fragLocalPos, fragRadius, fragStartAngle, fragSweepAngle, minHalfWidth );
+ 
+-    float aaWidth = abs( fragAAPixelSize ) * 0.5;
++    float aaWidth = edgeRamp( fragAAPixelSize, fragLocalPos );
+     float alpha = 1.0 - smoothstep( -aaWidth, aaWidth, dist );
+ 
+     // A layer that takes each pixel once cannot have partly covered edges
+diff --git a/common/rhi/shaders/pcb_pad.frag b/common/rhi/shaders/pcb_pad.frag
+index fd604d7c..fd5523a7 100644
+--- a/common/rhi/shaders/pcb_pad.frag
++++ b/common/rhi/shaders/pcb_pad.frag
+@@ -65,6 +65,16 @@ float sdTrapezoid( vec2 p, float halfWidthTop, float halfWidthBot, float halfHei
+     return length( max( d, 0.0 ) ) + min( max( d.x, d.y ), 0.0 );
+ }
+ 
++// Half the edge ramp: a pixel, or a texel of a supersampled target, whose average then smooths
++// the edge further. aPixelSize is a pixel in local units, negative for a hard edge.
++float edgeRamp( float aPixelSize, vec2 aLocalPos )
++{
++    float texel = length( vec2( dFdx( aLocalPos.x ), dFdy( aLocalPos.x ) ) );
++    float pixel = abs( aPixelSize );
++
++    return 0.5 * ( texel > 0.0 ? min( pixel, texel ) : pixel );
++}
++
+ void main()
+ {
+     float hw = fragHalfWidth;
+@@ -116,7 +126,7 @@ void main()
+     }
+ 
+     // One pixel of transition, as tracks and arcs have. A wider one blurs the pad edge
+-    float aaWidth = abs( fragAAPixelSize ) * 0.5;
++    float aaWidth = edgeRamp( fragAAPixelSize, fragLocalPos );
+     float alpha = 1.0 - smoothstep( -aaWidth, aaWidth, dist );
+ 
+     // A layer that takes each pixel once cannot have partly covered edges
+diff --git a/common/rhi/shaders/pcb_track.frag b/common/rhi/shaders/pcb_track.frag
+index 7c920148..94dca485 100644
+--- a/common/rhi/shaders/pcb_track.frag
++++ b/common/rhi/shaders/pcb_track.frag
+@@ -29,6 +29,16 @@ float median( vec3 aValue )
+     return max( min( aValue.r, aValue.g ), min( max( aValue.r, aValue.g ), aValue.b ) );
+ }
+ 
++// Half the edge ramp: a pixel, or a texel of a supersampled target, whose average then smooths
++// the edge further. aPixelSize is a pixel in local units, negative for a hard edge.
++float edgeRamp( float aPixelSize, vec2 aLocalPos )
++{
++    float texel = length( vec2( dFdx( aLocalPos.x ), dFdy( aLocalPos.x ) ) );
++    float pixel = abs( aPixelSize );
++
++    return 0.5 * ( texel > 0.0 ? min( pixel, texel ) : pixel );
++}
++
+ void main()
+ {
+     // A glyph of the bitmap font is filtered as the OpenGL canvas does, fragHalfWidth being the
+@@ -64,7 +74,7 @@ void main()
+     float dist = sdSegment( fragLocalPos, endA, endB ) - minHalfWidth;
+ 
+     // Analytical anti-aliasing via smoothstep over 1 pixel transition
+-    float aaWidth = abs( fragAAPixelSize ) * 0.5;
++    float aaWidth = edgeRamp( fragAAPixelSize, fragLocalPos );
+     float alpha = 1.0 - smoothstep( -aaWidth, aaWidth, dist );
+ 
+     // A layer that takes each pixel once cannot have partly covered edges
+diff --git a/common/rhi/shaders/sch_wire.frag b/common/rhi/shaders/sch_wire.frag
+index be54e88a..8820c5ad 100644
+--- a/common/rhi/shaders/sch_wire.frag
++++ b/common/rhi/shaders/sch_wire.frag
+@@ -19,6 +19,16 @@ float sdSegment( vec2 p, vec2 a, vec2 b )
+     return length( pa - ba * h );
+ }
+ 
++// Half the edge ramp: a pixel, or a texel of a supersampled target, whose average then smooths
++// the edge further. aPixelSize is a pixel in local units, negative for a hard edge.
++float edgeRamp( float aPixelSize, vec2 aLocalPos )
++{
++    float texel = length( vec2( dFdx( aLocalPos.x ), dFdy( aLocalPos.x ) ) );
++    float pixel = abs( aPixelSize );
++
++    return 0.5 * ( texel > 0.0 ? min( pixel, texel ) : pixel );
++}
++
+ void main()
+ {
+     vec2 endA = vec2( -fragHalfLength, 0.0 );
+@@ -29,7 +39,7 @@ void main()
+     float dist = sdSegment( fragLocalPos, endA, endB ) - minHalfWidth;
+ 
+     // Analytical anti-aliasing via smoothstep over 1 pixel transition
+-    float aaWidth = abs( fragAAPixelSize ) * 0.5;
++    float aaWidth = edgeRamp( fragAAPixelSize, fragLocalPos );
+     float alpha = 1.0 - smoothstep( -aaWidth, aaWidth, dist );
+ 
+     // A layer that takes each pixel once cannot have partly covered edges
+diff --git a/common/rhi/shaders/sdf_quad.glsl b/common/rhi/shaders/sdf_quad.glsl
+index 85a1274d..047ee592 100644
+--- a/common/rhi/shaders/sdf_quad.glsl
++++ b/common/rhi/shaders/sdf_quad.glsl
+@@ -3,8 +3,10 @@
+ const float QUAD_REACH_PIXELS = 0.465;
+ 
+ // The pixel size a fragment shader ramps its edge over. A negative one tells it to cut the edge
+-// hard, for RHI_INSTANCE_HARD_EDGE and for a supersampled target, whose average is the ramp.
++// hard, for RHI_INSTANCE_HARD_EDGE. A supersampled target keeps the ramp, one of its texels wide
++// (see edgeRamp() in the fragment shaders): cut hard, a pixel could only be 0 to 4 quarters
++// covered, which leaves thin text stepped on high density screens.
+ float edgePixelSize( float aPixelSize, uint aFlags )
+ {
+-    return ( supersampled() || ( aFlags & 0x80u ) != 0u ) ? -aPixelSize : aPixelSize;
++    return ( aFlags & 0x80u ) != 0u ? -aPixelSize : aPixelSize;
+ }
+-- 
+2.54.0 (Apple Git-157)
+

@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ai; next: aj).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99aj; next: ak).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -39,7 +39,10 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 3. **P8: integrated MCP server. Done in 10.99af** (Preferences > MCP Server; see HANDOVER).
    - 10.99ag: a whole board designed over MCP (work/esp32s3-uno), with fixes for re-entrant tool
      calls during progress yields and stale DRC rules.
-   - Follow-ups: schematic tools (ERC, annotate, update PCB), a board-picture tool, Windows sockets;
+   - 10.99aj: fixes from another agent's schematic session (see HANDOVER, "Agent feedback
+     fixes"): document specifiers filled in, editors reload files changed on disk,
+     kicad_screenshot, kicad_open_project.
+   - Follow-ups: schematic tools (ERC, annotate, update PCB), Windows sockets;
      the GUI DRC dialog still uses stale rules after API rule changes (reinit on API change).
 4. **P9: import and export third-party symbols, footprints and 3D models. Done in 10.99ah**
    (File > Import / Export Library Package, plus MCP tools; see HANDOVER).  Tested with SnapEDA's

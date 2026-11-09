@@ -1,0 +1,232 @@
+From e79f283857a2f618d73863e864551fe910d0bdde Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 9 Nov 2026 13:31:52 +0530
+Subject: [PATCH 35/37] Android: give each GL context its own gl4es instance
+
+gl4es (desktop GL over GLES) keeps its GL state in globals and, with contexts made outside
+it (wxQt's QOpenGLWidget), cannot tell them apart.  The 3D viewer opened a second time got a
+new EGL context while gl4es still held the first one's programs and bindings, and drew
+nothing: a black view until the app restarted.
+
+GL_CONTEXT_MANAGER now loads a separate gl4es instance (android_dlopen_ext with
+ANDROID_DLEXT_FORCE_LOAD, from the same file in the APK) for every context after the first,
+and points glad at a context's instance when it is locked.  The canvases call the new
+GL_CONTEXT_MANAGER::LoadGL() in place of gladLoaderLoadGL(), which would load the shared
+instance again.  Other platforms are unchanged.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ 3d-viewer/3d_canvas/eda_3d_canvas.cpp         |  2 +-
+ .../3d_model_viewer/eda_3d_model_viewer.cpp   |  2 +-
+ common/gal/opengl/opengl_gal.cpp              |  2 +-
+ common/kicad_gl/gl_context_mgr.cpp            | 93 +++++++++++++++++++
+ include/kicad_gl/gl_context_mgr.h             | 18 ++++
+ 5 files changed, 114 insertions(+), 3 deletions(-)
+
+diff --git a/3d-viewer/3d_canvas/eda_3d_canvas.cpp b/3d-viewer/3d_canvas/eda_3d_canvas.cpp
+index 60503683..905f0067 100644
+--- a/3d-viewer/3d_canvas/eda_3d_canvas.cpp
++++ b/3d-viewer/3d_canvas/eda_3d_canvas.cpp
+@@ -257,7 +257,7 @@ bool  EDA_3D_CANVAS::initializeOpenGL()
+ 
+     SetOpenGLBackendInfo( GL_UTILS::DetectGLBackend( this ) );
+ 
+-    const int glVersion = gladLoaderLoadGL();
++    const int glVersion = Pgm().GetGLContextManager()->LoadGL();
+ 
+     if( glVersion == 0 )
+     {
+diff --git a/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp b/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp
+index bca10602..20aaa111 100644
+--- a/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp
++++ b/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp
+@@ -193,7 +193,7 @@ bool EDA_3D_MODEL_VIEWER::ogl_initialize()
+ {
+     SetOpenGLBackendInfo( GL_UTILS::DetectGLBackend( this ) );
+ 
+-    const int glVersion = gladLoaderLoadGL();
++    const int glVersion = Pgm().GetGLContextManager()->LoadGL();
+ 
+     if( glVersion == 0 )
+     {
+diff --git a/common/gal/opengl/opengl_gal.cpp b/common/gal/opengl/opengl_gal.cpp
+index 73fad989..d5e22825 100644
+--- a/common/gal/opengl/opengl_gal.cpp
++++ b/common/gal/opengl/opengl_gal.cpp
+@@ -3389,7 +3389,7 @@ void OPENGL_GAL::init()
+ 
+     SetOpenGLBackendInfo( GL_UTILS::DetectGLBackend( this ) );
+ 
+-    int glVersion = gladLoaderLoadGL();
++    int glVersion = Pgm().GetGLContextManager()->LoadGL();
+ 
+     if( glVersion == 0 )
+         throw std::runtime_error( "Failed to load OpenGL via loader" );
+diff --git a/common/kicad_gl/gl_context_mgr.cpp b/common/kicad_gl/gl_context_mgr.cpp
+index a6c1572a..a88aecc8 100644
+--- a/common/kicad_gl/gl_context_mgr.cpp
++++ b/common/kicad_gl/gl_context_mgr.cpp
+@@ -25,6 +25,58 @@
+ #include <wx/debug.h>
+ #include <wx/log.h>
+ 
++#ifdef __ANDROID__
++#include <android/dlext.h>
++#include <dlfcn.h>
++
++
++// gl4es keeps its GL state in globals.  Loading the library again (a forced load gets a copy
++// with its own globals, from the same file in the APK) gives a context a state of its own.
++static void* openGl4es( bool aNewInstance )
++{
++    static void* base = dlopen( "libGL.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE );
++
++    if( !aNewInstance || !base )
++        return base;
++
++    Dl_info info{};
++    void*   sym = dlsym( base, "gl4es_GetProcAddress" );
++
++    if( !sym || !dladdr( sym, &info ) || !info.dli_fname )
++        return base;
++
++    android_dlextinfo ext{};
++    ext.flags = ANDROID_DLEXT_FORCE_LOAD;
++
++    void* instance = android_dlopen_ext( info.dli_fname, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE,
++                                         &ext );
++
++    wxLogTrace( traceGalContext, wxS( "gl4es: new instance %p from %s" ), instance,
++                info.dli_fname );
++
++    return instance ? instance : base;
++}
++
++
++static GLADapiproc gl4esProc( void* aInstance, const char* aName )
++{
++    if( void* proc = dlsym( aInstance, aName ) )
++        return reinterpret_cast<GLADapiproc>( proc );
++
++    using GET_PROC = void* ( * )( const char* );
++    static thread_local void*    lastInstance = nullptr;
++    static thread_local GET_PROC getProc = nullptr;
++
++    if( lastInstance != aInstance )
++    {
++        getProc = reinterpret_cast<GET_PROC>( dlsym( aInstance, "gl4es_GetProcAddress" ) );
++        lastInstance = aInstance;
++    }
++
++    return getProc ? reinterpret_cast<GLADapiproc>( getProc( aName ) ) : nullptr;
++}
++#endif
++
+ 
+ static bool resetRecoveryEnabled()
+ {
+@@ -79,6 +131,12 @@ wxGLContext* GL_CONTEXT_MANAGER::CreateCtx( wxGLCanvas* aCanvas, const wxGLConte
+ 
+     m_glContexts.insert( std::make_pair( context, aCanvas ) );
+ 
++#ifdef __ANDROID__
++    // The first context uses the instance loaded at startup; later ones get their own
++    m_gl4es[context] = openGl4es( m_baseGl4esUsed );
++    m_baseGl4esUsed = true;
++#endif
++
+     if( loseOnReset )
+         m_loseOnResetContexts.insert( context );
+ 
+@@ -92,6 +150,9 @@ void GL_CONTEXT_MANAGER::DestroyCtx( wxGLContext* aContext )
+     {
+         m_glContexts.erase( aContext );
+         m_loseOnResetContexts.erase( aContext );
++#ifdef __ANDROID__
++        m_gl4es.erase( aContext );
++#endif
+         delete aContext;
+     }
+     else
+@@ -148,10 +209,42 @@ bool GL_CONTEXT_MANAGER::LockCtx( wxGLContext* aContext, wxGLCanvas* aCanvas )
+ 
+     m_glCtx = aContext;
+ 
++#ifdef __ANDROID__
++    // Point glad at this context's gl4es; a context not yet loaded does that in LoadGL()
++    auto it = m_gl4es.find( aContext );
++
++    if( current && it != m_gl4es.end() && it->second && m_loadedGl4es
++        && it->second != m_loadedGl4es )
++    {
++        if( gladLoadGLUserPtr( gl4esProc, it->second ) )
++            m_loadedGl4es = it->second;
++    }
++#endif
++
+     return current;
+ }
+ 
+ 
++int GL_CONTEXT_MANAGER::LoadGL()
++{
++#ifdef __ANDROID__
++    auto it = m_gl4es.find( m_glCtx );
++
++    if( it != m_gl4es.end() && it->second )
++    {
++        int version = gladLoadGLUserPtr( gl4esProc, it->second );
++
++        if( version )
++            m_loadedGl4es = it->second;
++
++        return version;
++    }
++#endif
++
++    return gladLoaderLoadGL();
++}
++
++
+ void GL_CONTEXT_MANAGER::UnlockCtx( wxGLContext* aContext )
+ {
+     wxCHECK( aContext && m_glContexts.count( aContext ) > 0, /* void */ );
+diff --git a/include/kicad_gl/gl_context_mgr.h b/include/kicad_gl/gl_context_mgr.h
+index a0810124..e498d8a5 100644
+--- a/include/kicad_gl/gl_context_mgr.h
++++ b/include/kicad_gl/gl_context_mgr.h
+@@ -82,6 +82,17 @@ public:
+      */
+     bool LockCtx( wxGLContext* aContext, wxGLCanvas* aCanvas );
+ 
++    /**
++     * Load the OpenGL entry points (glad) for the locked context, in place of
++     * gladLoaderLoadGL().  Returns the GL version as gladLoaderLoadGL() does, or 0.
++     *
++     * On Android, GL is gl4es over GLES, which keeps one global GL state and cannot tell EGL
++     * contexts apart: a second context (the 3D viewer opened again) would start from the first
++     * one's state and draw nothing.  So each context gets its own gl4es instance, and locking a
++     * context points glad at that instance.
++     */
++    int LoadGL();
++
+     /**
+      * Allow other canvases to bind an OpenGL context.
+      *
+@@ -157,6 +168,13 @@ private:
+     /// Contexts created with the lose-on-reset notification strategy.
+     std::set<const wxGLContext*> m_loseOnResetContexts;
+ 
++#ifdef __ANDROID__
++    /// The gl4es instance (a dlopen handle) each context draws with, see LoadGL()
++    std::map<const wxGLContext*, void*> m_gl4es;
++    void* m_loadedGl4es = nullptr;   ///< the instance glad's entry points come from
++    bool  m_baseGl4esUsed = false;   ///< the instance loaded at startup has a context
++#endif
++
+     /// Lock to prevent unexpected GL context switching.
+     std::mutex m_glCtxMutex;
+ };
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,557 @@
+From 9a6667d23c24aa214555f43e5118fe9eed1adce1 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Mon, 9 Nov 2026 13:31:52 +0530
+Subject: [PATCH 36/37] Editors reload documents changed on disk
+
+The schematic and board editors kept showing (and would later save over) their in-memory copy
+when another program changed the files, for example an AI agent editing them through MCP.
+
+A DOCUMENT_FILE_WATCHER polls the open files' modification times and sizes (which works on
+Android's shared storage, unlike inotify), waits for a change to hold for two polls, and runs
+only while the frame could take an API command.  The editor then reloads with ReloadFromDisk();
+with unsaved edits it asks first (Reload / Keep My Edits).  Saving and ReloadFromDisk() take
+a new baseline, so neither the editor's own writes nor a git reload are reported.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/CMakeLists.txt            |   1 +
+ common/document_file_watcher.cpp | 121 +++++++++++++++++++++++++++++++
+ eeschema/files-io.cpp            |  12 ++-
+ eeschema/sch_edit_frame.cpp      |  60 +++++++++++++++
+ eeschema/sch_edit_frame.h        |   6 ++
+ include/document_file_watcher.h  |  85 ++++++++++++++++++++++
+ pcbnew/files.cpp                 |  12 ++-
+ pcbnew/pcb_edit_frame.cpp        |  49 +++++++++++++
+ pcbnew/pcb_edit_frame.h          |   6 ++
+ 9 files changed, 350 insertions(+), 2 deletions(-)
+ create mode 100644 common/document_file_watcher.cpp
+ create mode 100644 include/document_file_watcher.h
+
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index a84780f0..5f89ad15 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -936,6 +936,7 @@ set( COMMON_SRCS
+     draw_panel_gal.cpp
+     gal_display_options_common.cpp
+     gr_text.cpp
++    document_file_watcher.cpp
+     eda_base_frame.cpp
+     eda_draw_frame.cpp
+     eda_group.cpp
+diff --git a/common/document_file_watcher.cpp b/common/document_file_watcher.cpp
+new file mode 100644
+index 00000000..56195077
+--- /dev/null
++++ b/common/document_file_watcher.cpp
+@@ -0,0 +1,121 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++
++#include <document_file_watcher.h>
++
++#include <eda_base_frame.h>
++
++#include <wx/filename.h>
++
++
++DOCUMENT_FILE_WATCHER::DOCUMENT_FILE_WATCHER( EDA_BASE_FRAME* aFrame, FILES_FN aFiles,
++                                              CHANGED_FN aOnChanged, int aIntervalMs ) :
++        m_frame( aFrame ),
++        m_files( std::move( aFiles ) ),
++        m_onChanged( std::move( aOnChanged ) ),
++        m_timer( this )
++{
++    Bind( wxEVT_TIMER, &DOCUMENT_FILE_WATCHER::onTimer, this, m_timer.GetId() );
++    m_timer.Start( aIntervalMs );
++}
++
++
++DOCUMENT_FILE_WATCHER::~DOCUMENT_FILE_WATCHER()
++{
++    m_timer.Stop();
++}
++
++
++DOCUMENT_FILE_WATCHER::STAMPS DOCUMENT_FILE_WATCHER::stamp() const
++{
++    STAMPS stamps;
++
++    for( const wxString& file : m_files() )
++    {
++        wxFileName fn( file );
++
++        if( file.IsEmpty() || !fn.FileExists() )
++            continue;
++
++        STAMP s;
++        s.mtime = fn.GetModificationTime().GetValue();
++        s.size = fn.GetSize();
++        stamps[fn.GetFullPath()] = s;
++    }
++
++    return stamps;
++}
++
++
++void DOCUMENT_FILE_WATCHER::Snapshot()
++{
++    m_baseline = stamp();
++    m_pending.clear();
++}
++
++
++void DOCUMENT_FILE_WATCHER::onTimer( wxTimerEvent& aEvent )
++{
++    if( m_inCallback || !m_frame || !m_frame->CanAcceptApiCommands() )
++        return;
++
++    STAMPS now = stamp();
++
++    // Another document, or the same one under a new name: nothing to compare with yet
++    bool sameFiles = now.size() == m_baseline.size();
++
++    for( auto it = now.begin(); sameFiles && it != now.end(); ++it )
++        sameFiles = m_baseline.count( it->first ) > 0;
++
++    if( !sameFiles )
++    {
++        m_baseline = now;
++        m_pending.clear();
++        return;
++    }
++
++    std::vector<wxString> changed;
++
++    for( const auto& [file, s] : now )
++    {
++        if( m_baseline[file] != s )
++            changed.push_back( file );
++    }
++
++    if( changed.empty() )
++    {
++        m_pending.clear();
++        return;
++    }
++
++    // Wait for the writer to finish: report the change once two polls agree
++    if( m_pending != now )
++    {
++        m_pending = now;
++        return;
++    }
++
++    m_baseline = now;
++    m_pending.clear();
++
++    m_inCallback = true;
++    m_onChanged( changed );
++    m_inCallback = false;
++}
+diff --git a/eeschema/files-io.cpp b/eeschema/files-io.cpp
+index 7cad9e45..67a2c843 100644
+--- a/eeschema/files-io.cpp
++++ b/eeschema/files-io.cpp
+@@ -74,6 +74,7 @@
+ #include <widgets/kistatusbar.h>
+ #include <widgets/wx_infobar.h>
+ #include <wildcards_and_files_ext.h>
++#include <document_file_watcher.h>
+ #include <local_history.h>
+ #include <drawing_sheet/ds_data_model.h>
+ #include <wx/app.h>
+@@ -120,7 +121,12 @@ bool SCH_EDIT_FRAME::ReloadFromDisk()
+         screen->SetContentModified( false );
+ 
+     ReleaseFile();
+-    return OpenProjectFiles( std::vector<wxString>( 1, file ), KICTL_REVERT );
++    bool ok = OpenProjectFiles( std::vector<wxString>( 1, file ), KICTL_REVERT );
++
++    if( m_documentWatcher )
++        m_documentWatcher->Snapshot();
++
++    return ok;
+ }
+ 
+ 
+@@ -1086,6 +1092,10 @@ bool SCH_EDIT_FRAME::saveSchematicFile( SCH_SHEET* aSheet, const wxString& aSave
+ 
+         msg.Printf( _( "File '%s' saved." ),  screen->GetFileName() );
+         SetStatusText( msg, 0 );
++
++        // Our own write is not a change on disk to reload
++        if( m_documentWatcher )
++            m_documentWatcher->Snapshot();
+     }
+ 
+     return success;
+diff --git a/eeschema/sch_edit_frame.cpp b/eeschema/sch_edit_frame.cpp
+index 55b6fe1c..cd745d76 100644
+--- a/eeschema/sch_edit_frame.cpp
++++ b/eeschema/sch_edit_frame.cpp
+@@ -54,6 +54,8 @@
+ #include <kiplatform/app.h>
+ #include <kiplatform/ui.h>
+ #include <kiway.h>
++#include <wx/msgdlg.h>
++#include <document_file_watcher.h>
+ #include <symbol_edit_frame.h>
+ #include <symbol_viewer_frame.h>
+ #include <pgm_base.h>
+@@ -473,6 +475,30 @@ SCH_EDIT_FRAME::SCH_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
+ 
+     m_apiHandler = std::make_unique<API_HANDLER_SCH>( this );
+     Pgm().GetApiServer().RegisterHandler( m_apiHandler.get() );
++
++    m_documentWatcher = std::make_unique<DOCUMENT_FILE_WATCHER>(
++            this,
++            [this]() -> std::vector<wxString>
++            {
++                std::vector<wxString> files;
++
++                if( !m_schematic || !m_schematic->IsValid() || Schematic().GetFileName().IsEmpty() )
++                    return files;
++
++                SCH_SCREENS screens( Schematic().Root() );
++
++                for( SCH_SCREEN* screen = screens.GetFirst(); screen; screen = screens.GetNext() )
++                {
++                    if( !screen->GetFileName().IsEmpty() )
++                        files.push_back( Prj().AbsolutePath( screen->GetFileName() ) );
++                }
++
++                return files;
++            },
++            [this]( const std::vector<wxString>& aFiles )
++            {
++                onDocumentFilesChanged( aFiles );
++            } );
+     subscribeConnectivity();
+ 
+     if( Kiface().IsSingle() )
+@@ -611,6 +637,7 @@ void SCH_EDIT_FRAME::OnCrossProbeFlashTimer( wxTimerEvent& aEvent )
+ 
+ SCH_EDIT_FRAME::~SCH_EDIT_FRAME()
+ {
++    m_documentWatcher.reset();
+     m_crossProbeFlashing = false;
+     m_crossProbeFlashTimer.Stop();
+ 
+@@ -3647,6 +3674,39 @@ bool SCH_EDIT_FRAME::interactiveOperationInProgress() const
+ }
+ 
+ 
++void SCH_EDIT_FRAME::onDocumentFilesChanged( const std::vector<wxString>& aFiles )
++{
++    wxString names;
++
++    for( const wxString& file : aFiles )
++        names += ( names.IsEmpty() ? wxString() : wxString( wxS( ", " ) ) ) + wxFileName( file ).GetFullName();
++
++    // Neither choice is safe without asking: reloading discards the unsaved edits, keeping
++    // them means the next save overwrites what changed on disk
++    if( IsContentModified() )
++    {
++        wxMessageDialog dlg( this,
++                             wxString::Format( _( "%s changed on disk while you had unsaved edits.\n\n"
++                                                  "Reloading loses your edits. Keeping them means "
++                                                  "your next save overwrites the changes on disk." ),
++                                               names ),
++                             _( "Schematic Changed on Disk" ),
++                             wxYES_NO | wxNO_DEFAULT | wxICON_WARNING | wxCENTER );
++        dlg.SetYesNoLabels( _( "&Reload" ), _( "&Keep My Edits" ) );
++
++        if( dlg.ShowModal() != wxID_YES )
++            return;
++    }
++
++    if( ReloadFromDisk() && GetInfoBar() )
++    {
++        GetInfoBar()->ShowMessageFor( wxString::Format( _( "Reloaded %s, which changed on disk." ),
++                                                        names ),
++                                      6000 );
++    }
++}
++
++
+ bool SCH_EDIT_FRAME::CanAcceptApiCommands()
+ {
+     if( interactiveOperationInProgress() )
+diff --git a/eeschema/sch_edit_frame.h b/eeschema/sch_edit_frame.h
+index 53b5785f..7e00e8ec 100644
+--- a/eeschema/sch_edit_frame.h
++++ b/eeschema/sch_edit_frame.h
+@@ -66,6 +66,7 @@ class HIERARCHY_PANE;
+ class API_HANDLER_COMMON;
+ class API_HANDLER_LIBRARIES;
+ class API_HANDLER_SCH;
++class DOCUMENT_FILE_WATCHER;
+ class DIALOG_SCHEMATIC_SETUP;
+ class PROGRESS_REPORTER;
+ class wxSearchCtrl;
+@@ -1197,6 +1198,11 @@ private:
+     wxChoice*                   m_currentVariantCtrl;
+ 
+     std::unique_ptr<API_HANDLER_SCH> m_apiHandler;
++
++    /// Reloads the schematic when its files change on disk behind our back
++    std::unique_ptr<DOCUMENT_FILE_WATCHER> m_documentWatcher;
++
++    void onDocumentFilesChanged( const std::vector<wxString>& aFiles );
+     std::unique_ptr<API_HANDLER_COMMON> m_apiHandlerCommon;
+     std::unique_ptr<API_HANDLER_LIBRARIES> m_apiLibrariesHandler;
+ };
+diff --git a/include/document_file_watcher.h b/include/document_file_watcher.h
+new file mode 100644
+index 00000000..14e51f03
+--- /dev/null
++++ b/include/document_file_watcher.h
+@@ -0,0 +1,85 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++
++#pragma once
++
++#include <wx/event.h>
++#include <wx/longlong.h>
++#include <wx/string.h>
++#include <wx/timer.h>
++
++#include <functional>
++#include <map>
++#include <vector>
++
++class EDA_BASE_FRAME;
++
++/**
++ * Notices when the files an editor has open change on disk behind its back, for example when
++ * an AI agent or a script edits them, so the editor can reload instead of showing (and later
++ * saving over) a stale copy.
++ *
++ * Polls the files' modification times and sizes, which works on every file system, Android's
++ * shared storage included.  A change is reported once it has held for two polls, so a file
++ * still being written is not read half done, and only while the frame could take an API
++ * command (no modal dialog, no interactive tool running).  The editor calls Snapshot() after
++ * it saves, so its own writes are not reported.  A different set of files (another document
++ * opened, Save As) is taken as the new baseline without a report.
++ */
++class DOCUMENT_FILE_WATCHER : public wxEvtHandler
++{
++public:
++    using FILES_FN = std::function<std::vector<wxString>()>;
++    using CHANGED_FN = std::function<void( const std::vector<wxString>& aChangedFiles )>;
++
++    DOCUMENT_FILE_WATCHER( EDA_BASE_FRAME* aFrame, FILES_FN aFiles, CHANGED_FN aOnChanged,
++                           int aIntervalMs = 1000 );
++    ~DOCUMENT_FILE_WATCHER();
++
++    /// Take the files as they are now as the baseline; call after saving them.
++    void Snapshot();
++
++private:
++    struct STAMP
++    {
++        wxLongLong  mtime;
++        wxULongLong size;
++
++        bool operator==( const STAMP& aOther ) const
++        {
++            return mtime == aOther.mtime && size == aOther.size;
++        }
++
++        bool operator!=( const STAMP& aOther ) const { return !( *this == aOther ); }
++    };
++
++    using STAMPS = std::map<wxString, STAMP>;
++
++    STAMPS stamp() const;
++    void   onTimer( wxTimerEvent& aEvent );
++
++    EDA_BASE_FRAME* m_frame;
++    FILES_FN        m_files;
++    CHANGED_FN      m_onChanged;
++    wxTimer         m_timer;
++    STAMPS          m_baseline;
++    STAMPS          m_pending;      ///< a change seen at the last poll, reported if it holds
++    bool            m_inCallback = false;
++};
+diff --git a/pcbnew/files.cpp b/pcbnew/files.cpp
+index 86060498..5dd0d6df 100644
+--- a/pcbnew/files.cpp
++++ b/pcbnew/files.cpp
+@@ -49,6 +49,7 @@
+ #include <netlist_reader/pcb_netlist.h>
+ #include <pcbnew_id.h>
+ #include <wildcards_and_files_ext.h>
++#include <document_file_watcher.h>
+ #include <tool/tool_manager.h>
+ #include <board.h>
+ #include <footprint.h>
+@@ -483,7 +484,12 @@ bool PCB_EDIT_FRAME::ReloadFromDisk()
+     // The caller already handled confirmation, so skip the save prompt.
+     GetScreen()->SetContentModified( false );
+     ReleaseFile();
+-    return OpenProjectFiles( std::vector<wxString>( 1, fileName ), KICTL_REVERT );
++    bool ok = OpenProjectFiles( std::vector<wxString>( 1, fileName ), KICTL_REVERT );
++
++    if( m_documentWatcher )
++        m_documentWatcher->Snapshot();
++
++    return ok;
+ }
+ 
+ 
+@@ -1154,6 +1160,10 @@ bool PCB_EDIT_FRAME::SavePcbFile( const wxString& aFileName, bool addToHistory,
+ 
+     RefreshGitCommitPane();
+ 
++    // Our own write is not a change on disk to reload
++    if( m_documentWatcher )
++        m_documentWatcher->Snapshot();
++
+     return true;
+ }
+ 
+diff --git a/pcbnew/pcb_edit_frame.cpp b/pcbnew/pcb_edit_frame.cpp
+index 79981a21..074c4847 100644
+--- a/pcbnew/pcb_edit_frame.cpp
++++ b/pcbnew/pcb_edit_frame.cpp
+@@ -37,6 +37,8 @@
+ #include <connectivity/connectivity_data.h>
+ #include <kiface_base.h>
+ #include <kiway.h>
++#include <wx/msgdlg.h>
++#include <document_file_watcher.h>
+ #include <board_design_settings.h>
+ #include <settings/color_settings.h>
+ #include <pgm_base.h>
+@@ -562,6 +564,22 @@ PCB_EDIT_FRAME::PCB_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
+     m_apiHandler = std::make_unique<API_HANDLER_PCB>( this );
+     Pgm().GetApiServer().RegisterHandler( m_apiHandler.get() );
+ 
++    m_documentWatcher = std::make_unique<DOCUMENT_FILE_WATCHER>(
++            this,
++            [this]() -> std::vector<wxString>
++            {
++                std::vector<wxString> files;
++
++                if( GetBoard() && !GetBoard()->GetFileName().IsEmpty() )
++                    files.push_back( Prj().AbsolutePath( GetBoard()->GetFileName() ) );
++
++                return files;
++            },
++            [this]( const std::vector<wxString>& aFiles )
++            {
++                onDocumentFilesChanged( aFiles );
++            } );
++
+     if( Kiface().IsSingle() )
+     {
+         m_apiHandlerCommon = std::make_unique<API_HANDLER_COMMON>();
+@@ -802,6 +820,7 @@ void PCB_EDIT_FRAME::OnCrossProbeFlashTimer( wxTimerEvent& aEvent )
+ 
+ PCB_EDIT_FRAME::~PCB_EDIT_FRAME()
+ {
++    m_documentWatcher.reset();
+     UnregisterPcbMcpTools( this );
+ 
+     // Always ensure that we are unregistered even in a close without graceful doCloseWindow()
+@@ -2943,6 +2962,36 @@ bool PCB_EDIT_FRAME::interactiveOperationInProgress() const
+ }
+ 
+ 
++void PCB_EDIT_FRAME::onDocumentFilesChanged( const std::vector<wxString>& aFiles )
++{
++    wxString name = aFiles.empty() ? wxString() : wxFileName( aFiles.front() ).GetFullName();
++
++    // Neither choice is safe without asking: reloading discards the unsaved edits, keeping
++    // them means the next save overwrites what changed on disk
++    if( IsContentModified() )
++    {
++        wxMessageDialog dlg( this,
++                             wxString::Format( _( "%s changed on disk while you had unsaved edits.\n\n"
++                                                  "Reloading loses your edits. Keeping them means "
++                                                  "your next save overwrites the changes on disk." ),
++                                               name ),
++                             _( "Board Changed on Disk" ),
++                             wxYES_NO | wxNO_DEFAULT | wxICON_WARNING | wxCENTER );
++        dlg.SetYesNoLabels( _( "&Reload" ), _( "&Keep My Edits" ) );
++
++        if( dlg.ShowModal() != wxID_YES )
++            return;
++    }
++
++    if( ReloadFromDisk() && GetInfoBar() )
++    {
++        GetInfoBar()->ShowMessageFor( wxString::Format( _( "Reloaded %s, which changed on disk." ),
++                                                        name ),
++                                      6000 );
++    }
++}
++
++
+ bool PCB_EDIT_FRAME::CanAcceptApiCommands()
+ {
+     if( interactiveOperationInProgress() )
+diff --git a/pcbnew/pcb_edit_frame.h b/pcbnew/pcb_edit_frame.h
+index 3b12b264..0d59e57e 100644
+--- a/pcbnew/pcb_edit_frame.h
++++ b/pcbnew/pcb_edit_frame.h
+@@ -68,6 +68,7 @@ class WX_INFOBAR;
+ 
+ class KICAD_API_SERVER;
+ class API_HANDLER_PCB;
++class DOCUMENT_FILE_WATCHER;
+ class API_HANDLER_COMMON;
+ class API_HANDLER_LIBRARIES;
+ 
+@@ -900,6 +901,11 @@ private:
+     KIID_PATH         m_lastSchematicSheetPath;
+ 
+     std::unique_ptr<API_HANDLER_PCB>    m_apiHandler;
++
++    /// Reloads the board when its file changes on disk behind our back
++    std::unique_ptr<DOCUMENT_FILE_WATCHER> m_documentWatcher;
++
++    void onDocumentFilesChanged( const std::vector<wxString>& aFiles );
+     std::unique_ptr<API_HANDLER_COMMON> m_apiHandlerCommon;
+     std::unique_ptr<API_HANDLER_LIBRARIES> m_apiLibrariesHandler;
+ };
+-- 
+2.54.0 (Apple Git-157)
+
