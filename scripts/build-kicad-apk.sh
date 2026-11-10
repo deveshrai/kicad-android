@@ -65,6 +65,13 @@ if [ "${KICAD_BUNDLE_LIBS:-1}" != 0 ]; then
          "$OUT/assets/kicad-libs/template" -type f -exec sh -c 'for f; do mv "$f" "$f.kad"; done' _ {} +
     cp "$LIBS_SRC/VERSION" "$OUT/assets/kicad-libs/VERSION"
 fi
+# KiCadRoutingTools and the Python it runs on (scripts/build-python-android.sh): the Python files
+# as an asset tree extracted on first use, the native side as jniLibs (added after androiddeployqt,
+# so Qt never loads them into KiCad's process; only the ":router" process does)
+PYRT="$KA_ROOT/build/python-android/apk"
+[ -f "$PYRT/jni/libkrtrunner.so" ] || "$KA_ROOT/scripts/build-python-android.sh"
+cp -R "$PYRT/assets/python-router" "$OUT/assets/python-router"
+
 # Qt binary patch: no full backing-store image copy per widget flush (scripts/patch-qtgui.sh)
 "$KA_ROOT/scripts/patch-qtgui.sh"
 QPLUG="$QT_ANDROID_PATH/plugins"
@@ -167,6 +174,25 @@ rm -rf "$QT_JAVA" && cp -R "$QT_ANDROID_PATH/src/android/java" "$QT_JAVA"
 cp "$KA_ROOT/android/package/res/xml/qtprovider_paths.xml" "$QT_JAVA/res/xml/qtprovider_paths.xml"
 perl -pi -e "s|^qtAndroidDir=.*|qtAndroidDir=$QT_JAVA|" "$OUT/gradle.properties"
 grep -q "^qtAndroidDir=$QT_JAVA\$" "$OUT/gradle.properties"
+
+# The router process: RouterService (android:process=":router") runs KiCadRoutingTools' steps,
+# a foreground service so a long route survives the app going to the background
+cp "$PYRT"/jni/*.so "$OUT/libs/$ABI/"
+ROUTER_CLASSES="$KA_ROOT/build/router-classes"
+rm -rf "$ROUTER_CLASSES" && mkdir -p "$ROUTER_CLASSES"
+"$JAVA_HOME/bin/javac" --release 11 -nowarn -cp "$ANDROID_SDK_ROOT/platforms/android-35/android.jar" \
+    -d "$ROUTER_CLASSES" "$KA_ROOT"/android/router/java/io/github/deveshrai/kicadandroid/*.java
+( cd "$ROUTER_CLASSES" && rm -f "$OUT/libs/router.jar" && zip -q -r "$OUT/libs/router.jar" io )
+grep -q 'FOREGROUND_SERVICE_SPECIAL_USE' "$OUT/AndroidManifest.xml" || \
+    perl -0pi -e 's|(<application\b)|<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    $1|' "$OUT/AndroidManifest.xml"
+grep -q 'RouterService' "$OUT/AndroidManifest.xml" || \
+    perl -0pi -e 's|(</application>)|    <service android:name="io.github.deveshrai.kicadandroid.RouterService" android:process=":router" android:exported="false" android:foregroundServiceType="specialUse">\n            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Runs the PCB autorouter on a board the user is editing"/>\n        </service>\n    $1|' "$OUT/AndroidManifest.xml"
+grep -q 'android:process=":router"' "$OUT/AndroidManifest.xml"
+# aapt's default ignore pattern drops asset directories starting with "_" (<dir>_*), which loses
+# Python packages such as numpy/_core and the stdlib's __phello__; keep only the VCS/OS exclusions
+grep -q 'ignoreAssetsPattern' "$OUT/build.gradle" || \
+    perl -0pi -e "s|(aaptOptions \{)|\$1\n        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'|" "$OUT/build.gradle"
+grep -q 'ignoreAssetsPattern' "$OUT/build.gradle"
 
 # Integrated autorouter (Freerouting's core plus its driver; scripts/build-autorouter.sh)
 [ -f "$KA_ROOT/build/autorouter/autorouter.jar" ] || "$KA_ROOT/scripts/build-autorouter.sh"

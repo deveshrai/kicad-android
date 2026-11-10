@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99aj; next: ak).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ak; next: al).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -29,7 +29,17 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 1. **Waiting on the user:**
    - How routing feels (P1).
    - Hands-on checks of the touch gestures (P4) and of the blue text-handle fix (P6).
-2. **P7: integrated autorouter. Done in 10.99ae; tune it if the user asks.**
+2. **P7: autorouting.  10.99ak: Route > Autoroute is a tool for KiCadRoutingTools (bundled
+   Python) and Freerouting** (see HANDOVER, "Autoroute tool").
+   - Follow-ups:
+     - a narrower run view;
+     - via-cost tuning for 2-layer boards (KRT makes B.Cu cost 3x);
+     - differential pairs and length matching (KRT's route_diff.py and length matching are
+       bundled but not in the UI);
+     - presets;
+     - check that Freerouting optimize-only improves hand-routed nets;
+     - fix the 10.99aj reload and DRC staleness bugs listed in that section.
+   - Earlier, 10.99ae: Freerouting inside the app.
    - Route > Autoroute Board... runs Freerouting 2.5.0's core inside the app (see HANDOVER,
      "Integrated autorouter").  The blinker routes in under a second, with DRC clean.
    - Possible follow-ups: route only the selected nets, a passes or time limit, a progress

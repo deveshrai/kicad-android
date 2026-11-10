@@ -47,7 +47,48 @@ public final class Autorouter {
   private static volatile long startedAt;
   private static volatile Worker worker;
 
+  // Options for the next route() call, set by KiCad with setOptions() just before it.
+  private static volatile String[] onlyNets;
+  private static volatile String[] inactiveLayers;
+  private static volatile boolean routeEnabled = true;
+  private static volatile int fanoutMode = -1;
+  private static volatile int optimizerPasses = -1;
+  private static volatile int viaCost = -1;
+
   private Autorouter() {}
+
+  /**
+   * Options for the next route() call.
+   *
+   * @param nets route (and optimize) only these nets, by name; empty for every net
+   * @param offLayers copper layers (by name) the router must not route on
+   * @param route false to skip routing and only optimize what is on the board
+   * @param fanout 1 to fan out SMD pads before routing, 0 not to, -1 for Freerouting's default
+   * @param passes optimizer passes, 0 or less for the default
+   * @param vias the cost of a via, 0 or less for the default (higher: fewer vias)
+   */
+  public static void setOptions(
+      String[] nets, String[] offLayers, boolean route, int fanout, int passes, int vias) {
+    onlyNets = nets;
+    inactiveLayers = offLayers;
+    routeEnabled = route;
+    fanoutMode = fanout;
+    optimizerPasses = passes;
+    viaCost = vias;
+  }
+
+  /** Pauses the running job; its threads wait in their next check. */
+  public static void pause() {
+    StoppableThread.setPaused(true);
+  }
+
+  public static void resume() {
+    StoppableThread.setPaused(false);
+  }
+
+  public static boolean isPaused() {
+    return StoppableThread.isPaused();
+  }
 
   public static String getStage() {
     return stage;
@@ -103,6 +144,7 @@ public final class Autorouter {
     if (w != null) {
       w.requestStop();
     }
+    StoppableThread.setPaused(false);
   }
 
   /**
@@ -132,6 +174,7 @@ public final class Autorouter {
     violations = -1;
     traceLengthMm = -1;
     startedAt = System.currentTimeMillis();
+    StoppableThread.setPaused(false);
 
     try {
       RoutingJob job = new RoutingJob();
@@ -167,6 +210,7 @@ public final class Autorouter {
       job.routerSettings = merger.merge();
       job.routerSettings.applyBoardSpecificOptimizations(job.board);
       job.routerSettings.applyNetClassExclusions(job.board);
+      applyOptions(job);
       job.state = RoutingJobState.RUNNING;
 
       updateStatistics(job.board.getStatistics());
@@ -196,6 +240,38 @@ public final class Autorouter {
     } catch (Throwable t) {
       worker = null;
       return fail(t.toString());
+    } finally {
+      StoppableThread.setPaused(false);
+      app.freerouting.board.model.items.Item.onlyNets = null;
+      setOptions(null, null, true, -1, -1, -1);
+    }
+  }
+
+  private static void applyOptions(RoutingJob job) {
+    String[] nets = onlyNets;
+    app.freerouting.board.model.items.Item.onlyNets =
+        nets != null && nets.length > 0 ? new java.util.HashSet<>(java.util.Arrays.asList(nets)) : null;
+
+    String[] off = inactiveLayers;
+    if (off != null) {
+      java.util.Set<String> names = new java.util.HashSet<>(java.util.Arrays.asList(off));
+      var layers = job.board.layerStructure.layers;
+      for (int i = 0; i < layers.length; i++) {
+        if (names.contains(layers[i].name)) {
+          job.routerSettings.setLayerActive(i, false);
+        }
+      }
+    }
+
+    job.routerSettings.autorouter.enabled = routeEnabled;
+    if (fanoutMode >= 0) {
+      job.routerSettings.fanout.enabled = fanoutMode == 1;
+    }
+    if (optimizerPasses > 0) {
+      job.routerSettings.optimizer.maxPasses = optimizerPasses;
+    }
+    if (viaCost > 0) {
+      job.routerSettings.setViaCosts(viaCost);
     }
   }
 

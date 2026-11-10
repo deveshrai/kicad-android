@@ -15,6 +15,13 @@ repository, these make up the complete corresponding source of the published bin
 | mimalloc (operator new/delete shim, `android/kimalloc`) | https://github.com/microsoft/mimalloc | v3.5.3 release tarball (SHA-512 pinned in `scripts/build-kimalloc.sh`) | none; the shim is `android/kimalloc/kimalloc.cpp` | MIT |
 | Freerouting (integrated autorouter) | https://github.com/freerouting/freerouting | `b647a2f824cfbc54bc4dcaee71b03b7cd945eb76` (tag v2.5.0) | `patches/freerouting/*.patch`; only the routing core is built (no GUI, web API or CLI), with the driver in `android/autorouter/java` | GPL-3.0 |
 | Gson (inside the autorouter jar) | https://github.com/google/gson | 2.14.0 (taken from the Freerouting 2.5.0 release jar) | none | Apache-2.0 |
+| KiCadRoutingTools (Autoroute tool's default router) | https://github.com/drandyhaas/KiCadRoutingTools | `f03e3e18b6f53a31d0ca371434868a6907b4a69e` (tag v0.23.9) | none; its Rust core is built for Android with mimalloc's local-dynamic TLS (`scripts/build-python-android.sh`) | MIT |
+| CPython for Android | https://www.python.org/ftp/python/3.14.10/ | 3.14.10 (python.org's aarch64-linux-android release) | none; run by `android/router` | PSF-2.0 |
+| numpy | https://pypi.org/project/numpy/ | 2.5.4 (sdist) | none (built without BLAS) | BSD-3-Clause |
+| scipy | https://pypi.org/project/scipy/ | 1.18.1 (sdist) | `patches/python/scipy-0001-*.patch`; built without Fortran, against OpenBLAS | BSD-3-Clause |
+| shapely | https://pypi.org/project/shapely/ | 2.2.0 (sdist) | none | BSD-3-Clause |
+| GEOS (for shapely) | https://libgeos.org | 3.15.0 | none | LGPL-2.1-or-later |
+| OpenBLAS (for scipy) | https://github.com/OpenMathLib/OpenBLAS | 0.3.34 (C LAPACK, no Fortran) | none | BSD-3-Clause |
 | KiCad symbol/footprint/template libraries | https://gitlab.com/kicad/libraries | tag `10.0.8` (`scripts/fetch-kicad-libs.sh`) | none | CC-BY-SA-4.0 with the KiCad library exception |
 
 Build order: `scripts/build-deps.sh`, `scripts/build-wxqt-android.sh`, `scripts/build-qtforandroid.sh`,

@@ -29,9 +29,10 @@ upstream KiCad sources.
   `kicad-cli`.
 - **GPU canvas.**  It runs on KiCad's Vulkan backend, with pointer motion coalesced so the
   interactive router keeps up.
-- **Built-in autorouter.**  **Route > Autoroute Board** runs
-  [Freerouting](https://github.com/freerouting/freerouting)'s routing engine inside the app.
-  You watch the routes appear on the board, then keep them or undo them in one step.
+- **Two built-in autorouters.**  **Route > Autoroute** runs
+  [KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools) (Andy Haas's router, with
+  its own Python, numpy and scipy) or [Freerouting](https://github.com/freerouting/freerouting) on
+  the device.  [More below](#autoroute).
 - **Built-in MCP server.**  Turn it on in **Preferences > MCP Server** and Claude Code (on the
   tablet in Termux, or on a computer on the same Wi-Fi) can read and edit your design, route it
   and run DRC while you watch.  It has designed [a whole board](#a-whole-board-over-mcp-esp32-s3-in-uno-format)
@@ -54,12 +55,12 @@ ERC until it shows 0 errors and 0 warnings.
 <img src="docs/media/schematic.gif" alt="Adding a resistor, LED, wire, ground and net label in the schematic editor, then fixing the one ERC error" width="860">
 
 **2. PCB.**  Pull the footprints in from the schematic and drag them onto the board.  Route them
-(the recording imports a Specctra session from Freerouting; since 10.99ae, **Route > Autoroute
-Board** does the same on the device in under a second) and fill the ground zones.
+(the recording imports a Specctra session from Freerouting; since 10.99ae, **Route > Autoroute**
+does the same on the device in under a second) and fill the ground zones.
 
 <img src="docs/media/pcb-layout.gif" alt="Dragging footprints onto the board outline, importing routed tracks and filling the GND zones" width="860">
 
-**Or let the built-in autorouter do it.**  Route > Autoroute Board routes the blinker in under a
+**Or let the built-in autorouter do it.**  Route > Autoroute routes the blinker in under a
 second on the tablet, then the zones are refilled.
 
 <img src="docs/media/autoroute.gif" alt="Route > Autoroute Board routing the blinker on the tablet: the routes appear, Keep, and the ground zones fill" width="860">
@@ -70,6 +71,43 @@ second on the tablet, then the zones are refilled.
 
 Full-resolution videos: [schematic](docs/media/video/schematic.mp4),
 [PCB](docs/media/video/pcb-layout.mp4), [3D](docs/media/video/3d-blinker.mp4).
+
+## Autoroute
+
+**Route > Autoroute** is one tool for every automatic routing job, with a choice of router:
+
+- **KiCadRoutingTools** (the default): a grid router with rip-up and reroute, fan-out of
+  fine-pitch parts, bus routing and plane connections.  It runs on the tablet in a process of its
+  own, with python.org's Python 3.14 for Android and numpy, scipy and shapely built for it.
+- **Freerouting:** a gridless push-and-shove router with an optimizer.
+
+The tabs:
+
+- **Route:** every unrouted net, or the nets you pick (from a filterable list, or the board
+  selection).  Route the picked nets side by side as a bus, or only between two or more parts.
+  Choose the layers, and whether to pour the planes and fan out the parts first.
+- **Fan Out:** pull short escape tracks out of every pin of dense parts.  "Choose Fine-Pitch
+  Parts" ticks every part at 0.5 mm pitch or below.
+- **Planes:** copper zones over the whole board, such as GND on In1.Cu and 3V3 on In2.Cu.
+- **Optimize:** improve nets that are already routed, your hand-routed ones included.
+- **Settings:** how far below the net class sizes the router may go (exactly, down to the
+  board's minimums, or down to the fab's), the routing grid, via cost, optimizer passes.
+
+While a run is active the board is locked, so nothing can be edited underneath the router.  The
+run shows its steps, the net being routed, progress and the router's output, and can be paused,
+resumed or stopped.  At the end it lists the nets still unrouted (tap one to see it) and the whole
+run is one undo step: keep it, discard it, or start another run on top.
+
+On the RP2350A board below (2 layers, a 0.4 mm-pitch QFN-60), with the same rules and KiCad's DRC
+as the judge:
+
+| | Connections left | DRC errors added | Vias |
+|---|---|---|---|
+| Freerouting | 86 of 162 | 11 | 63 |
+| KiCadRoutingTools, fan-out first | 31 of 162 | 0 | 195 |
+| KiCadRoutingTools, 4 layers with GND and 3V3 planes | 20 of 168 | 0 | 199 |
+
+The first run after installing unpacks the router (about 150 MB) and takes a minute.
 
 ## Drive it from Claude Code
 
@@ -89,7 +127,9 @@ connected and what it last did.
 What a client can do:
 - **See the design:** `kicad_status`, `kicad_open_project`, `kicad_open_editor`, `pcb_board_summary` (every footprint, its position, and the
   unrouted count), and `kicad_screenshot`, a picture of what the app shows, canvas and dialogs included.
-- **Change it:** `pcb_move_footprint`, `pcb_autoroute`, `pcb_run_drc`.  The changes appear on the
+- **Change it:** `pcb_move_footprint`, `pcb_run_drc`, and `pcb_autoroute` with
+  `pcb_autoroute_status` and `pcb_autoroute_control` (pause, resume, stop, keep, discard): the
+  Autoroute tool's options as arguments, the run shown on the tablet.  The changes appear on the
   board as they happen, and each one is an undo step.
 - **Do anything else KiCad's IPC API can:** `kicad_api` runs any API command (the API
   kicad-python uses), with `kicad_api_commands` and `kicad_api_describe` to find your way around.
@@ -259,6 +299,7 @@ upstream revisions.
 | Qt for Android | [`patches/qtbase`](patches/qtbase): faster window composition, input-method fixes |
 | MCP server | part of [`patches/kicad`](patches/kicad) (patch 0031): an MCP server on KiCad's IPC API, with a one-page settings panel |
 | Freerouting | [`patches/freerouting`](patches/freerouting): its routing core built for Android's Java runtime, driven by [`android/autorouter`](android/autorouter) |
+| KiCadRoutingTools | unchanged, run by [`android/router`](android/router) in a process of its own; [`scripts/build-python-android.sh`](scripts/build-python-android.sh) builds it, Python 3.14, numpy, scipy (no Fortran; OpenBLAS with C LAPACK) and shapely (GEOS) for Android, with one scipy patch in [`patches/python`](patches/python) |
 
 **[Read the full write-up of the changes →](docs/CHANGES.md)**
 
@@ -307,7 +348,9 @@ Most of this port was written with an AI coding assistant (Claude); see the comm
   - wxWidgets: wxWindows Library Licence
   - Qt: LGPL-3.0
 - The APK combines KiCad with Qt (LGPL-3.0), wxWidgets, gl4es (MIT) and the libraries in
-  [`SOURCES.md`](SOURCES.md), each under its own licence.  The bundled KiCad libraries are
+  [`SOURCES.md`](SOURCES.md), each under its own licence.  The router process adds
+  KiCadRoutingTools (MIT), CPython (PSF), numpy, scipy and shapely (BSD), OpenBLAS (BSD) and GEOS
+  (LGPL-2.1, as a shared library).  The bundled KiCad libraries are
   CC-BY-SA-4.0 with the KiCad library exception.
 - The corresponding source for every published APK is this repository at the release tag, together
   with the upstream revisions in `SOURCES.md`.

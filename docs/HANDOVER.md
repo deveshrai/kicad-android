@@ -196,10 +196,106 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - gl4es keeps one global GL state and can't see EGL context switches made outside it (NOX11; its NewGLState/ActivateGLState aren't exported, and EGL_WRAPPER doesn't track state either).
   - GL_CONTEXT_MANAGER now gives every context after the first its own gl4es instance: `android_dlopen_ext(path from dladdr, ANDROID_DLEXT_FORCE_LOAD)` on the same libGL.so in the APK.
   - It points glad at that instance on LockCtx and in the new `LoadGL()`. The three gladLoaderLoadGL() call sites use LoadGL().
-  - Copies of the .so in app storage aren't an option: Android 10+ blocks dlopen from app data.
+  - The instances come from the APK rather than from copies in app storage. (The 10.99aj note
+    said Android blocks dlopen from app data; that's wrong: the router process loads numpy and
+    scipy from there. Only exec of app files is blocked.)
   - About 2.5 MB per opening; instances are never unloaded.
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
+
+## Autoroute tool (10.99ak, 2026-11-10)
+The user found Freerouting weak even on easy boards. Route > Autoroute is now a tool for both
+routers. KiCad patch 0038, Freerouting patch 0003, `android/router`, `scripts/build-python-android.sh`.
+- **KiCadRoutingTools (KRT, github.com/drandyhaas/KiCadRoutingTools, MIT, tag v0.23.9):**
+  - It's 200k lines of Python (numpy, scipy, shapely) around a 6.6k-line Rust A* core, so it runs
+    unchanged on bundled Python rather than being ported.
+  - Survey and benchmarks: memory `autorouter-krt-decision`.
+- **Build (`scripts/build-python-android.sh`, about 10 min from scratch, every step skips itself
+  when done):**
+  - python.org's Python 3.14.10 for Android, with numpy 2.5.4, scipy 1.18.1 and shapely 2.2.0
+    cross-built by cibuildwheel (`--platform android`, NDK 27.3, API 29).
+  - numpy needs `longdouble_format = 'IEEE_QUAD_LE'` in a meson cross file.
+  - scipy: `-D_without-fortran=true` against OpenBLAS 0.3.34 built with C_LAPACK (CMake; the
+    Makefile build was refused by the sandbox). It needs API 29 (`clog`/`cpow` are API 26+), and
+    patch `patches/python/scipy-0001` drops ducc's thread pinning (no `pthread_*affinity_np` in
+    bionic).
+  - shapely needs GEOS 3.15.0, built with the NDK.
+  - The KRT Rust core needs `-DMI_LOCAL_DYNAMIC_TLS=1 -ftls-model=local-dynamic` for mimalloc, or
+    bionic refuses to dlopen it ("TLS symbol ... IE access model").
+  - Output: `build/python-android/apk/jni` (libkrtrunner.so plus CPython's renamed libs) and
+    `apk/assets/python-router` (145 MB, about 2,350 files). VERSION is a content hash, so an
+    unchanged rebuild doesn't re-unpack.
+  - The stage also runs from adb: see the script's header.
+- **APK (`scripts/build-kicad-apk.sh`):**
+  - The jniLibs are copied in after androiddeployqt, so Qt never loads them into KiCad's process.
+  - `router.jar` carries RouterService and RouterControl.
+  - The manifest gets the service (`android:process=":router"`, foreground, specialUse) and the
+    FOREGROUND_SERVICE and POST_NOTIFICATIONS permissions.
+  - **aapt drops asset directories whose names start with `_`** by default (numpy/_core,
+    `__phello__`), so the script sets `ignoreAssetsPattern` in build.gradle. The APK is about 430 MB.
+- **Runtime:**
+  - KIPLATFORM::ROUTER_PROCESS (libs/kiplatform/os/android/router_process.cpp) unpacks the assets
+    to `files/python-router` on the first run (about 1 min on the tablet).
+  - It starts one step at a time via RouterService. The step's work directory gets `pid` and
+    `exit`, and output goes to its log.
+  - Pause/resume are SIGSTOP/SIGCONT (Process.sendSignal); stop is a kill. Liveness is read from
+    `/proc/<pid>/cmdline`, read to EOF because /proc files report a length of 0.
+  - Each step is a fresh process; numpy can't be re-initialised.
+  - libkrtrunner sets `PyConfig.executable`: python.org's Android build otherwise sends
+    stdout/stderr to logcat (`_android_support`, "embedded in an app" means an empty
+    sys.executable).
+- **The run engine (pcbnew/autoroute/autoroute_job.cpp, AUTOROUTE_JOB and AUTOROUTE_SETTINGS):**
+  - **Steps:**
+    - Planes: KiCad zones over the board outline, made in C++ for either router.
+    - KRT fan-out per part: qfn_fanout, or bga_fanout for BGA/WLCSP names.
+    - KRT route.py, or Freerouting.
+  - **KRT steps chain board files:**
+    - The first exports with SavePcbCopy, which writes in.kicad_pro and in.kicad_dru.
+    - Each step's result is imported at once: tracks and vias are diffed by KIID and new zones
+      added, all one undo step via APPEND_UNDO.
+    - Always passed: `--no-fix-drc-settings --keep-input-copper`; `--escalation off|board|fab`
+      from the Rules setting (default board).
+  - **Chosen nets:** routed with `KICAD_RIP_PREEXISTING=0 KICAD_FINALIZE_RIP=0
+    KICAD_RECONCILE_RIP_ESCALATION=0`. Without them KRT rips any blocking net, fan-out stubs
+    included, and routes it in full. All three were needed: one route of 6 nets otherwise rewrote
+    +3V3 from 18 to 140 segments. Settings has a "let the router move other nets" opt-in.
+  - **"Only between these parts":** PART_FILTER takes the routed nets' pads on other parts off
+    their nets while the board is exported (SavePcbCopy or the DSN export), then restores them.
+  - **Freerouting:**
+    - Options go through Autorouter.setOptions: only these nets, inactive layers,
+      route-or-optimize-only, fan-out, passes, via cost.
+    - The Freerouting patch adds `Item.onlyNets`, checked where hasIgnoredNets() skips net classes,
+      and `StoppableThread.setPaused()`, which blocks threads in their stop checks.
+- **UI (pcbnew/dialogs/dialog_autoroute.cpp):**
+  - Tabs Route, Fan Out, Planes, Optimize and Settings; the run button's label follows the tab.
+  - The run view and results replace the tabs in the same modal dialog, so the board can't be
+    edited while a run is active (the frame is disabled, so the IPC API also answers busy). It sits
+    at the editor's right edge.
+  - The results list unrouted nets; a tap highlights the net and zooms to it.
+  - Keep refills zones; Discard is an undo; New Run keeps the result and goes back to the tabs.
+  - **`OptOut(this)`:** DIALOG_SHIM's control-state persistence restored the last router and tab
+    over MCP's settings. The dialog keeps its own last settings (static).
+- **MCP:**
+  - `pcb_autoroute` (settings as JSON, see AUTOROUTE_SETTINGS::FromJson; `wait`) opens the tool
+    via CallAfter and returns once the run starts.
+  - `pcb_autoroute_status` reports the state, steps, progress, log tail and the nets still open.
+  - `pcb_autoroute_control` does pause, resume, stop, keep and discard.
+  - The old `optimize` argument maps to optimize_after; `max_passes` is ignored.
+- **Tested on the tablet (RP2350A copies under Download/, "RP2350A Dev Board ... test"):**
+  - Fan out U1, then route everything: 11 min. 31 connections open, matching the Mac; the app's
+    DRC finds nothing beyond the unrouted ones.
+  - Six GPIO nets between U1 and U5 as a bus: 29 s. Only those nets got copper; J3 untouched.
+  - Pause/resume/stop work for both routers. Freerouting stop keeps what was routed (93 of 166),
+    and discard undoes it.
+  - Freerouting optimize-only of two nets: it left the board intact, but changed nothing either;
+    not proven to improve anything yet.
+- **Known issues:**
+  - The run view is about 860 px wide on the tablet and covers part of the board.
+  - Bugs found in 10.99aj while testing, not fixed yet:
+    - The "Board Changed on Disk" Reload button did not reload (RevertDocument did).
+    - `pcb_run_drc` graded a stale board right after a revert.
+    - DRC markers count as unsaved edits.
+    - kicad_screenshot draws native dialogs at the wrong place in DeX/windowed mode.
 
 ## Crash fix: tree item data on wxQt (10.99ai)
 The user hit a crash on 2026-11-07 (10.99ah) in the PCB editor's Tools > DRC Rule Editor.

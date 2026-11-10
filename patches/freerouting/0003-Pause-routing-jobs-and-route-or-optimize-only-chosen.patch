@@ -1,0 +1,121 @@
+From 9d406c887f71021fc53e8d86b6c5b7513adfe28a Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 10 Nov 2026 19:25:27 +0530
+Subject: [PATCH] Pause routing jobs, and route or optimize only chosen nets
+
+StoppableThread.setPaused() makes every routing job's threads wait in
+their next stop check until resumed (a stop request ends the pause).
+Item.onlyNets, when set, makes the auto-router and the optimizer treat
+every other net as ignored, so an embedding application can route or
+optimize a selection.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../freerouting/board/model/items/Item.java   | 10 ++++
+ .../app/freerouting/core/StoppableThread.java | 52 +++++++++++++++++--
+ 2 files changed, 58 insertions(+), 4 deletions(-)
+
+diff --git a/src/main/java/app/freerouting/board/model/items/Item.java b/src/main/java/app/freerouting/board/model/items/Item.java
+index 5cc9cbb..295b6f8 100644
+--- a/src/main/java/app/freerouting/board/model/items/Item.java
++++ b/src/main/java/app/freerouting/board/model/items/Item.java
+@@ -1313,17 +1313,27 @@ public abstract class Item
+     return false;
+   }
+ 
++  /**
++   * When not null, the auto-router and the optimizer work only on these nets (by name) and treat
++   * every other net as ignored.  Set by the embedding application before a job starts.
++   */
++  public static volatile java.util.Set<String> onlyNets = null;
++
+   /**
+    * Checks if the item has a net that must be ignored by the auto-router.
+    *
+    * @return true, if this item has at least one net that must be ignored
+    */
+   public boolean hasIgnoredNets() {
++    java.util.Set<String> only = onlyNets;
+     for (int netNumber : this.netNumbers) {
+       Net net = this.board.rules.nets.get(netNumber);
+       if (net.getNetClass().isIgnoredByAutorouter) {
+         return true;
+       }
++      if (only != null && !only.contains(net.name)) {
++        return true;
++      }
+     }
+ 
+     return false;
+diff --git a/src/main/java/app/freerouting/core/StoppableThread.java b/src/main/java/app/freerouting/core/StoppableThread.java
+index a59ed0b..524c2f0 100644
+--- a/src/main/java/app/freerouting/core/StoppableThread.java
++++ b/src/main/java/app/freerouting/core/StoppableThread.java
+@@ -25,8 +25,49 @@ public abstract class StoppableThread extends Thread implements Stoppable {
+   }
+ 
+   @Override
+-  public synchronized boolean isStopRequested() {
+-    return this.stopRequestState == StopRequestState.ALL;
++  public boolean isStopRequested() {
++    waitWhilePaused();
++    synchronized (this) {
++      return this.stopRequestState == StopRequestState.ALL;
++    }
++  }
++
++  private static final Object PAUSE_LOCK = new Object();
++  private static boolean paused = false;
++
++  /**
++   * Pauses every routing job: their threads block in their next stop check until resumed.  A stop
++   * request ends a pause, so a paused job can always be stopped.
++   */
++  public static void setPaused(boolean aPaused) {
++    synchronized (PAUSE_LOCK) {
++      paused = aPaused;
++      PAUSE_LOCK.notifyAll();
++    }
++  }
++
++  public static boolean isPaused() {
++    synchronized (PAUSE_LOCK) {
++      return paused;
++    }
++  }
++
++  private void waitWhilePaused() {
++    synchronized (PAUSE_LOCK) {
++      while (paused) {
++        synchronized (this) {
++          if (this.stopRequestState == StopRequestState.ALL) {
++            return;
++          }
++        }
++        try {
++          PAUSE_LOCK.wait(200);
++        } catch (InterruptedException e) {
++          Thread.currentThread().interrupt();
++          return;
++        }
++      }
++    }
+   }
+ 
+   /** Requests the Autorouter to stop while other tasks continue. */
+@@ -37,7 +78,10 @@ public abstract class StoppableThread extends Thread implements Stoppable {
+   }
+ 
+   /** Returns whether the Autorouter should stop. */
+-  public synchronized boolean isStopAutoRouterRequested() {
+-    return this.stopRequestState != StopRequestState.NONE;
++  public boolean isStopAutoRouterRequested() {
++    waitWhilePaused();
++    synchronized (this) {
++      return this.stopRequestState != StopRequestState.NONE;
++    }
+   }
+ }
+-- 
+2.54.0 (Apple Git-157)
+
