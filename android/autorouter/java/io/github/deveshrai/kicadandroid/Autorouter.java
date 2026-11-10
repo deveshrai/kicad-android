@@ -264,6 +264,12 @@ public final class Autorouter {
     }
 
     job.routerSettings.autorouter.enabled = routeEnabled;
+    if (!routeEnabled) {
+      // Optimizing on its own means improving what is routed, even when the board is not finished:
+      // Freerouting's pre-flight guards would skip the optimizer on any unrouted connection.
+      job.routerSettings.optimizer.enabled = true;
+      job.routerSettings.optimizer.enablePreflightGuards = false;
+    }
     if (fanoutMode >= 0) {
       job.routerSettings.fanout.enabled = fanoutMode == 1;
     }

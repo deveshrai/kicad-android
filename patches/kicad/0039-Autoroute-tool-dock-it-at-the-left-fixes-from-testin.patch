@@ -1,0 +1,4201 @@
+From 3d6eafd484b3ac5eb39c1d4e3b08c72c3407b08d Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Tue, 10 Nov 2026 22:18:59 +0530
+Subject: [PATCH] Autoroute tool: dock it at the left; fixes from testing
+
+The Autoroute tool is now a panel that lives in a dialog or docked in the
+board editor's left panel column (in place of the Properties panel while
+it is shown, the full height of the window).  Docked, a run locks the
+editor itself: canvas clicks and keys, menus, toolbars, other panels, the
+IPC API and the MCP board tools, until its result is kept or discarded,
+and the editor cannot be closed meanwhile.
+
+Fixes found while testing: the tool's destructor touched a frame being
+destroyed (crash when a project was switched with the tool open);
+kicad_open_project now refuses while a modal dialog is open; screenshots
+draw message boxes centred, where Android shows them; progress parsing
+follows KiCadRoutingTools' (N ripped) counters; the router output keeps
+showing new lines after the first 400; Freerouting's optimize-only runs
+no longer skip the optimizer on unfinished boards.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ kicad/kicad.cpp                       |   13 +
+ libs/kiplatform/port/wxqt/ui.cpp      |    7 +
+ pcbnew/CMakeLists.txt                 |    3 +-
+ pcbnew/api/mcp_tools_pcb.cpp          |   76 +-
+ pcbnew/autoroute/autoroute_job.cpp    |   16 +-
+ pcbnew/autoroute/autoroute_job.h      |    4 +
+ pcbnew/autoroute/autoroute_panel.cpp  | 1880 +++++++++++++++++++++++++
+ pcbnew/autoroute/autoroute_panel.h    |  233 +++
+ pcbnew/dialogs/dialog_autoroute.cpp   | 1413 +------------------
+ pcbnew/dialogs/dialog_autoroute.h     |  158 +--
+ pcbnew/pcb_edit_frame.cpp             |   20 +
+ pcbnew/pcb_edit_frame.h               |    2 +
+ pcbnew/tools/board_editor_control.cpp |    8 +-
+ 13 files changed, 2259 insertions(+), 1574 deletions(-)
+ create mode 100644 pcbnew/autoroute/autoroute_panel.cpp
+ create mode 100644 pcbnew/autoroute/autoroute_panel.h
+
+diff --git a/kicad/kicad.cpp b/kicad/kicad.cpp
+index 1f93d6d6..a2e75865 100644
+--- a/kicad/kicad.cpp
++++ b/kicad/kicad.cpp
+@@ -24,6 +24,7 @@
+  */
+ 
+ 
++#include <wx/dialog.h>
+ #include <wx/filename.h>
+ #include <wx/log.h>
+ #include <wx/app.h>
+@@ -530,6 +531,18 @@ bool PGM_KICAD::OnPgmInit()
+                             return MCP_RESULT::Error( "no project file at "
+                                                       + fn.GetFullPath().ToStdString( wxConvUTF8 ) );
+ 
++                        // Switching projects closes the editors; never under an open modal dialog
++                        // (the dialog would be torn down with its editor).
++                        for( wxWindow* win : wxTopLevelWindows )
++                        {
++                            if( wxDialog* dlg = dynamic_cast<wxDialog*>( win ); dlg && dlg->IsModal() )
++                            {
++                                return MCP_RESULT::Error( "a dialog is open in KiCad (\""
++                                                          + dlg->GetTitle().ToStdString( wxConvUTF8 )
++                                                          + "\"); close it first" );
++                            }
++                        }
++
+                         // Asks the user first if an editor has unsaved changes
+                         if( !managerFrame->LoadProject( fn ) )
+                             return MCP_RESULT::Error( "the project was not opened (the user may "
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index f7911c12..2a00915b 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -42,6 +42,7 @@
+ #include <QExposeEvent>
+ #include <QJniEnvironment>
+ #include <QJniObject>
++#include <QMessageBox>
+ #include <QtCore/qcoreapplication_platform.h>
+ #include <QSet>
+ #define VK_USE_PLATFORM_ANDROID_KHR
+@@ -962,6 +963,12 @@ bool KIPLATFORM::UI::GrabAppImage( wxImage& aImage )
+         QImage part = aWidget->grab().toImage();
+         part.setDevicePixelRatio( 1.0 );
+         QPoint at = ( aWidget->mapToGlobal( QPoint( 0, 0 ) ) - origin ) * dpr;
++
++        // Qt for Android shows a QMessageBox as a native AlertDialog, centred over the app; the
++        // widget's own position means nothing (in a DeX window it put the box off to one side).
++        if( qobject_cast<QMessageBox*>( aWidget ) )
++            at = QPoint( ( image.width() - part.width() ) / 2, ( image.height() - part.height() ) / 2 );
++
+         painter.drawImage( at, part );
+     };
+ 
+diff --git a/pcbnew/CMakeLists.txt b/pcbnew/CMakeLists.txt
+index 858dc235..658f7c7e 100644
+--- a/pcbnew/CMakeLists.txt
++++ b/pcbnew/CMakeLists.txt
+@@ -268,7 +268,8 @@ set( PCBNEW_DIALOGS
+ 
+ # The integrated autorouter runs Freerouting in the Android app's Java runtime
+ if( ANDROID )
+-    list( APPEND PCBNEW_DIALOGS dialogs/dialog_autoroute.cpp autoroute/autoroute_job.cpp )
++    list( APPEND PCBNEW_DIALOGS dialogs/dialog_autoroute.cpp autoroute/autoroute_job.cpp
++                                autoroute/autoroute_panel.cpp )
+ endif()
+ 
+ set( PCBNEW_BRDSTACKUP_MGR
+diff --git a/pcbnew/api/mcp_tools_pcb.cpp b/pcbnew/api/mcp_tools_pcb.cpp
+index e570d7d7..5f1fa286 100644
+--- a/pcbnew/api/mcp_tools_pcb.cpp
++++ b/pcbnew/api/mcp_tools_pcb.cpp
+@@ -40,7 +40,7 @@
+ #include <zone.h>
+ 
+ #ifdef __ANDROID__
+-#include <dialogs/dialog_autoroute.h>
++#include <autoroute/autoroute_panel.h>
+ #include <chrono>
+ #include <thread>
+ #endif
+@@ -246,10 +246,10 @@ static MCP_RESULT runDrc( PCB_EDIT_FRAME* aFrame, const json& aArgs )
+ #ifdef __ANDROID__
+ static json autorouteStatus()
+ {
+-    if( DIALOG_AUTOROUTE* dlg = DIALOG_AUTOROUTE::Open() )
++    if( AUTOROUTE_PANEL* dlg = AUTOROUTE_PANEL::Active() )
+         return dlg->Job().StatusJson();
+ 
+-    json last = json::parse( DIALOG_AUTOROUTE::LastStatus(), nullptr, false );
++    json last = json::parse( AUTOROUTE_PANEL::LastStatus(), nullptr, false );
+ 
+     if( last.is_object() )
+     {
+@@ -277,25 +277,23 @@ static MCP_RESULT autoroute( PCB_EDIT_FRAME* aFrame, const json& aArgs )
+     if( !settings.FromJson( args, error ) )
+         return MCP_RESULT::Error( error.ToStdString() );
+ 
+-    bool open = false;
+-    MCP_SERVER::RunOnMainThread( [&]() { open = DIALOG_AUTOROUTE::Open() != nullptr; } );
++    bool busy = false;
++    MCP_SERVER::RunOnMainThread( [&]() { busy = AUTOROUTE_PANEL::IsEditorLocked(); } );
+ 
+-    if( open )
++    if( busy )
+     {
+-        return MCP_RESULT::Error( "the Autoroute tool is already open; see pcb_autoroute_status, "
+-                                  "and end its run with pcb_autoroute_control" );
++        return MCP_RESULT::Error( "the Autoroute tool has a run that is active or waiting to be "
++                                  "kept or discarded; see pcb_autoroute_status, and end it with "
++                                  "pcb_autoroute_control" );
+     }
+ 
+-    // ShowModal() runs its own event loop, so it must not run inside RunOnMainThread.
++    // The dialog form's ShowModal() runs its own event loop, so it must not run inside
++    // RunOnMainThread.
+     MCP_SERVER::RunOnMainThread(
+             [aFrame, settings]()
+             {
+-                aFrame->CallAfter(
+-                        [aFrame, settings]()
+-                        {
+-                            DIALOG_AUTOROUTE dlg( aFrame, &settings, true );
+-                            dlg.ShowModal();
+-                        } );
++                aFrame->CallAfter( [aFrame, settings]()
++                                   { AUTOROUTE_PANEL::OpenTool( aFrame, &settings, true ); } );
+             } );
+ 
+     bool started = false;
+@@ -306,15 +304,16 @@ static MCP_RESULT autoroute( PCB_EDIT_FRAME* aFrame, const json& aArgs )
+         MCP_SERVER::RunOnMainThread(
+                 [&]()
+                 {
+-                    DIALOG_AUTOROUTE* dlg = DIALOG_AUTOROUTE::Open();
+-
+-                    if( dlg && dlg->AutoStartDone() )
++                    if( AUTOROUTE_PANEL::AutoStartDone( error ) )
+                     {
+                         started = true;
+-                        error = dlg->StartError();
+ 
++                        // A tool that could not start is closed again, so it does not linger.
+                         if( !error.IsEmpty() )
+-                            dlg->EndModal( wxID_CANCEL );
++                        {
++                            if( AUTOROUTE_PANEL* tool = AUTOROUTE_PANEL::Active() )
++                                tool->DoClose();
++                        }
+                     }
+                 } );
+     }
+@@ -337,7 +336,7 @@ static MCP_RESULT autoroute( PCB_EDIT_FRAME* aFrame, const json& aArgs )
+             MCP_SERVER::RunOnMainThread(
+                     [&]()
+                     {
+-                        DIALOG_AUTOROUTE* dlg = DIALOG_AUTOROUTE::Open();
++                        AUTOROUTE_PANEL* dlg = AUTOROUTE_PANEL::Active();
+                         active = dlg && dlg->Job().IsActive();
+                         status = autorouteStatus();
+                     } );
+@@ -362,7 +361,7 @@ static MCP_RESULT autoroute( PCB_EDIT_FRAME* aFrame, const json& aArgs )
+ static MCP_RESULT autorouteControl( const json& aArgs )
+ {
+     std::string       action = aArgs.value( "action", std::string() );
+-    DIALOG_AUTOROUTE* dlg = DIALOG_AUTOROUTE::Open();
++    AUTOROUTE_PANEL* dlg = AUTOROUTE_PANEL::Active();
+ 
+     if( !dlg )
+         return MCP_RESULT::Error( "the Autoroute tool is not open" );
+@@ -400,9 +399,12 @@ static MCP_RESULT autorouteControl( const json& aArgs )
+         else
+         {
+             dlg->DoDiscard();
+-            dlg->EndModal( wxID_CANCEL );
+         }
+ 
++        // Either way the run is over: close the tool, so the editor is the user's again.
++        if( AUTOROUTE_PANEL::Active() == dlg )
++            dlg->DoClose();
++
+         status["tool_open"] = false;
+         status["result"] = action == "keep" ? "kept (one undo step)" : "discarded";
+         return MCP_RESULT::Json( status );
+@@ -431,12 +433,36 @@ void RegisterPcbMcpTools( PCB_EDIT_FRAME* aFrame )
+                            },
+                            aFrame );
+ 
++    // The board is locked while an autorouting run is active or waiting to be kept or discarded.
++    auto locked = []() -> bool
++    {
++#ifdef __ANDROID__
++        return AUTOROUTE_PANEL::IsEditorLocked();
++#else
++        return false;
++#endif
++    };
++
+     server.SetToolHandler( "pcb_move_footprint",
+-                           [aFrame]( const json& aArgs ) { return moveFootprint( aFrame, aArgs ); },
++                           [aFrame, locked]( const json& aArgs )
++                           {
++                               if( locked() )
++                                   return MCP_RESULT::Error( "the board is locked by an "
++                                                             "autorouting run" );
++
++                               return moveFootprint( aFrame, aArgs );
++                           },
+                            aFrame );
+ 
+     server.SetToolHandler( "pcb_run_drc",
+-                           [aFrame]( const json& aArgs ) { return runDrc( aFrame, aArgs ); },
++                           [aFrame, locked]( const json& aArgs )
++                           {
++                               if( locked() )
++                                   return MCP_RESULT::Error( "the board is locked by an "
++                                                             "autorouting run" );
++
++                               return runDrc( aFrame, aArgs );
++                           },
+                            aFrame );
+ 
+ #ifdef __ANDROID__
+diff --git a/pcbnew/autoroute/autoroute_job.cpp b/pcbnew/autoroute/autoroute_job.cpp
+index 3151c5b9..d6ca7e15 100644
+--- a/pcbnew/autoroute/autoroute_job.cpp
++++ b/pcbnew/autoroute/autoroute_job.cpp
+@@ -359,6 +359,7 @@ bool AUTOROUTE_JOB::Start( const AUTOROUTE_SETTINGS& aSettings, wxString& aError
+     m_error.clear();
+     m_summary.clear();
+     m_log.clear();
++    m_logTotal = 0;
+     m_openNets.clear();
+     m_progress = PROGRESS();
+     m_step = -1;
+@@ -1442,6 +1443,7 @@ void AUTOROUTE_JOB::readLog( const wxString& aPath )
+         line.Replace( wxS( "\r" ), wxEmptyString );
+         parseLine( line );
+         m_log.push_back( line );
++        m_logTotal++;
+ 
+         while( m_log.size() > MAX_LOG_LINES )
+             m_log.pop_front();
+@@ -1451,10 +1453,12 @@ void AUTOROUTE_JOB::readLog( const wxString& aPath )
+ 
+ void AUTOROUTE_JOB::parseLine( const wxString& aLine )
+ {
+-    // "[17/57 (5 failed)] Routing /GPIO22 (id=50)"  or  "[1/46] Routing /L_LED (id=47)"
+-    static wxRegEx netLine( wxS( "^\\[([0-9]+)/([0-9]+)( \\(([0-9]+) failed\\))?\\] Routing (.+) "
++    // "[17/57 (5 failed)] Routing /GPIO22 (id=50)", "[1/46] Routing /L_LED (id=47)", or with
++    // more counters once nets are ripped up: "[32/58 (6 failed) (4 ripped)] Routing ..."
++    static wxRegEx netLine( wxS( "^\\[([0-9]+)/([0-9]+)((?: \\([^)]*\\))*)\\] Routing (.+) "
+                                  "\\(id=[0-9]+\\)" ),
+                             wxRE_ADVANCED );
++    static wxRegEx failedPart( wxS( "\\(([0-9]+) failed\\)" ), wxRE_ADVANCED );
+     static wxRegEx summary( wxS( "^JSON_SUMMARY(_MIN)?: (\\{.*\\})\\s*$" ), wxRE_ADVANCED );
+ 
+     if( netLine.Matches( aLine ) )
+@@ -1462,7 +1466,11 @@ void AUTOROUTE_JOB::parseLine( const wxString& aLine )
+         long index = 0, total = 0, failed = 0;
+         netLine.GetMatch( aLine, 1 ).ToLong( &index );
+         netLine.GetMatch( aLine, 2 ).ToLong( &total );
+-        netLine.GetMatch( aLine, 4 ).ToLong( &failed );
++
++        wxString counters = netLine.GetMatch( aLine, 3 );
++
++        if( failedPart.Matches( counters ) )
++            failedPart.GetMatch( counters, 1 ).ToLong( &failed );
+ 
+         // The router makes several passes (first routes, then rip-up and reroute rounds); a
+         // new pass starts its count again.
+@@ -1472,7 +1480,7 @@ void AUTOROUTE_JOB::parseLine( const wxString& aLine )
+         m_progress.done = (int) index - 1;
+         m_progress.total = (int) total;
+         m_progress.failed = (int) failed;
+-        m_progress.net = netLine.GetMatch( aLine, 5 );
++        m_progress.net = netLine.GetMatch( aLine, 4 );
+ 
+         if( m_state == STATE::RUNNING )
+         {
+diff --git a/pcbnew/autoroute/autoroute_job.h b/pcbnew/autoroute/autoroute_job.h
+index cd4399de..a9debe37 100644
+--- a/pcbnew/autoroute/autoroute_job.h
++++ b/pcbnew/autoroute/autoroute_job.h
+@@ -202,6 +202,9 @@ public:
+     /// The last lines the router printed.
+     const std::deque<wxString>& GetLog() const { return m_log; }
+ 
++    /// How many lines the router has printed in this run (GetLog() keeps only the last ones).
++    size_t GetLogTotal() const { return m_logTotal; }
++
+     /// Nets that still have unrouted connections, after the run.
+     const std::vector<wxString>& GetOpenNets() const { return m_openNets; }
+ 
+@@ -249,6 +252,7 @@ private:
+     wxString              m_error;
+     wxString              m_summary;
+     std::deque<wxString>  m_log;
++    size_t                m_logTotal = 0;
+     long                  m_logOffset = 0;
+     wxString              m_logPartial;
+     std::vector<wxString> m_openNets;
+diff --git a/pcbnew/autoroute/autoroute_panel.cpp b/pcbnew/autoroute/autoroute_panel.cpp
+new file mode 100644
+index 00000000..6f1ad1b7
+--- /dev/null
++++ b/pcbnew/autoroute/autoroute_panel.cpp
+@@ -0,0 +1,1880 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "autoroute_panel.h"
++
++#include <dialogs/dialog_autoroute.h>
++
++#include <board.h>
++#include <board_connected_item.h>
++#include <board_design_settings.h>
++#include <confirm.h>
++#include <footprint.h>
++#include <kiplatform/autorouter.h>
++#include <kiplatform/router_process.h>
++#include <netinfo.h>
++#include <pad.h>
++#include <pcb_edit_frame.h>
++#include <pcb_painter.h>
++#include <pcb_track.h>
++#include <tool/actions.h>
++#include <tool/tool_manager.h>
++#include <tools/pcb_actions.h>
++#include <view/view.h>
++#include <widgets/wx_aui_utils.h>
++#include <wx/aui/aui.h>
++#include <wx/ffile.h>
++#include <wx/filename.h>
++#include <kiplatform/environment.h>
++
++#include <nlohmann/json.hpp>
++
++#include <wx/button.h>
++#include <wx/checkbox.h>
++#include <wx/checklst.h>
++#include <wx/choice.h>
++#include <wx/gauge.h>
++#include <wx/listbox.h>
++#include <wx/listctrl.h>
++#include <wx/notebook.h>
++#include <wx/panel.h>
++#include <wx/radiobox.h>
++#include <wx/radiobut.h>
++#include <wx/scrolwin.h>
++#include <wx/sizer.h>
++#include <wx/spinctrl.h>
++#include <wx/statline.h>
++#include <wx/stattext.h>
++#include <wx/textctrl.h>
++#include <wx/tokenzr.h>
++
++#include <algorithm>
++#include <set>
++
++AUTOROUTE_PANEL* AUTOROUTE_PANEL::s_active = nullptr;
++std::string      AUTOROUTE_PANEL::s_lastStatus;
++
++static const wxChar* const PANE_NAME = wxS( "AutoroutePane" );
++
++/// What the last automatic start (MCP) gave: done, and the error if it did not start.
++static bool     s_autoStartDone = false;
++static wxString s_autoStartError;
++
++/// The settings of the last run, so the dialog opens the way it was left.
++static AUTOROUTE_SETTINGS s_lastSettings;
++static bool               s_haveLastSettings = false;
++
++
++/**
++ * A filterable checklist of nets: a filter box, the list, and buttons to take the nets of the
++ * board selection or clear the choice.  Checked nets stay checked while filtered out.
++ */
++class NET_CHECKLIST : public wxPanel
++{
++public:
++    NET_CHECKLIST( wxWindow* aParent, PCB_EDIT_FRAME* aFrame ) :
++            wxPanel( aParent ),
++            m_frame( aFrame )
++    {
++        wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++        wxBoxSizer* row = new wxBoxSizer( wxHORIZONTAL );
++
++        m_filter = new wxTextCtrl( this, wxID_ANY, wxEmptyString );
++        m_filter->SetHint( _( "Filter nets" ) );
++        row->Add( m_filter, 1, wxALIGN_CENTER_VERTICAL );
++
++        wxButton* fromSel = new wxButton( this, wxID_ANY, _( "Use Selection" ) );
++        wxButton* none = new wxButton( this, wxID_ANY, _( "Clear" ) );
++        row->Add( fromSel, 0, wxLEFT, 6 );
++        row->Add( none, 0, wxLEFT, 6 );
++        top->Add( row, 0, wxEXPAND | wxBOTTOM, 4 );
++
++        m_list = new wxCheckListBox( this, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 150 ) ) );
++        top->Add( m_list, 1, wxEXPAND );
++
++        m_count = new wxStaticText( this, wxID_ANY, wxEmptyString );
++        top->Add( m_count, 0, wxTOP, 2 );
++        SetSizer( top );
++
++        for( NETINFO_ITEM* net : aFrame->GetBoard()->GetNetInfo() )
++        {
++            if( net->GetNetCode() > 0 && !net->GetNetname().IsEmpty() )
++                m_all.push_back( net->GetNetname() );
++        }
++
++        std::sort( m_all.begin(), m_all.end(),
++                   []( const wxString& a, const wxString& b ) { return a.CmpNoCase( b ) < 0; } );
++
++        m_filter->Bind( wxEVT_TEXT, [this]( wxCommandEvent& ) { rebuild(); } );
++        m_list->Bind( wxEVT_CHECKLISTBOX,
++                      [this]( wxCommandEvent& aEvent )
++                      {
++                          int      i = aEvent.GetInt();
++                          wxString net = m_shown[i];
++
++                          if( m_list->IsChecked( i ) )
++                              m_checked.insert( net );
++                          else
++                              m_checked.erase( net );
++
++                          updateCount();
++                          wxCommandEvent changed( wxEVT_CHECKLISTBOX, GetId() );
++                          wxPostEvent( GetParent(), changed );
++                      } );
++        fromSel->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { useSelection(); } );
++        none->Bind( wxEVT_BUTTON,
++                    [this]( wxCommandEvent& )
++                    {
++                        m_checked.clear();
++                        rebuild();
++                    } );
++        rebuild();
++    }
++
++    void SetChecked( const std::vector<wxString>& aNets )
++    {
++        m_checked = std::set<wxString>( aNets.begin(), aNets.end() );
++        rebuild();
++    }
++
++    std::vector<wxString> GetChecked() const
++    {
++        std::vector<wxString> out;
++
++        for( const wxString& net : m_all )
++        {
++            if( m_checked.count( net ) )
++                out.push_back( net );
++        }
++
++        return out;
++    }
++
++private:
++    void rebuild()
++    {
++        wxString filter = m_filter->GetValue().Lower();
++
++        m_list->Freeze();
++        m_list->Clear();
++        m_shown.clear();
++
++        for( const wxString& net : m_all )
++        {
++            if( !filter.IsEmpty() && !net.Lower().Contains( filter ) )
++                continue;
++
++            m_shown.push_back( net );
++            int i = m_list->Append( net );
++            m_list->Check( i, m_checked.count( net ) > 0 );
++        }
++
++        m_list->Thaw();
++        updateCount();
++    }
++
++    void updateCount()
++    {
++        m_count->SetLabel( wxString::Format( _( "%zu of %zu nets chosen" ), m_checked.size(),
++                                             m_all.size() ) );
++    }
++
++    void useSelection()
++    {
++        for( EDA_ITEM* item : m_frame->GetCurrentSelection() )
++        {
++            if( FOOTPRINT* fp = dynamic_cast<FOOTPRINT*>( item ) )
++            {
++                for( PAD* pad : fp->Pads() )
++                {
++                    if( pad->GetNetCode() > 0 )
++                        m_checked.insert( pad->GetNetname() );
++                }
++            }
++            else if( BOARD_CONNECTED_ITEM* bci = dynamic_cast<BOARD_CONNECTED_ITEM*>( item ) )
++            {
++                if( bci->GetNetCode() > 0 )
++                    m_checked.insert( bci->GetNetname() );
++            }
++        }
++
++        rebuild();
++    }
++
++    PCB_EDIT_FRAME*       m_frame;
++    wxTextCtrl*           m_filter;
++    wxCheckListBox*       m_list;
++    wxStaticText*         m_count;
++    std::vector<wxString> m_all;
++    std::vector<wxString> m_shown;
++    std::set<wxString>    m_checked;
++};
++
++
++/// Breaks @a aText into lines no wider than @a aWidth in @a aWin's font (wxStaticText::Wrap()
++/// does not take on wxQt when the label changes after creation).
++static wxString wrapText( wxWindow* aWin, const wxString& aText, int aWidth )
++{
++    wxString out;
++
++    for( const wxString& para : wxSplit( aText, '\n', 0 ) )
++    {
++        wxString line;
++
++        for( const wxString& word : wxSplit( para, ' ', 0 ) )
++        {
++            wxString trial = line.IsEmpty() ? word : line + wxS( " " ) + word;
++
++            if( !line.IsEmpty() && aWin->GetTextExtent( trial ).x > aWidth )
++            {
++                out << line << wxS( "\n" );
++                line = word;
++            }
++            else
++            {
++                line = trial;
++            }
++        }
++
++        out << line << wxS( "\n" );
++    }
++
++    return out.Trim();
++}
++
++
++static void setWrapped( wxStaticText* aText, const wxString& aLabel, int aWidthDip = 300 )
++{
++    aText->SetLabel( wrapText( aText, aLabel, aText->FromDIP( aWidthDip ) ) );
++}
++
++
++static wxStaticText* note( wxWindow* aParent, const wxString& aText )
++{
++    wxStaticText* t = new wxStaticText( aParent, wxID_ANY, wxEmptyString );
++    t->SetFont( t->GetFont().Smaller() );
++    setWrapped( t, aText );
++    return t;
++}
++
++
++/// A note for the third column of a settings row.
++static wxStaticText* narrowNote( wxWindow* aParent, const wxString& aText )
++{
++    wxStaticText* t = new wxStaticText( aParent, wxID_ANY, wxEmptyString );
++    t->SetFont( t->GetFont().Smaller() );
++    setWrapped( t, aText, 150 );
++    return t;
++}
++
++
++static wxString mmText( double aMm )
++{
++    return wxString::FromCDouble( aMm, 3 );
++}
++
++
++// ---------------------------------------------------------------------------------------------
++
++AUTOROUTE_PANEL::AUTOROUTE_PANEL( wxWindow* aParent, PCB_EDIT_FRAME* aFrame,
++                                  AUTOROUTE_HOST* aHost ) :
++        wxPanel( aParent ),
++        m_frame( aFrame ),
++        m_host( aHost ),
++        m_job( std::make_unique<AUTOROUTE_JOB>( aFrame ) ),
++        m_timer( this )
++{
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++
++    // ---- Setup: router, tabs ----
++    m_setupPanel = new wxPanel( this );
++    wxBoxSizer* setup = new wxBoxSizer( wxVERTICAL );
++
++    wxBoxSizer* routerRow = new wxBoxSizer( wxHORIZONTAL );
++    routerRow->Add( new wxStaticText( m_setupPanel, wxID_ANY, _( "Router:" ) ), 0,
++                    wxALIGN_CENTER_VERTICAL | wxRIGHT, 8 );
++    m_router = new wxChoice( m_setupPanel, wxID_ANY );
++    m_router->Append( _( "KiCadRoutingTools" ) );
++    m_router->Append( _( "Freerouting" ) );
++    m_router->SetMinSize( FromDIP( wxSize( 170, -1 ) ) );
++    routerRow->Add( m_router, 0, wxALIGN_CENTER_VERTICAL );
++    routerRow->AddStretchSpacer();
++    m_dockBtn = new wxButton( m_setupPanel, wxID_ANY,
++                              aHost->IsDocked() ? _( "Undock" ) : _( "Dock to Side" ) );
++    m_dockBtn->SetToolTip( aHost->IsDocked()
++                                   ? _( "Show the Autoroute tool as a dialog instead" )
++                                   : _( "Show the Autoroute tool as a panel at the left of the "
++                                        "board editor" ) );
++    routerRow->Add( m_dockBtn, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8 );
++    setup->Add( routerRow, 0, wxALL | wxEXPAND, 8 );
++
++    m_routerInfo = note( m_setupPanel, wxEmptyString );
++    setup->Add( m_routerInfo, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 8 );
++
++    m_book = new wxNotebook( m_setupPanel, wxID_ANY );
++    m_book->AddPage( buildRoutePage( m_book ), _( "Route" ) );
++    m_book->AddPage( buildFanoutPage( m_book ), _( "Fan Out" ) );
++    m_book->AddPage( buildPlanesPage( m_book ), _( "Planes" ) );
++    m_book->AddPage( buildOptimizePage( m_book ), _( "Optimize" ) );
++    m_book->AddPage( buildSettingsPage( m_book ), _( "Settings" ) );
++
++    // In the dialog the tabs size the dialog (they only need to scroll in the docked column).
++    if( !aHost->IsDocked() )
++    {
++        for( size_t i = 0; i < m_book->GetPageCount(); i++ )
++        {
++            wxWindow* page = m_book->GetPage( i );
++
++            if( page->GetSizer() )
++                page->SetMinSize( page->GetSizer()->CalcMin() );
++        }
++    }
++    setup->Add( m_book, 1, wxEXPAND | wxLEFT | wxRIGHT, 8 );
++
++    m_hint = note( m_setupPanel, wxEmptyString );
++    setup->Add( m_hint, 0, wxALL | wxEXPAND, 8 );
++    m_setupPanel->SetSizer( setup );
++    top->Add( m_setupPanel, 1, wxEXPAND );
++
++    // ---- Run and result ----
++    m_runPanel = buildRunPanel();
++    top->Add( m_runPanel, 1, wxEXPAND );
++
++    // ---- Buttons ----
++    wxBoxSizer* buttons = new wxBoxSizer( wxHORIZONTAL );
++    m_fitBtn = new wxButton( this, wxID_ANY, _( "Zoom to Fit" ) );
++    buttons->Add( m_fitBtn, 0, wxRIGHT, 8 );
++    buttons->AddStretchSpacer();
++    m_closeBtn = new wxButton( this, wxID_ANY, _( "Close" ) );
++    m_pauseBtn = new wxButton( this, wxID_ANY, _( "Pause" ) );
++    m_stopBtn = new wxButton( this, wxID_ANY, _( "Stop" ) );
++    m_discardBtn = new wxButton( this, wxID_ANY, _( "Discard" ) );
++    m_backBtn = new wxButton( this, wxID_ANY, _( "New Run" ) );
++    m_keepBtn = new wxButton( this, wxID_ANY, _( "Keep" ) );
++    m_runBtn = new wxButton( this, wxID_ANY, _( "Route" ) );
++
++    for( wxButton* b : { m_closeBtn, m_pauseBtn, m_stopBtn, m_discardBtn, m_backBtn, m_keepBtn,
++                         m_runBtn } )
++    {
++        buttons->Add( b, 0, wxLEFT, 8 );
++    }
++
++    top->Add( new wxStaticLine( this ), 0, wxEXPAND | wxLEFT | wxRIGHT, 8 );
++    top->Add( buttons, 0, wxEXPAND | wxALL, 8 );
++    SetSizer( top );
++
++    m_runBtn->Bind( wxEVT_BUTTON,
++                    [this]( wxCommandEvent& )
++                    {
++                        if( !Start() )
++                            DisplayErrorMessage( this, m_startError );
++                    } );
++    m_closeBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoClose(); } );
++    m_dockBtn->Bind( wxEVT_BUTTON,
++                     [this]( wxCommandEvent& )
++                     {
++                         AUTOROUTE_SETTINGS settings;
++                         wxString           error;
++
++                         // Carry the settings over to the other host.
++                         if( readSettings( settings, error ) )
++                         {
++                             s_lastSettings = settings;
++                             s_haveLastSettings = true;
++                         }
++
++                         SetPreferDocked( !m_host->IsDocked() );
++                         clearHighlight();
++                         m_host->CloseTool( true );
++                     } );
++    m_pauseBtn->Bind( wxEVT_BUTTON,
++                      [this]( wxCommandEvent& )
++                      {
++                          if( m_job->GetState() == AUTOROUTE_JOB::STATE::PAUSED )
++                              DoResume();
++                          else
++                              DoPause();
++                      } );
++    m_stopBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoStop(); } );
++    m_discardBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoDiscard(); } );
++    m_keepBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoKeep(); } );
++    m_backBtn->Bind( wxEVT_BUTTON,
++                     [this]( wxCommandEvent& )
++                     {
++                         // The result stays on the board (its own undo step).
++                         bool fill = m_job->ChangedBoard() && m_job->GetSettings().refillZones;
++
++                         clearHighlight();
++                         lockEditor( false );
++                         setView( VIEW::SETUP );
++
++                         if( fill )
++                             m_frame->GetToolManager()->PostAction( PCB_ACTIONS::zoneFillAll );
++                     } );
++    m_fitBtn->Bind( wxEVT_BUTTON,
++                    [this]( wxCommandEvent& )
++                    {
++                        m_frame->GetToolManager()->RunAction( ACTIONS::zoomFitScreen );
++                    } );
++    m_router->Bind( wxEVT_CHOICE, [this]( wxCommandEvent& ) { updateRouterHints(); } );
++    m_book->Bind( wxEVT_NOTEBOOK_PAGE_CHANGED,
++                  [this]( wxBookCtrlEvent& aEvent )
++                  {
++                      aEvent.Skip();
++                      updateRunButton();
++                  } );
++    Bind( wxEVT_TIMER, &AUTOROUTE_PANEL::onTimer, this );
++
++    LoadSettings( s_haveLastSettings ? s_lastSettings : AUTOROUTE_SETTINGS() );
++    setView( VIEW::SETUP );
++}
++
++
++AUTOROUTE_PANEL::~AUTOROUTE_PANEL()
++{
++    m_timer.Stop();
++
++    if( m_frame && !m_frame->IsBeingDeleted() )
++    {
++        clearHighlight();
++        lockEditor( false );
++    }
++
++    if( m_job->GetState() != AUTOROUTE_JOB::STATE::IDLE )
++        s_lastStatus = m_job->StatusJson().dump();
++
++    if( s_active == this )
++        s_active = nullptr;
++}
++
++
++void AUTOROUTE_PANEL::Detach()
++{
++    m_timer.Stop();
++    m_frame = nullptr;
++}
++
++
++AUTOROUTE_PANEL* AUTOROUTE_PANEL::Active()
++{
++    return s_active;
++}
++
++
++bool AUTOROUTE_PANEL::IsEditorLocked()
++{
++    return s_active && s_active->m_locked;
++}
++
++
++static wxString dockPrefPath()
++{
++    wxFileName fn( KIPLATFORM::ENV::GetUserCachePath(), wxS( "docked" ) );
++    fn.AppendDir( wxS( "autoroute" ) );
++    return fn.GetFullPath();
++}
++
++
++bool AUTOROUTE_PANEL::PreferDocked()
++{
++    return wxFileExists( dockPrefPath() );
++}
++
++
++void AUTOROUTE_PANEL::SetPreferDocked( bool aDocked )
++{
++    wxString path = dockPrefPath();
++
++    if( aDocked )
++    {
++        wxFileName::Mkdir( wxFileName( path ).GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++        wxFFile( path, wxS( "w" ) ).Write( wxS( "1" ) );
++    }
++    else if( wxFileExists( path ) )
++    {
++        wxRemoveFile( path );
++    }
++}
++
++
++/**
++ * The pane at the left of the board editor.  The panel lives as long as the frame; closing the
++ * tool hides the pane.
++ */
++class DOCKED_AUTOROUTE_HOST : public AUTOROUTE_HOST
++{
++public:
++    DOCKED_AUTOROUTE_HOST( PCB_EDIT_FRAME* aFrame ) : m_frame( aFrame ) {}
++
++    bool IsDocked() const override { return true; }
++
++    void PanelLayoutChanged( bool aRunning ) override
++    {
++        if( m_panel )
++            m_panel->Layout();
++    }
++
++    void CloseTool( bool aToggleDock ) override;
++
++    PCB_EDIT_FRAME*  m_frame;
++    AUTOROUTE_PANEL* m_panel = nullptr;
++    bool             m_propertiesWasShown = false;
++};
++
++
++void DOCKED_AUTOROUTE_HOST::CloseTool( bool aToggleDock )
++{
++    wxAuiPaneInfo& pane = m_frame->m_auimgr.GetPane( PANE_NAME );
++
++    if( pane.IsOk() )
++    {
++        pane.Show( false );
++
++        // Give the Properties panel its place back.
++        wxAuiPaneInfo& props = m_frame->m_auimgr.GetPane( PCB_EDIT_FRAME::PropertiesPaneName() );
++
++        if( props.IsOk() && m_propertiesWasShown )
++            props.Show( true );
++
++        m_frame->m_auimgr.Update();
++    }
++
++    if( AUTOROUTE_PANEL::s_active == m_panel )
++        AUTOROUTE_PANEL::s_active = nullptr;
++
++    if( aToggleDock )
++    {
++        PCB_EDIT_FRAME* frame = m_frame;
++        frame->CallAfter( [frame]() { AUTOROUTE_PANEL::OpenTool( frame ); } );
++    }
++}
++
++
++void AUTOROUTE_PANEL::OpenTool( PCB_EDIT_FRAME* aFrame, const AUTOROUTE_SETTINGS* aSettings,
++                                bool aAutoStart )
++{
++    s_autoStartDone = false;
++    s_autoStartError.clear();
++
++    auto autoStart =
++            []( AUTOROUTE_PANEL* aPanel )
++            {
++                if( !aPanel->Start() )
++                    s_autoStartError = aPanel->StartError();
++
++                s_autoStartDone = true;
++            };
++
++    if( s_active )
++    {
++        // Already on screen: bring it up; an MCP start goes into it unless it is busy.
++        if( aAutoStart && !IsEditorLocked() )
++        {
++            if( aSettings )
++                s_active->LoadSettings( *aSettings );
++
++            autoStart( s_active );
++        }
++        else if( aAutoStart )
++        {
++            s_autoStartError = _( "The Autoroute tool is busy with another run." );
++            s_autoStartDone = true;
++        }
++
++        return;
++    }
++
++    if( PreferDocked() )
++    {
++        wxAuiPaneInfo&   pane = aFrame->m_auimgr.GetPane( PANE_NAME );
++        AUTOROUTE_PANEL* panel = nullptr;
++
++        if( pane.IsOk() )
++        {
++            panel = static_cast<AUTOROUTE_PANEL*>( pane.window );
++        }
++        else
++        {
++            DOCKED_AUTOROUTE_HOST* host = new DOCKED_AUTOROUTE_HOST( aFrame );
++            panel = new AUTOROUTE_PANEL( aFrame, aFrame, host );
++            panel->m_ownedHost.reset( host );
++            host->m_panel = panel;
++
++            // In the Properties panel's place at the left (Properties is hidden while the tool
++            // is shown there), the full height of the editor.
++            aFrame->m_auimgr.AddPane( panel, EDA_PANE().Name( PANE_NAME )
++                                                     .Left().Layer( 5 ).Row( 0 ).Position( 0 )
++                                                     .Caption( _( "Autoroute" ) )
++                                                     .CaptionVisible( true )
++                                                     .CloseButton( false )
++                                                     .PaneBorder( false )
++                                                     .MinSize( aFrame->FromDIP( wxSize( 360, 200 ) ) )
++                                                     .BestSize( aFrame->FromDIP( wxSize( 420, -1 ) ) ) );
++        }
++
++        s_active = panel;
++
++        if( aSettings )
++            panel->LoadSettings( *aSettings );
++        else if( s_haveLastSettings && !panel->m_job->IsActive() )
++            panel->LoadSettings( s_lastSettings );
++
++        wxAuiPaneInfo& props = aFrame->m_auimgr.GetPane( PCB_EDIT_FRAME::PropertiesPaneName() );
++        static_cast<DOCKED_AUTOROUTE_HOST*>( panel->m_host )->m_propertiesWasShown =
++                props.IsOk() && props.IsShown();
++
++        if( props.IsOk() )
++            props.Show( false );
++
++        aFrame->m_auimgr.GetPane( PANE_NAME ).Show( true );
++        aFrame->m_auimgr.Update();
++
++        if( aAutoStart )
++            autoStart( panel );
++
++        return;
++    }
++
++    DIALOG_AUTOROUTE dlg( aFrame );
++    AUTOROUTE_PANEL* panel = dlg.Panel();
++
++    s_active = panel;
++
++    if( aSettings )
++        panel->LoadSettings( *aSettings );
++
++    if( aAutoStart )
++    {
++        dlg.Bind( wxEVT_INIT_DIALOG,
++                  [&dlg, panel, autoStart]( wxInitDialogEvent& aEvent )
++                  {
++                      aEvent.Skip();
++                      dlg.CallAfter( [panel, autoStart]() { autoStart( panel ); } );
++                  } );
++    }
++
++    dlg.ShowModal();
++
++    if( s_active == panel )
++        s_active = nullptr;
++}
++
++
++bool AUTOROUTE_PANEL::AutoStartDone( wxString& aError )
++{
++    aError = s_autoStartError;
++    return s_autoStartDone;
++}
++
++
++void AUTOROUTE_PANEL::ShowSetup()
++{
++    if( !m_job->IsActive() && !m_locked )
++        setView( VIEW::SETUP );
++}
++
++
++/**
++ * Swallows the clicks and keys that would edit the board, so the docked tool can lock the editor
++ * while the canvas still draws and two-finger gestures still zoom and pan.  Keys typed into
++ * @a aAllowed (the Autoroute panel) still go through.
++ */
++class AR_INPUT_BLOCKER : public wxEvtHandler
++{
++public:
++    AR_INPUT_BLOCKER( wxWindow* aAllowed, bool aMouse ) : m_allowed( aAllowed )
++    {
++        if( aMouse )
++        {
++            auto swallow = []( wxMouseEvent& ) {};
++            Bind( wxEVT_LEFT_DOWN, swallow );
++            Bind( wxEVT_LEFT_UP, swallow );
++            Bind( wxEVT_LEFT_DCLICK, swallow );
++            Bind( wxEVT_RIGHT_DOWN, swallow );
++            Bind( wxEVT_RIGHT_UP, swallow );
++            Bind( wxEVT_RIGHT_DCLICK, swallow );
++        }
++
++        Bind( wxEVT_KEY_DOWN, &AR_INPUT_BLOCKER::onKey, this );
++        Bind( wxEVT_KEY_UP, &AR_INPUT_BLOCKER::onKey, this );
++        Bind( wxEVT_CHAR, &AR_INPUT_BLOCKER::onKey, this );
++        Bind( wxEVT_CHAR_HOOK, &AR_INPUT_BLOCKER::onKey, this );
++    }
++
++private:
++    void onKey( wxKeyEvent& aEvent )
++    {
++        wxWindow* focus = wxWindow::FindFocus();
++
++        for( wxWindow* w = focus; w && m_allowed; w = w->GetParent() )
++        {
++            if( w == m_allowed )
++            {
++                aEvent.Skip();
++                return;
++            }
++        }
++    }
++
++    wxWindow* m_allowed;
++};
++
++
++void AUTOROUTE_PANEL::lockEditor( bool aLock )
++{
++    if( m_locked == aLock || !m_frame )
++        return;
++
++    m_locked = aLock;
++
++    // The dialog is modal, which locks the editor by itself; the flag still stops MCP edits.
++    if( !m_host->IsDocked() )
++        return;
++
++    if( aLock )
++    {
++        m_frame->GetToolManager()->RunAction( ACTIONS::cancelInteractive );
++        m_frame->GetToolManager()->RunAction( ACTIONS::selectionClear );
++    }
++
++    for( wxAuiPaneInfo& pane : m_frame->m_auimgr.GetAllPanes() )
++    {
++        if( pane.window && pane.window != this && pane.window != m_frame->GetCanvas() )
++            pane.window->Enable( !aLock );
++    }
++
++    if( wxMenuBar* menus = m_frame->GetMenuBar() )
++    {
++        for( size_t i = 0; i < menus->GetMenuCount(); i++ )
++            menus->EnableTop( i, !aLock );
++    }
++
++    if( aLock )
++    {
++        m_canvasBlocker = new AR_INPUT_BLOCKER( nullptr, true );
++        m_frameBlocker = new AR_INPUT_BLOCKER( this, false );
++        m_frame->GetCanvas()->PushEventHandler( m_canvasBlocker );
++        m_frame->PushEventHandler( m_frameBlocker );
++    }
++    else
++    {
++        if( m_canvasBlocker )
++            m_frame->GetCanvas()->RemoveEventHandler( m_canvasBlocker );
++
++        if( m_frameBlocker )
++            m_frame->RemoveEventHandler( m_frameBlocker );
++
++        delete m_canvasBlocker;
++        delete m_frameBlocker;
++        m_canvasBlocker = m_frameBlocker = nullptr;
++    }
++}
++
++
++wxPanel* AUTOROUTE_PANEL::buildRoutePage( wxNotebook* aBook )
++{
++    wxPanel*    page = new wxPanel( aBook );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++    BOARD*      board = m_frame->GetBoard();
++
++    m_routeAll = new wxRadioButton( page, wxID_ANY, _( "Every unrouted net" ), wxDefaultPosition,
++                                    wxDefaultSize, wxRB_GROUP );
++    m_routeChosen = new wxRadioButton( page, wxID_ANY, _( "Only these nets:" ) );
++    top->Add( m_routeAll, 0, wxALL, 6 );
++    top->Add( m_routeChosen, 0, wxLEFT | wxRIGHT, 6 );
++
++    m_routeNets = new NET_CHECKLIST( page, m_frame );
++    top->Add( m_routeNets, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6 );
++
++    m_bus = new wxCheckBox( page, wxID_ANY,
++                            _( "Route them side by side, like a bus" ) );
++    top->Add( m_bus, 0, wxALL, 6 );
++
++    wxBoxSizer* between = new wxBoxSizer( wxHORIZONTAL );
++    m_betweenOn = new wxCheckBox( page, wxID_ANY, _( "Only between these parts:" ) );
++    m_betweenParts = new wxTextCtrl( page, wxID_ANY, wxEmptyString );
++    m_betweenParts->SetHint( _( "e.g. U1, J3" ) );
++    wxButton* partsFromSel = new wxButton( page, wxID_ANY, _( "Use Selection" ) );
++    between->Add( m_betweenOn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6 );
++    between->Add( m_betweenParts, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6 );
++    between->Add( partsFromSel, 0, wxALIGN_CENTER_VERTICAL );
++    top->Add( between, 0, wxEXPAND | wxLEFT | wxRIGHT, 6 );
++    top->Add( note( page, _( "Routes the nets' connections among two or more parts only; their "
++                             "pads on other parts are left unrouted." ) ),
++              0, wxLEFT | wxRIGHT | wxTOP, 6 );
++
++    partsFromSel->Bind( wxEVT_BUTTON,
++                        [this]( wxCommandEvent& )
++                        {
++                            wxString refs;
++
++                            for( EDA_ITEM* item : m_frame->GetCurrentSelection() )
++                            {
++                                FOOTPRINT* fp = dynamic_cast<FOOTPRINT*>( item );
++
++                                if( !fp && item->GetParent() )
++                                    fp = dynamic_cast<FOOTPRINT*>( item->GetParent() );
++
++                                if( fp && !refs.Contains( fp->GetReference() ) )
++                                    refs << ( refs.IsEmpty() ? wxS( "" ) : wxS( ", " ) )
++                                         << fp->GetReference();
++                            }
++
++                            m_betweenParts->SetValue( refs );
++                            m_betweenOn->SetValue( !refs.IsEmpty() );
++                        } );
++    m_betweenParts->Bind( wxEVT_TEXT,
++                          [this]( wxCommandEvent& )
++                          {
++                              m_betweenOn->SetValue( !m_betweenParts->GetValue().Trim().IsEmpty() );
++                          } );
++
++    wxBoxSizer* lower = new wxBoxSizer( wxHORIZONTAL );
++    wxBoxSizer* layerCol = new wxBoxSizer( wxVERTICAL );
++    layerCol->Add( new wxStaticText( page, wxID_ANY, _( "Route on these layers:" ) ), 0,
++                   wxBOTTOM, 4 );
++    m_layers = new wxCheckListBox( page, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( 160, 90 ) ) );
++
++    for( PCB_LAYER_ID layer : board->GetEnabledLayers().CuStack() )
++        m_layers->Append( board->GetLayerName( layer ) );
++
++    layerCol->Add( m_layers, 1, wxEXPAND );
++    lower->Add( layerCol, 0, wxEXPAND | wxRIGHT, 16 );
++
++    wxBoxSizer* firstCol = new wxBoxSizer( wxVERTICAL );
++    firstCol->Add( new wxStaticText( page, wxID_ANY, _( "Before routing:" ) ), 0, wxBOTTOM, 4 );
++    m_planesFirst = new wxCheckBox( page, wxID_ANY, _( "Pour the planes first" ) );
++    m_fanoutFirst = new wxCheckBox( page, wxID_ANY, _( "Fan out the parts first" ) );
++    firstCol->Add( m_planesFirst, 0, wxBOTTOM, 4 );
++    firstCol->Add( m_fanoutFirst, 0, wxBOTTOM, 4 );
++    firstCol->Add( narrowNote( page, _( "Planes and parts are set on their tabs. Fine-pitch chips "
++                                        "(0.5 mm pitch and below) usually route only after they "
++                                        "are fanned out." ) ),
++                   0, wxTOP, 4 );
++    lower->Add( firstCol, 1, wxEXPAND );
++    top->Add( lower, 0, wxEXPAND | wxALL, 6 );
++
++    page->SetSizer( top );
++
++    auto toggle =
++            [this]( wxCommandEvent& )
++            {
++                m_routeNets->Enable( m_routeChosen->GetValue() );
++                updateRouterHints();
++            };
++
++    m_routeAll->Bind( wxEVT_RADIOBUTTON, toggle );
++    m_routeChosen->Bind( wxEVT_RADIOBUTTON, toggle );
++    return page;
++}
++
++
++wxPanel* AUTOROUTE_PANEL::buildFanoutPage( wxNotebook* aBook )
++{
++    wxPanel*    page = new wxPanel( aBook );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++    BOARD*      board = m_frame->GetBoard();
++
++    top->Add( note( page, _( "Fanning out pulls a short track (and a via where needed) out of "
++                             "every pin of a dense part, so the router can reach the pins. "
++                             "KiCadRoutingTools only." ) ),
++              0, wxALL | wxEXPAND, 6 );
++
++    m_fanoutParts = new wxCheckListBox( page, wxID_ANY, wxDefaultPosition,
++                                        FromDIP( wxSize( -1, 180 ) ) );
++
++    std::vector<std::pair<wxString, FOOTPRINT*>> parts;
++
++    for( FOOTPRINT* fp : board->Footprints() )
++    {
++        if( fp->Pads().size() >= 8 )
++            parts.emplace_back( fp->GetReference(), fp );
++    }
++
++    std::sort( parts.begin(), parts.end(),
++               []( const auto& a, const auto& b ) { return a.first.CmpNoCase( b.first ) < 0; } );
++
++    for( const auto& [ref, fp] : parts )
++    {
++        int pitch = 0;
++
++        for( size_t i = 0; i < fp->Pads().size(); i++ )
++        {
++            for( size_t j = i + 1; j < fp->Pads().size(); j++ )
++            {
++                int d = ( fp->Pads()[i]->GetPosition() - fp->Pads()[j]->GetPosition() ).EuclideanNorm();
++
++                if( d > 0 && ( pitch == 0 || d < pitch ) )
++                    pitch = d;
++            }
++        }
++
++        m_fanoutRefs.push_back( ref );
++        m_fanoutParts->Append( wxString::Format( wxS( "%s    %s    (%zu pads, %s mm pitch)" ), ref,
++                                                 fp->GetFPID().GetLibItemName().wx_str(),
++                                                 fp->Pads().size(),
++                                                 mmText( pcbIUScale.IUTomm( pitch ) ) ) );
++        m_fanoutParts->SetClientData( m_fanoutParts->GetCount() - 1,
++                                      reinterpret_cast<void*>( (intptr_t) pitch ) );
++    }
++
++    top->Add( m_fanoutParts, 1, wxEXPAND | wxLEFT | wxRIGHT, 6 );
++
++    wxBoxSizer* row = new wxBoxSizer( wxHORIZONTAL );
++    wxButton*   fine = new wxButton( page, wxID_ANY, _( "Choose Fine-Pitch Parts" ) );
++    row->Add( fine, 0, wxRIGHT, 16 );
++    row->Add( new wxStaticText( page, wxID_ANY, _( "Track width:" ) ), 0,
++              wxALIGN_CENTER_VERTICAL | wxRIGHT, 6 );
++    m_fanoutWidth = new wxTextCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                                    FromDIP( wxSize( 70, -1 ) ) );
++    m_fanoutWidth->SetHint( _( "board min" ) );
++    row->Add( m_fanoutWidth, 0, wxALIGN_CENTER_VERTICAL );
++    row->Add( new wxStaticText( page, wxID_ANY, _( "mm" ) ), 0, wxALIGN_CENTER_VERTICAL | wxLEFT,
++              4 );
++    top->Add( row, 0, wxALL, 6 );
++
++    top->Add( note( page, wxString::Format( _( "Leave the width empty to use the board's minimum "
++                                               "track width (%s mm, Board Setup > Constraints)." ),
++                                            mmText( pcbIUScale.IUTomm(
++                                                    board->GetDesignSettings().m_TrackMinWidth ) ) ) ),
++              0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
++
++    page->SetSizer( top );
++    fine->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { selectFinePitchParts(); } );
++    m_fanoutParts->Bind( wxEVT_CHECKLISTBOX, [this]( wxCommandEvent& ) { updateRouterHints(); } );
++    return page;
++}
++
++
++void AUTOROUTE_PANEL::selectFinePitchParts()
++{
++    int limit = pcbIUScale.mmToIU( 0.51 );
++
++    for( unsigned i = 0; i < m_fanoutParts->GetCount(); i++ )
++    {
++        int pitch = (int) reinterpret_cast<intptr_t>( m_fanoutParts->GetClientData( i ) );
++        m_fanoutParts->Check( i, pitch > 0 && pitch <= limit );
++    }
++
++    updateRouterHints();
++}
++
++
++wxPanel* AUTOROUTE_PANEL::buildPlanesPage( wxNotebook* aBook )
++{
++    wxPanel*    page = new wxPanel( aBook );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++    BOARD*      board = m_frame->GetBoard();
++
++    top->Add( note( page, _( "A plane is a copper zone over the whole board on one layer, "
++                             "usually ground or a supply on an inner layer. The router connects "
++                             "pads to it with vias. Add inner layers in Board Setup > Physical "
++                             "Stackup." ) ),
++              0, wxALL | wxEXPAND, 6 );
++
++    wxBoxSizer* row = new wxBoxSizer( wxHORIZONTAL );
++    m_planeNet = new wxChoice( page, wxID_ANY );
++    m_planeLayer = new wxChoice( page, wxID_ANY );
++
++    std::vector<wxString> nets;
++
++    for( NETINFO_ITEM* net : board->GetNetInfo() )
++    {
++        if( net->GetNetCode() > 0 && !net->GetNetname().IsEmpty() )
++            nets.push_back( net->GetNetname() );
++    }
++
++    std::sort( nets.begin(), nets.end(),
++               []( const wxString& a, const wxString& b ) { return a.CmpNoCase( b ) < 0; } );
++
++    for( const wxString& net : nets )
++        m_planeNet->Append( net );
++
++    for( PCB_LAYER_ID layer : board->GetEnabledLayers().CuStack() )
++        m_planeLayer->Append( board->GetLayerName( layer ) );
++
++    // Sensible first choices: ground, and the first inner layer if there is one.
++    for( unsigned i = 0; i < m_planeNet->GetCount(); i++ )
++    {
++        if( m_planeNet->GetString( i ).Upper() == wxS( "GND" ) )
++            m_planeNet->SetSelection( i );
++    }
++
++    if( m_planeNet->GetSelection() == wxNOT_FOUND && m_planeNet->GetCount() )
++        m_planeNet->SetSelection( 0 );
++
++    m_planeLayer->SetSelection( m_planeLayer->GetCount() > 2 ? 1 : 0 );
++
++    wxButton* add = new wxButton( page, wxID_ANY, _( "Add" ) );
++    row->Add( m_planeNet, 1, wxRIGHT, 6 );
++    row->Add( new wxStaticText( page, wxID_ANY, _( "on" ) ), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT,
++              6 );
++    row->Add( m_planeLayer, 0, wxRIGHT, 6 );
++    row->Add( add, 0 );
++    top->Add( row, 0, wxEXPAND | wxLEFT | wxRIGHT, 6 );
++
++    m_planeList = new wxListBox( page, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 120 ) ) );
++    top->Add( m_planeList, 1, wxEXPAND | wxALL, 6 );
++
++    wxBoxSizer* row2 = new wxBoxSizer( wxHORIZONTAL );
++    wxButton*   remove = new wxButton( page, wxID_ANY, _( "Remove" ) );
++    wxButton*   setupBtn = new wxButton( page, wxID_ANY, _( "Board Setup..." ) );
++    row2->Add( remove, 0, wxRIGHT, 8 );
++    row2->Add( setupBtn, 0 );
++    top->Add( row2, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
++
++    page->SetSizer( top );
++
++    add->Bind( wxEVT_BUTTON,
++               [this]( wxCommandEvent& )
++               {
++                   if( m_planeNet->GetSelection() == wxNOT_FOUND
++                       || m_planeLayer->GetSelection() == wxNOT_FOUND )
++                   {
++                       return;
++                   }
++
++                   AR_PLANE plane{ m_planeNet->GetStringSelection(),
++                                   m_planeLayer->GetStringSelection() };
++
++                   for( const AR_PLANE& p : m_planes )
++                   {
++                       if( p.layer == plane.layer && p.net == plane.net )
++                           return;
++                   }
++
++                   m_planes.push_back( plane );
++                   fillPlanesList();
++               } );
++    remove->Bind( wxEVT_BUTTON,
++                  [this]( wxCommandEvent& )
++                  {
++                      int i = m_planeList->GetSelection();
++
++                      if( i != wxNOT_FOUND && i < (int) m_planes.size() )
++                      {
++                          m_planes.erase( m_planes.begin() + i );
++                          fillPlanesList();
++                      }
++                  } );
++    setupBtn->Bind( wxEVT_BUTTON,
++                    [this]( wxCommandEvent& )
++                    {
++                        DisplayInfoMessage( this, _( "Close the Autoroute tool, open File > "
++                                                     "Board Setup > Physical Stackup and choose "
++                                                     "4 or more copper layers. Then come back "
++                                                     "here to add the planes." ) );
++                    } );
++    return page;
++}
++
++
++void AUTOROUTE_PANEL::fillPlanesList()
++{
++    m_planeList->Clear();
++
++    for( const AR_PLANE& p : m_planes )
++        m_planeList->Append( wxString::Format( _( "%s on %s" ), p.net, p.layer ) );
++
++    updateRouterHints();
++}
++
++
++wxPanel* AUTOROUTE_PANEL::buildOptimizePage( wxNotebook* aBook )
++{
++    wxPanel*    page = new wxPanel( aBook );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++
++    top->Add( note( page, _( "Improve nets that are already routed, including ones you routed by "
++                             "hand. Freerouting pulls the tracks tight and removes vias it can "
++                             "do without. KiCadRoutingTools routes the chosen nets again from "
++                             "scratch. Lock any track that must stay exactly as it is." ) ),
++              0, wxALL | wxEXPAND, 6 );
++
++    m_optimizeAll = new wxRadioButton( page, wxID_ANY, _( "Every routed net" ), wxDefaultPosition,
++                                       wxDefaultSize, wxRB_GROUP );
++    m_optimizeChosen = new wxRadioButton( page, wxID_ANY, _( "Only these nets:" ) );
++    top->Add( m_optimizeAll, 0, wxLEFT | wxRIGHT, 6 );
++    top->Add( m_optimizeChosen, 0, wxLEFT | wxRIGHT | wxTOP, 6 );
++
++    m_optimizeNets = new NET_CHECKLIST( page, m_frame );
++    top->Add( m_optimizeNets, 1, wxEXPAND | wxALL, 6 );
++    page->SetSizer( top );
++
++    auto toggle =
++            [this]( wxCommandEvent& )
++            {
++                m_optimizeNets->Enable( m_optimizeChosen->GetValue() );
++                updateRouterHints();
++            };
++
++    m_optimizeAll->Bind( wxEVT_RADIOBUTTON, toggle );
++    m_optimizeChosen->Bind( wxEVT_RADIOBUTTON, toggle );
++    return page;
++}
++
++
++wxPanel* AUTOROUTE_PANEL::buildSettingsPage( wxNotebook* aBook )
++{
++    // Scrolls when the tab is taller than the docked column.
++    wxScrolledWindow* page = new wxScrolledWindow( aBook );
++    page->SetScrollRate( 0, FromDIP( 10 ) );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++
++    wxString rules[] = { _( "Exactly the net class sizes" ),
++                         _( "Down to the board's minimums" ),
++                         _( "Down to the fab's minimums (reported)" ) };
++    m_rules = new wxRadioBox( page, wxID_ANY, _( "Sizes and clearances (KiCadRoutingTools)" ),
++                              wxDefaultPosition, wxDefaultSize, 3, rules, 1 );
++    top->Add( m_rules, 0, wxEXPAND | wxALL, 6 );
++
++    // A field per row with its note underneath, so the tab fits the docked width too.
++    auto row = [&]( const wxString& aLabel, wxWindow* aField, const wxString& aNote )
++    {
++        wxBoxSizer* line = new wxBoxSizer( wxHORIZONTAL );
++        line->Add( new wxStaticText( page, wxID_ANY, aLabel ), 0,
++                   wxALIGN_CENTER_VERTICAL | wxRIGHT, 8 );
++        line->Add( aField, 0, wxALIGN_CENTER_VERTICAL );
++        top->Add( line, 0, wxLEFT | wxRIGHT | wxTOP, 6 );
++        top->Add( note( page, aNote ), 0, wxLEFT | wxRIGHT, 6 );
++    };
++
++    m_grid = new wxTextCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                             FromDIP( wxSize( 80, -1 ) ) );
++    row( _( "Routing grid (mm):" ), m_grid,
++         _( "KiCadRoutingTools only; finer is slower. Freerouting has no grid." ) );
++
++    m_viaCost = new wxSpinCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                                FromDIP( wxSize( 100, -1 ) ), wxSP_ARROW_KEYS, 0, 5000, 0 );
++    row( _( "Via cost:" ), m_viaCost,
++         _( "0 for the router's default. Higher means fewer vias and longer tracks." ) );
++
++    m_passes = new wxSpinCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                               FromDIP( wxSize( 100, -1 ) ), wxSP_ARROW_KEYS, 0, 100, 0 );
++    row( _( "Optimizer passes:" ), m_passes, _( "Freerouting only; 0 for its default." ) );
++    top->AddSpacer( 6 );
++
++    m_optimizeAfter = new wxCheckBox( page, wxID_ANY,
++                                      _( "Optimize after routing (Freerouting)" ) );
++    m_frFanout = new wxCheckBox( page, wxID_ANY,
++                                 _( "Fan out all SMD pads first (Freerouting)" ) );
++    m_live = new wxCheckBox( page, wxID_ANY,
++                             _( "Show routes as they are found (Freerouting)" ) );
++    m_refill = new wxCheckBox( page, wxID_ANY, _( "Refill zones when the result is kept" ) );
++    m_ripOthers = new wxCheckBox( page, wxID_ANY,
++                                  _( "Move other nets to make room" ) );
++
++    top->Add( m_ripOthers, 0, wxLEFT | wxRIGHT, 6 );
++    top->Add( note( page, _( "KiCadRoutingTools, when routing chosen nets: it may rip up and "
++                             "reroute other nets' tracks. Off, it leaves them alone." ) ),
++              0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
++
++    for( wxCheckBox* c : { m_optimizeAfter, m_frFanout, m_live, m_refill } )
++        top->Add( c, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
++
++    page->SetSizer( top );
++    return page;
++}
++
++
++wxPanel* AUTOROUTE_PANEL::buildRunPanel()
++{
++    wxPanel*    panel = new wxPanel( this );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++
++    m_runTitle = new wxStaticText( panel, wxID_ANY, wxEmptyString );
++    m_runTitle->SetFont( m_runTitle->GetFont().Larger().Bold() );
++    top->Add( m_runTitle, 0, wxALL, 8 );
++
++    m_stage = new wxStaticText( panel, wxID_ANY, wxEmptyString );
++    m_stage->SetFont( m_stage->GetFont().Bold() );
++    top->Add( m_stage, 0, wxLEFT | wxRIGHT | wxEXPAND, 8 );
++
++    m_gauge = new wxGauge( panel, wxID_ANY, 100, wxDefaultPosition, FromDIP( wxSize( 300, -1 ) ) );
++    top->Add( m_gauge, 0, wxEXPAND | wxALL, 8 );
++
++    m_counts = new wxStaticText( panel, wxID_ANY, wxEmptyString );
++    top->Add( m_counts, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8 );
++
++    m_steps = new wxListCtrl( panel, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 110 ) ),
++                              wxLC_REPORT | wxLC_SINGLE_SEL );
++    m_steps->AppendColumn( _( "Step" ), wxLIST_FORMAT_LEFT, FromDIP( 150 ) );
++    m_steps->AppendColumn( _( "Status" ), wxLIST_FORMAT_LEFT, FromDIP( 56 ) );
++    m_steps->AppendColumn( _( "Details" ), wxLIST_FORMAT_LEFT, FromDIP( 130 ) );
++    top->Add( m_steps, 0, wxEXPAND | wxLEFT | wxRIGHT, 8 );
++
++    m_openLabel = new wxStaticText( panel, wxID_ANY, _( "Nets still unrouted (tap one to see it):" ) );
++    top->Add( m_openLabel, 0, wxLEFT | wxRIGHT | wxTOP, 8 );
++    m_openNets = new wxListBox( panel, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 100 ) ) );
++    top->Add( m_openNets, 0, wxEXPAND | wxLEFT | wxRIGHT, 8 );
++
++    top->Add( new wxStaticText( panel, wxID_ANY, _( "Router output:" ) ), 0,
++              wxLEFT | wxRIGHT | wxTOP, 8 );
++    m_log = new wxTextCtrl( panel, wxID_ANY, wxEmptyString, wxDefaultPosition,
++                            FromDIP( wxSize( 300, 120 ) ),
++                            wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP );
++    m_log->SetFont( wxFont( m_log->GetFont().GetPointSize() - 1, wxFONTFAMILY_TELETYPE,
++                            wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL ) );
++    top->Add( m_log, 1, wxEXPAND | wxALL, 8 );
++
++    panel->SetSizer( top );
++
++    m_openNets->Bind( wxEVT_LISTBOX,
++                      [this]( wxCommandEvent& aEvent ) { zoomToNet( aEvent.GetString() ); } );
++    return panel;
++}
++
++
++void AUTOROUTE_PANEL::LoadSettings( const AUTOROUTE_SETTINGS& s )
++{
++    m_router->SetSelection( s.router == AR_ROUTER::KRT ? 0 : 1 );
++
++    m_routeAll->SetValue( s.allNets );
++    m_routeChosen->SetValue( !s.allNets );
++    m_routeNets->SetChecked( s.nets );
++    m_routeNets->Enable( !s.allNets );
++    m_bus->SetValue( s.bus );
++
++    wxString parts;
++
++    for( const wxString& ref : s.betweenParts )
++        parts << ( parts.IsEmpty() ? wxS( "" ) : wxS( ", " ) ) << ref;
++
++    m_betweenParts->ChangeValue( parts );
++    m_betweenOn->SetValue( !s.betweenParts.empty() );
++
++    for( unsigned i = 0; i < m_layers->GetCount(); i++ )
++    {
++        m_layers->Check( i, s.layers.empty()
++                                    || std::find( s.layers.begin(), s.layers.end(),
++                                                  m_layers->GetString( i ) )
++                                               != s.layers.end() );
++    }
++
++    m_planesFirst->SetValue( s.planesFirst );
++    m_fanoutFirst->SetValue( s.fanoutFirst );
++
++    for( unsigned i = 0; i < m_fanoutParts->GetCount(); i++ )
++    {
++        m_fanoutParts->Check( i, std::find( s.fanoutParts.begin(), s.fanoutParts.end(),
++                                            m_fanoutRefs[i] )
++                                         != s.fanoutParts.end() );
++    }
++
++    m_fanoutWidth->SetValue( s.fanoutWidthMm > 0 ? mmText( s.fanoutWidthMm ) : wxString() );
++    m_planes = s.planes;
++    fillPlanesList();
++
++    m_optimizeAll->SetValue( s.optimizeAll );
++    m_optimizeChosen->SetValue( !s.optimizeAll );
++    m_optimizeNets->SetChecked( s.optimizeNets );
++    m_optimizeNets->Enable( !s.optimizeAll );
++
++    m_rules->SetSelection( s.rules == AR_RULES::EXACT ? 0 : s.rules == AR_RULES::BOARD ? 1 : 2 );
++    m_grid->SetValue( mmText( s.gridMm ) );
++    m_viaCost->SetValue( s.viaCost );
++    m_passes->SetValue( s.optimizerPasses );
++    m_optimizeAfter->SetValue( s.optimizeAfter );
++    m_frFanout->SetValue( s.freeroutingFanout );
++    m_live->SetValue( s.liveView );
++    m_refill->SetValue( s.refillZones );
++    m_ripOthers->SetValue( s.ripOtherNets );
++
++    // A first use with no fan-out chosen yet: suggest the fine-pitch parts.
++    if( !s_haveLastSettings && s.fanoutParts.empty() )
++        selectFinePitchParts();
++
++    switch( s.task )
++    {
++    case AR_TASK::ROUTE:    m_book->SetSelection( 0 ); break;
++    case AR_TASK::FANOUT:   m_book->SetSelection( 1 ); break;
++    case AR_TASK::PLANES:   m_book->SetSelection( 2 ); break;
++    case AR_TASK::OPTIMIZE: m_book->SetSelection( 3 ); break;
++    }
++
++    updateRouterHints();
++}
++
++
++bool AUTOROUTE_PANEL::readSettings( AUTOROUTE_SETTINGS& s, wxString& aError )
++{
++    s.router = m_router->GetSelection() == 1 ? AR_ROUTER::FREEROUTING : AR_ROUTER::KRT;
++
++    switch( m_book->GetSelection() )
++    {
++    case 1:  s.task = AR_TASK::FANOUT; break;
++    case 2:  s.task = AR_TASK::PLANES; break;
++    case 3:  s.task = AR_TASK::OPTIMIZE; break;
++    default: s.task = AR_TASK::ROUTE; break;
++    }
++
++    s.allNets = m_routeAll->GetValue();
++    s.nets = m_routeNets->GetChecked();
++    s.bus = m_bus->GetValue();
++    s.betweenParts.clear();
++
++    if( m_betweenOn->GetValue() )
++    {
++        BOARD*            board = m_frame->GetBoard();
++        wxStringTokenizer tok( m_betweenParts->GetValue(), wxS( ", ;" ), wxTOKEN_STRTOK );
++
++        while( tok.HasMoreTokens() )
++        {
++            wxString ref = tok.GetNextToken();
++            bool     found = false;
++
++            for( FOOTPRINT* fp : board->Footprints() )
++                found |= fp->GetReference() == ref;
++
++            if( !found )
++            {
++                aError = wxString::Format( _( "The board has no part %s." ), ref );
++                return false;
++            }
++
++            s.betweenParts.push_back( ref );
++        }
++
++        if( s.betweenParts.size() < 2 )
++        {
++            aError = _( "Name at least two parts to route between." );
++            return false;
++        }
++    }
++
++    s.layers.clear();
++    bool allLayers = true;
++
++    for( unsigned i = 0; i < m_layers->GetCount(); i++ )
++    {
++        if( m_layers->IsChecked( i ) )
++            s.layers.push_back( m_layers->GetString( i ) );
++        else
++            allLayers = false;
++    }
++
++    if( s.layers.empty() )
++    {
++        aError = _( "Choose at least one layer to route on." );
++        return false;
++    }
++
++    if( allLayers )
++        s.layers.clear();
++
++    s.planesFirst = m_planesFirst->GetValue();
++    s.fanoutFirst = m_fanoutFirst->GetValue();
++
++    s.fanoutParts.clear();
++
++    for( unsigned i = 0; i < m_fanoutParts->GetCount(); i++ )
++    {
++        if( m_fanoutParts->IsChecked( i ) )
++            s.fanoutParts.push_back( m_fanoutRefs[i] );
++    }
++
++    s.fanoutWidthMm = 0;
++
++    if( !m_fanoutWidth->GetValue().Trim().IsEmpty()
++        && ( !m_fanoutWidth->GetValue().ToCDouble( &s.fanoutWidthMm ) || s.fanoutWidthMm <= 0 ) )
++    {
++        aError = _( "The fan-out track width must be a number of millimetres." );
++        return false;
++    }
++
++    s.planes = m_planes;
++    s.optimizeAll = m_optimizeAll->GetValue();
++    s.optimizeNets = m_optimizeNets->GetChecked();
++
++    if( s.task == AR_TASK::OPTIMIZE && !s.optimizeAll && s.optimizeNets.empty() )
++    {
++        aError = _( "Choose at least one net to optimize." );
++        return false;
++    }
++
++    s.rules = m_rules->GetSelection() == 0 ? AR_RULES::EXACT
++            : m_rules->GetSelection() == 1 ? AR_RULES::BOARD
++                                           : AR_RULES::FAB;
++
++    if( !m_grid->GetValue().ToCDouble( &s.gridMm ) || s.gridMm < 0.01 || s.gridMm > 1.0 )
++    {
++        aError = _( "The routing grid must be between 0.01 and 1 mm." );
++        return false;
++    }
++
++    s.viaCost = m_viaCost->GetValue();
++    s.optimizerPasses = m_passes->GetValue();
++    s.optimizeAfter = m_optimizeAfter->GetValue();
++    s.freeroutingFanout = m_frFanout->GetValue();
++    s.liveView = m_live->GetValue();
++    s.refillZones = m_refill->GetValue();
++    s.ripOtherNets = m_ripOthers->GetValue();
++    return true;
++}
++
++
++void AUTOROUTE_PANEL::updateRouterHints()
++{
++    bool krt = m_router->GetSelection() != 1;
++
++    setWrapped( m_routerInfo,
++            krt ? _( "Recommended. KiCadRoutingTools by Andy Haas: a grid router with rip-up and reroute, "
++                     "fan-out of fine-pitch parts, bus routing and plane connections. Runs in its "
++                     "own process; large boards take minutes." )
++                : _( "Freerouting: a gridless push-and-shove router with an optimizer. Routes "
++                     "the whole board at once." ) );
++
++    m_bus->Enable( krt && m_routeChosen->GetValue() );
++    m_fanoutFirst->Enable( krt );
++    m_rules->Enable( krt );
++    m_grid->Enable( krt );
++    m_ripOthers->Enable( krt );
++    m_passes->Enable( !krt );
++    m_optimizeAfter->Enable( !krt );
++    m_frFanout->Enable( !krt );
++    m_live->Enable( !krt );
++
++    wxString hint;
++
++    if( !krt && m_book->GetSelection() == 1 )
++        hint = _( "Freerouting cannot fan out single parts. Choose KiCadRoutingTools, or use "
++                  "Freerouting's fan-out of every SMD pad on the Settings tab." );
++    else if( krt && !KIPLATFORM::ROUTER_PROCESS::IsRuntimeReady() )
++        hint = _( "The first run unpacks KiCadRoutingTools (about 150 MB), which takes a minute." );
++
++    setWrapped( m_hint, hint );
++    updateRunButton();
++    Layout();
++}
++
++
++void AUTOROUTE_PANEL::updateRunButton()
++{
++    switch( m_book->GetSelection() )
++    {
++    case 1:  m_runBtn->SetLabel( _( "Fan Out" ) ); break;
++    case 2:  m_runBtn->SetLabel( _( "Pour Planes" ) ); break;
++    case 3:  m_runBtn->SetLabel( _( "Optimize" ) ); break;
++    default: m_runBtn->SetLabel( _( "Route" ) ); break;
++    }
++
++    bool krt = m_router->GetSelection() != 1;
++    m_runBtn->Enable( !( !krt && m_book->GetSelection() == 1 ) );
++
++    if( m_book->GetSelection() == 4 )
++        m_runBtn->SetLabel( _( "Route" ) );
++}
++
++
++bool AUTOROUTE_PANEL::Start()
++{
++    AUTOROUTE_SETTINGS settings;
++    wxString           error;
++
++    if( m_job->IsActive() || m_locked )
++    {
++        m_startError = _( "A run is already in progress." );
++        return false;
++    }
++
++    // From the Settings tab, the button routes.
++    if( m_book->GetSelection() == 4 )
++        m_book->SetSelection( 0 );
++
++    if( !readSettings( settings, error ) || !m_job->Start( settings, error ) )
++    {
++        m_startError = error;
++        return false;
++    }
++
++    s_lastSettings = settings;
++    s_haveLastSettings = true;
++    m_startError.clear();
++    m_shownLogLines = 0;
++    m_log->Clear();
++    lockEditor( true );
++    setView( VIEW::RUN );
++    m_timer.Start( 300 );
++    return true;
++}
++
++
++void AUTOROUTE_PANEL::setView( VIEW aView )
++{
++    m_view = aView;
++
++    bool setup = aView == VIEW::SETUP;
++    bool run = aView == VIEW::RUN;
++    bool result = aView == VIEW::RESULT;
++
++    m_setupPanel->Show( setup );
++    m_runPanel->Show( !setup );
++    m_openLabel->Show( result && !m_job->GetOpenNets().empty() );
++    m_openNets->Show( result && !m_job->GetOpenNets().empty() );
++
++    m_closeBtn->Show( setup );
++    m_runBtn->Show( setup );
++    m_fitBtn->Show( !setup );
++    m_pauseBtn->Show( run );
++    m_stopBtn->Show( run );
++    m_discardBtn->Show( result && m_job->ChangedBoard() );
++    m_backBtn->Show( result );
++    m_keepBtn->Show( result );
++
++    if( result )
++    {
++        m_openNets->Clear();
++
++        for( const wxString& net : m_job->GetOpenNets() )
++            m_openNets->Append( net );
++    }
++
++    if( !setup )
++        refreshRunView();
++
++    m_dockBtn->Enable( setup );
++    m_runPanel->Layout();
++    m_setupPanel->Layout();
++    Layout();
++
++    if( result )
++    {
++        m_log->SetInsertionPointEnd();
++        m_log->ShowPosition( m_log->GetLastPosition() );
++    }
++
++    m_host->PanelLayoutChanged( !setup );
++}
++
++
++static wxString duration( long aMs )
++{
++    long secs = aMs / 1000;
++
++    if( secs < 60 )
++        return wxString::Format( _( "%ld s" ), secs );
++
++    return wxString::Format( wxS( "%ld:%02ld" ), secs / 60, secs % 60 );
++}
++
++
++void AUTOROUTE_PANEL::refreshRunView()
++{
++    const AUTOROUTE_JOB::PROGRESS& p = m_job->GetProgress();
++    AUTOROUTE_JOB::STATE           state = m_job->GetState();
++
++    wxString title = m_job->GetSettings().task == AR_TASK::OPTIMIZE ? _( "Optimizing with %s" )
++                                                                    : _( "Routing with %s" );
++    title = wxString::Format( title, AUTOROUTE_JOB::RouterName( m_job->GetSettings().router ) );
++
++    if( state == AUTOROUTE_JOB::STATE::PAUSED )
++        title += wxS( "  " ) + _( "(paused)" );
++
++    m_runTitle->SetLabel( title );
++
++    wxString stage = state == AUTOROUTE_JOB::STATE::FAILED && !m_job->GetError().IsEmpty()
++                             ? p.stage + wxS( "\n" ) + m_job->GetError()
++                             : p.stage;
++    wxString before = m_stage->GetLabel();
++    setWrapped( m_stage, stage, 300 );
++
++    // A longer or shorter stage line changes its height: lay the panel out again.
++    if( m_stage->GetLabel() != before )
++        m_runPanel->Layout();
++
++    if( state == AUTOROUTE_JOB::STATE::FINISHED )
++    {
++        m_gauge->SetRange( 1 );
++        m_gauge->SetValue( 1 );
++    }
++    else if( p.total > 0 )
++    {
++        m_gauge->SetRange( p.total );
++        m_gauge->SetValue( std::min( std::max( p.done, 0 ), p.total ) );
++    }
++    else if( m_job->IsActive() )
++    {
++        m_gauge->Pulse();
++    }
++    else
++    {
++        m_gauge->SetRange( 1 );
++        m_gauge->SetValue( state == AUTOROUTE_JOB::STATE::FINISHED ? 1 : 0 );
++    }
++
++    wxArrayString counts;
++
++    if( state == AUTOROUTE_JOB::STATE::PREPARING && p.total > 0 )
++        counts.Add( wxString::Format( _( "%d of %d files" ), p.done, p.total ) );
++    else if( p.total > 0 && m_job->GetSettings().router == AR_ROUTER::FREEROUTING )
++        counts.Add( wxString::Format( _( "%d of %d connections" ), p.done, p.total ) );
++    else if( p.total > 0 && m_job->IsActive() )
++        counts.Add( wxString::Format( _( "net %d of %d" ), p.done + 1, p.total ) );
++
++    if( !p.net.IsEmpty() && m_job->IsActive() )
++        counts.Add( p.net );
++
++    if( p.failed > 0 )
++        counts.Add( wxString::Format( _( "%d failed" ), p.failed ) );
++
++    if( p.vias >= 0 )
++        counts.Add( wxString::Format( _( "%d vias" ), p.vias ) );
++
++    if( p.lengthMm > 0 )
++        counts.Add( wxString::Format( _( "%.0f mm of track" ), p.lengthMm ) );
++
++    counts.Add( duration( p.elapsedMs ) );
++
++    wxString countText;
++
++    for( size_t i = 0; i < counts.size(); i++ )
++        countText << ( i ? wxS( "    " ) : wxS( "" ) ) << counts[i];
++
++    m_counts->SetLabel( countText );
++
++    // Steps
++    const std::vector<AUTOROUTE_JOB::STEP>& steps = m_job->GetSteps();
++
++    if( m_steps->GetItemCount() != (int) steps.size() )
++    {
++        m_steps->DeleteAllItems();
++
++        for( size_t i = 0; i < steps.size(); i++ )
++            m_steps->InsertItem( i, steps[i].title );
++    }
++
++    for( size_t i = 0; i < steps.size(); i++ )
++    {
++        wxString status;
++
++        switch( steps[i].state )
++        {
++        case AUTOROUTE_JOB::STEP_STATE::PENDING: status = _( "Waiting" ); break;
++        case AUTOROUTE_JOB::STEP_STATE::RUNNING:
++            status = state == AUTOROUTE_JOB::STATE::PAUSED ? _( "Paused" ) : _( "Running" );
++            break;
++        case AUTOROUTE_JOB::STEP_STATE::DONE:    status = _( "Done" ); break;
++        case AUTOROUTE_JOB::STEP_STATE::FAILED:  status = _( "Failed" ); break;
++        case AUTOROUTE_JOB::STEP_STATE::SKIPPED: status = _( "Skipped" ); break;
++        }
++
++        m_steps->SetItem( i, 0, steps[i].title );
++        m_steps->SetItem( i, 1, status );
++        m_steps->SetItem( i, 2, steps[i].detail );
++    }
++
++    // Log: append the new lines only.  The job keeps the last few hundred, so count by the total.
++    const std::deque<wxString>& log = m_job->GetLog();
++    size_t                      total = m_job->GetLogTotal();
++
++    if( total < m_shownLogLines )
++    {
++        m_log->Clear();
++        m_shownLogLines = 0;
++    }
++
++    if( total > m_shownLogLines )
++    {
++        size_t   fresh = std::min( total - m_shownLogLines, log.size() );
++        wxString add;
++
++        for( size_t i = log.size() - fresh; i < log.size(); i++ )
++            add << log[i] << wxS( "\n" );
++
++        m_log->AppendText( add );
++        m_shownLogLines = total;
++
++        // Keep the box to the last thousand or so lines, and follow the end (wxQt does not by
++        // itself).
++        if( m_log->GetNumberOfLines() > 1200 )
++            m_log->Remove( 0, m_log->XYToPosition( 0, m_log->GetNumberOfLines() - 1000 ) );
++
++        m_log->SetInsertionPointEnd();
++        m_log->ShowPosition( m_log->GetLastPosition() );
++    }
++
++    m_pauseBtn->SetLabel( state == AUTOROUTE_JOB::STATE::PAUSED ? _( "Resume" ) : _( "Pause" ) );
++    m_pauseBtn->Enable( state == AUTOROUTE_JOB::STATE::RUNNING
++                        || state == AUTOROUTE_JOB::STATE::PAUSED );
++    m_stopBtn->Enable( state != AUTOROUTE_JOB::STATE::STOPPING );
++}
++
++
++void AUTOROUTE_PANEL::onTimer( wxTimerEvent& aEvent )
++{
++    m_job->Poll();
++
++    if( m_view == VIEW::RUN && !m_job->IsActive() )
++    {
++        m_timer.Stop();
++        setView( VIEW::RESULT );
++        return;
++    }
++
++    refreshRunView();
++}
++
++
++bool AUTOROUTE_PANEL::DoPause()
++{
++    bool ok = m_job->Pause();
++    refreshRunView();
++    return ok;
++}
++
++
++bool AUTOROUTE_PANEL::DoResume()
++{
++    bool ok = m_job->Resume();
++    refreshRunView();
++    return ok;
++}
++
++
++void AUTOROUTE_PANEL::DoStop()
++{
++    m_job->Stop();
++    refreshRunView();
++}
++
++
++void AUTOROUTE_PANEL::DoKeep()
++{
++    if( m_job->IsActive() )
++        return;
++
++    bool fill = m_job->ChangedBoard() && m_job->GetSettings().refillZones;
++
++    clearHighlight();
++    lockEditor( false );
++
++    if( m_host->IsDocked() )
++        setView( VIEW::SETUP );
++    else
++        m_host->CloseTool( false );
++
++    if( fill )
++        m_frame->GetToolManager()->PostAction( PCB_ACTIONS::zoneFillAll );
++}
++
++
++void AUTOROUTE_PANEL::DoDiscard()
++{
++    if( m_job->IsActive() )
++        return;
++
++    clearHighlight();
++    m_job->Discard();
++    lockEditor( false );
++    setView( VIEW::SETUP );
++}
++
++
++void AUTOROUTE_PANEL::DoClose()
++{
++    HandleCloseRequest();
++}
++
++
++void AUTOROUTE_PANEL::HandleCloseRequest()
++{
++    if( m_job->IsActive() )
++    {
++        // Closing while a run is active means stop; the result is offered when it ends.
++        DoStop();
++        return;
++    }
++
++    if( m_view == VIEW::RESULT )
++    {
++        // Keeping the result ends the run; the docked tool goes back to its tabs, so close it too.
++        DoKeep();
++
++        if( m_host->IsDocked() )
++            m_host->CloseTool( false );
++
++        return;
++    }
++
++    clearHighlight();
++    m_host->CloseTool( false );
++}
++
++
++void AUTOROUTE_PANEL::zoomToNet( const wxString& aNet )
++{
++    BOARD*        board = m_frame->GetBoard();
++    NETINFO_ITEM* net = board->FindNet( aNet );
++
++    if( !net )
++        return;
++
++    BOX2I box;
++    bool  first = true;
++
++    for( FOOTPRINT* fp : board->Footprints() )
++    {
++        for( PAD* pad : fp->Pads() )
++        {
++            if( pad->GetNetCode() != net->GetNetCode() )
++                continue;
++
++            if( first )
++                box = pad->GetBoundingBox();
++            else
++                box.Merge( pad->GetBoundingBox() );
++
++            first = false;
++        }
++    }
++
++    if( first )
++        return;
++
++    box.Inflate( std::max( box.GetWidth(), box.GetHeight() ) / 4 + pcbIUScale.mmToIU( 2 ) );
++
++    KIGFX::VIEW*             view = m_frame->GetCanvas()->GetView();
++    KIGFX::RENDER_SETTINGS*  rs = view->GetPainter()->GetSettings();
++
++    rs->SetHighlight( true, net->GetNetCode() );
++    view->UpdateAllLayersColor();
++    view->SetViewport( BOX2D( box.GetOrigin(), box.GetSize() ) );
++    m_frame->GetCanvas()->Refresh();
++}
++
++
++void AUTOROUTE_PANEL::clearHighlight()
++{
++    if( !m_frame || m_frame->IsBeingDeleted() || !m_frame->GetCanvas() )
++        return;
++
++    KIGFX::VIEW* view = m_frame->GetCanvas()->GetView();
++
++    if( !view )
++        return;
++
++    KIGFX::RENDER_SETTINGS* rs = view->GetPainter()->GetSettings();
++
++    if( rs->IsHighlightEnabled() )
++    {
++        rs->SetHighlight( false );
++        view->UpdateAllLayersColor();
++        m_frame->GetCanvas()->Refresh();
++    }
++}
+diff --git a/pcbnew/autoroute/autoroute_panel.h b/pcbnew/autoroute/autoroute_panel.h
+new file mode 100644
+index 00000000..ebd71420
+--- /dev/null
++++ b/pcbnew/autoroute/autoroute_panel.h
+@@ -0,0 +1,233 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef AUTOROUTE_PANEL_H
++#define AUTOROUTE_PANEL_H
++
++#include <autoroute/autoroute_job.h>
++#include <wx/panel.h>
++#include <wx/timer.h>
++
++#include <memory>
++#include <string>
++
++class PCB_EDIT_FRAME;
++class NET_CHECKLIST;
++class wxButton;
++class wxCheckBox;
++class wxCheckListBox;
++class wxChoice;
++class wxEvtHandler;
++class wxGauge;
++class wxListBox;
++class wxListCtrl;
++class wxNotebook;
++class wxRadioBox;
++class wxRadioButton;
++class wxSpinCtrl;
++class wxStaticText;
++class wxTextCtrl;
++
++/**
++ * What holds an AUTOROUTE_PANEL: the modal Autoroute dialog, or the pane docked at the left of
++ * the board editor.
++ */
++class AUTOROUTE_HOST
++{
++public:
++    virtual ~AUTOROUTE_HOST() = default;
++
++    virtual bool IsDocked() const = 0;
++
++    /// The panel changed what it shows (setup, run, result); size and place it.
++    virtual void PanelLayoutChanged( bool aRunning ) = 0;
++
++    /// Close the tool.  @a aToggleDock: reopen it in the other host.
++    virtual void CloseTool( bool aToggleDock ) = 0;
++};
++
++
++/**
++ * The Autoroute tool: choose a router and what to do (route, fan out, pour planes, optimize),
++ * then watch the run.  The board cannot be edited while a run is active and until its result is
++ * kept or discarded: the dialog host is modal, and the docked host locks the editor (canvas
++ * clicks, keys, menus, toolbars, other panels and the IPC API).  Everything a run changes is one
++ * undo step.
++ */
++class AUTOROUTE_PANEL : public wxPanel
++{
++public:
++    AUTOROUTE_PANEL( wxWindow* aParent, PCB_EDIT_FRAME* aFrame, AUTOROUTE_HOST* aHost );
++    ~AUTOROUTE_PANEL() override;
++
++    /**
++     * Open the tool the way the user last chose (docked or as a dialog).  With @a aSettings,
++     * start from them; with @a aAutoStart, start the run at once (MCP).  The dialog form returns
++     * only when it closes; call it through CallAfter() when that matters.
++     */
++    static void OpenTool( PCB_EDIT_FRAME* aFrame, const AUTOROUTE_SETTINGS* aSettings = nullptr,
++                          bool aAutoStart = false );
++
++    /// The tool on screen (in either host), or nullptr.
++    static AUTOROUTE_PANEL* Active();
++
++    /// After OpenTool( ..., true ): whether the run has been started, and why not if it failed.
++    static bool AutoStartDone( wxString& aError );
++
++    /// The status (JSON text) of the last run, kept after its tool closes.
++    static const std::string& LastStatus() { return s_lastStatus; }
++
++    static bool PreferDocked();
++    static void SetPreferDocked( bool aDocked );
++
++    /// True while the editor must stay locked: a run is active, or its result is not decided.
++    static bool IsEditorLocked();
++
++    AUTOROUTE_JOB& Job() { return *m_job; }
++
++    void LoadSettings( const AUTOROUTE_SETTINGS& aSettings );
++    void ShowSetup();
++
++    /// Start a run from the controls; returns false with StartError() set.
++    bool Start();
++
++    /// The same as the buttons; also used by MCP.
++    bool     DoPause();
++    bool     DoResume();
++    void     DoStop();
++    void     DoKeep();
++    void     DoDiscard();
++    void     DoClose();
++    wxString StartError() const { return m_startError; }
++
++    /// For the host: whether closing now is allowed, and what closing means.
++    void HandleCloseRequest();
++
++    /// The host is going away (its frame is closing): forget the frame.
++    void Detach();
++
++private:
++    enum class VIEW
++    {
++        SETUP,
++        RUN,
++        RESULT
++    };
++
++    wxPanel* buildRoutePage( wxNotebook* aBook );
++    wxPanel* buildFanoutPage( wxNotebook* aBook );
++    wxPanel* buildPlanesPage( wxNotebook* aBook );
++    wxPanel* buildOptimizePage( wxNotebook* aBook );
++    wxPanel* buildSettingsPage( wxNotebook* aBook );
++    wxPanel* buildRunPanel();
++
++    bool readSettings( AUTOROUTE_SETTINGS& aSettings, wxString& aError );
++    void updateRouterHints();
++    void updateRunButton();
++    void fillPlanesList();
++    void selectFinePitchParts();
++
++    void setView( VIEW aView );
++    void refreshRunView();
++    void zoomToNet( const wxString& aNet );
++    void clearHighlight();
++    void lockEditor( bool aLock );
++
++    void onTimer( wxTimerEvent& aEvent );
++
++    PCB_EDIT_FRAME*                 m_frame;
++    AUTOROUTE_HOST*                 m_host;
++    std::unique_ptr<AUTOROUTE_HOST> m_ownedHost;   ///< The docked host; the dialog owns itself
++    std::unique_ptr<AUTOROUTE_JOB> m_job;
++    wxTimer                        m_timer;
++    VIEW                           m_view = VIEW::SETUP;
++    bool                           m_locked = false;
++    wxEvtHandler*                  m_canvasBlocker = nullptr;
++    wxEvtHandler*                  m_frameBlocker = nullptr;
++    wxString                       m_startError;
++    size_t                         m_shownLogLines = 0;
++    std::vector<wxString>          m_fanoutRefs;      ///< One per row of m_fanoutParts
++    std::vector<AR_PLANE>          m_planes;
++
++    // Setup
++    wxPanel*        m_setupPanel;
++    wxChoice*       m_router;
++    wxButton*       m_dockBtn;
++    wxStaticText*   m_routerInfo;
++    wxNotebook*     m_book;
++    wxStaticText*   m_hint;
++
++    wxRadioButton*  m_routeAll;
++    wxRadioButton*  m_routeChosen;
++    NET_CHECKLIST*  m_routeNets;
++    wxCheckBox*     m_bus;
++    wxCheckBox*     m_betweenOn;
++    wxTextCtrl*     m_betweenParts;
++    wxCheckListBox* m_layers;
++    wxCheckBox*     m_planesFirst;
++    wxCheckBox*     m_fanoutFirst;
++
++    wxCheckListBox* m_fanoutParts;
++    wxTextCtrl*     m_fanoutWidth;
++
++    wxChoice*       m_planeNet;
++    wxChoice*       m_planeLayer;
++    wxListBox*      m_planeList;
++
++    wxRadioButton*  m_optimizeAll;
++    wxRadioButton*  m_optimizeChosen;
++    NET_CHECKLIST*  m_optimizeNets;
++
++    wxRadioBox*     m_rules;
++    wxTextCtrl*     m_grid;
++    wxSpinCtrl*     m_viaCost;
++    wxSpinCtrl*     m_passes;
++    wxCheckBox*     m_optimizeAfter;
++    wxCheckBox*     m_frFanout;
++    wxCheckBox*     m_live;
++    wxCheckBox*     m_refill;
++    wxCheckBox*     m_ripOthers;
++
++    // Run and result
++    wxPanel*        m_runPanel;
++    wxStaticText*   m_runTitle;
++    wxStaticText*   m_stage;
++    wxGauge*        m_gauge;
++    wxStaticText*   m_counts;
++    wxListCtrl*     m_steps;
++    wxTextCtrl*     m_log;
++    wxStaticText*   m_openLabel;
++    wxListBox*      m_openNets;
++
++    wxButton*       m_closeBtn;
++    wxButton*       m_runBtn;
++    wxButton*       m_fitBtn;
++    wxButton*       m_pauseBtn;
++    wxButton*       m_stopBtn;
++    wxButton*       m_backBtn;
++    wxButton*       m_discardBtn;
++    wxButton*       m_keepBtn;
++
++    static AUTOROUTE_PANEL* s_active;
++    static std::string      s_lastStatus;
++
++    friend class DOCKED_AUTOROUTE_HOST;
++};
++
++#endif // AUTOROUTE_PANEL_H
+diff --git a/pcbnew/dialogs/dialog_autoroute.cpp b/pcbnew/dialogs/dialog_autoroute.cpp
+index ac5f05ef..cf1b2ac9 100644
+--- a/pcbnew/dialogs/dialog_autoroute.cpp
++++ b/pcbnew/dialogs/dialog_autoroute.cpp
+@@ -19,1436 +19,67 @@
+ 
+ #include "dialog_autoroute.h"
+ 
+-#include <board.h>
+-#include <board_connected_item.h>
+-#include <board_design_settings.h>
+-#include <confirm.h>
+-#include <footprint.h>
+-#include <kiplatform/autorouter.h>
+-#include <kiplatform/router_process.h>
+-#include <netinfo.h>
+-#include <pad.h>
+ #include <pcb_edit_frame.h>
+-#include <pcb_painter.h>
+-#include <pcb_track.h>
+-#include <tool/actions.h>
+-#include <tool/tool_manager.h>
+-#include <tools/pcb_actions.h>
+-#include <view/view.h>
+ 
+-#include <nlohmann/json.hpp>
+-
+-#include <wx/button.h>
+-#include <wx/checkbox.h>
+-#include <wx/checklst.h>
+-#include <wx/choice.h>
+-#include <wx/gauge.h>
+-#include <wx/listbox.h>
+-#include <wx/listctrl.h>
+-#include <wx/notebook.h>
+-#include <wx/panel.h>
+-#include <wx/radiobox.h>
+-#include <wx/radiobut.h>
+ #include <wx/sizer.h>
+-#include <wx/spinctrl.h>
+-#include <wx/statline.h>
+-#include <wx/stattext.h>
+-#include <wx/textctrl.h>
+-#include <wx/tokenzr.h>
+-
+-#include <algorithm>
+-#include <set>
+-
+-DIALOG_AUTOROUTE* DIALOG_AUTOROUTE::s_open = nullptr;
+-std::string       DIALOG_AUTOROUTE::s_lastStatus;
+-
+-/// The settings of the last run, so the dialog opens the way it was left.
+-static AUTOROUTE_SETTINGS s_lastSettings;
+-static bool               s_haveLastSettings = false;
+-
+-
+-/**
+- * A filterable checklist of nets: a filter box, the list, and buttons to take the nets of the
+- * board selection or clear the choice.  Checked nets stay checked while filtered out.
+- */
+-class NET_CHECKLIST : public wxPanel
+-{
+-public:
+-    NET_CHECKLIST( wxWindow* aParent, PCB_EDIT_FRAME* aFrame ) :
+-            wxPanel( aParent ),
+-            m_frame( aFrame )
+-    {
+-        wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-        wxBoxSizer* row = new wxBoxSizer( wxHORIZONTAL );
+-
+-        m_filter = new wxTextCtrl( this, wxID_ANY, wxEmptyString );
+-        m_filter->SetHint( _( "Filter nets" ) );
+-        row->Add( m_filter, 1, wxALIGN_CENTER_VERTICAL );
+-
+-        wxButton* fromSel = new wxButton( this, wxID_ANY, _( "Use Selection" ) );
+-        wxButton* none = new wxButton( this, wxID_ANY, _( "Clear" ) );
+-        row->Add( fromSel, 0, wxLEFT, 6 );
+-        row->Add( none, 0, wxLEFT, 6 );
+-        top->Add( row, 0, wxEXPAND | wxBOTTOM, 4 );
+-
+-        m_list = new wxCheckListBox( this, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 150 ) ) );
+-        top->Add( m_list, 1, wxEXPAND );
+-
+-        m_count = new wxStaticText( this, wxID_ANY, wxEmptyString );
+-        top->Add( m_count, 0, wxTOP, 2 );
+-        SetSizer( top );
+-
+-        for( NETINFO_ITEM* net : aFrame->GetBoard()->GetNetInfo() )
+-        {
+-            if( net->GetNetCode() > 0 && !net->GetNetname().IsEmpty() )
+-                m_all.push_back( net->GetNetname() );
+-        }
+-
+-        std::sort( m_all.begin(), m_all.end(),
+-                   []( const wxString& a, const wxString& b ) { return a.CmpNoCase( b ) < 0; } );
+-
+-        m_filter->Bind( wxEVT_TEXT, [this]( wxCommandEvent& ) { rebuild(); } );
+-        m_list->Bind( wxEVT_CHECKLISTBOX,
+-                      [this]( wxCommandEvent& aEvent )
+-                      {
+-                          int      i = aEvent.GetInt();
+-                          wxString net = m_shown[i];
+-
+-                          if( m_list->IsChecked( i ) )
+-                              m_checked.insert( net );
+-                          else
+-                              m_checked.erase( net );
+-
+-                          updateCount();
+-                          wxCommandEvent changed( wxEVT_CHECKLISTBOX, GetId() );
+-                          wxPostEvent( GetParent(), changed );
+-                      } );
+-        fromSel->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { useSelection(); } );
+-        none->Bind( wxEVT_BUTTON,
+-                    [this]( wxCommandEvent& )
+-                    {
+-                        m_checked.clear();
+-                        rebuild();
+-                    } );
+-        rebuild();
+-    }
+-
+-    void SetChecked( const std::vector<wxString>& aNets )
+-    {
+-        m_checked = std::set<wxString>( aNets.begin(), aNets.end() );
+-        rebuild();
+-    }
+-
+-    std::vector<wxString> GetChecked() const
+-    {
+-        std::vector<wxString> out;
+-
+-        for( const wxString& net : m_all )
+-        {
+-            if( m_checked.count( net ) )
+-                out.push_back( net );
+-        }
+-
+-        return out;
+-    }
+ 
+-private:
+-    void rebuild()
+-    {
+-        wxString filter = m_filter->GetValue().Lower();
+-
+-        m_list->Freeze();
+-        m_list->Clear();
+-        m_shown.clear();
+-
+-        for( const wxString& net : m_all )
+-        {
+-            if( !filter.IsEmpty() && !net.Lower().Contains( filter ) )
+-                continue;
+-
+-            m_shown.push_back( net );
+-            int i = m_list->Append( net );
+-            m_list->Check( i, m_checked.count( net ) > 0 );
+-        }
+-
+-        m_list->Thaw();
+-        updateCount();
+-    }
+-
+-    void updateCount()
+-    {
+-        m_count->SetLabel( wxString::Format( _( "%zu of %zu nets chosen" ), m_checked.size(),
+-                                             m_all.size() ) );
+-    }
+-
+-    void useSelection()
+-    {
+-        for( EDA_ITEM* item : m_frame->GetCurrentSelection() )
+-        {
+-            if( FOOTPRINT* fp = dynamic_cast<FOOTPRINT*>( item ) )
+-            {
+-                for( PAD* pad : fp->Pads() )
+-                {
+-                    if( pad->GetNetCode() > 0 )
+-                        m_checked.insert( pad->GetNetname() );
+-                }
+-            }
+-            else if( BOARD_CONNECTED_ITEM* bci = dynamic_cast<BOARD_CONNECTED_ITEM*>( item ) )
+-            {
+-                if( bci->GetNetCode() > 0 )
+-                    m_checked.insert( bci->GetNetname() );
+-            }
+-        }
+-
+-        rebuild();
+-    }
+-
+-    PCB_EDIT_FRAME*       m_frame;
+-    wxTextCtrl*           m_filter;
+-    wxCheckListBox*       m_list;
+-    wxStaticText*         m_count;
+-    std::vector<wxString> m_all;
+-    std::vector<wxString> m_shown;
+-    std::set<wxString>    m_checked;
+-};
+ 
+-
+-static wxStaticText* note( wxWindow* aParent, const wxString& aText )
+-{
+-    wxStaticText* t = new wxStaticText( aParent, wxID_ANY, aText );
+-    t->SetFont( t->GetFont().Smaller() );
+-    t->Wrap( aParent->FromDIP( 520 ) );
+-    return t;
+-}
+-
+-
+-static wxString mmText( double aMm )
+-{
+-    return wxString::FromCDouble( aMm, 3 );
+-}
+-
+-
+-// ---------------------------------------------------------------------------------------------
+-
+-DIALOG_AUTOROUTE::DIALOG_AUTOROUTE( PCB_EDIT_FRAME* aFrame, const AUTOROUTE_SETTINGS* aSettings,
+-                                    bool aAutoStart ) :
++DIALOG_AUTOROUTE::DIALOG_AUTOROUTE( PCB_EDIT_FRAME* aFrame ) :
+         DIALOG_SHIM( aFrame, wxID_ANY, _( "Autoroute" ), wxDefaultPosition, wxDefaultSize,
+                      wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER ),
+-        m_frame( aFrame ),
+-        m_job( std::make_unique<AUTOROUTE_JOB>( aFrame ) ),
+-        m_timer( this ),
+-        m_autoStart( aAutoStart )
++        m_frame( aFrame )
+ {
+-    s_open = this;
+-
+-    // The dialog keeps its own last-used settings (and MCP passes its own), so the shim's
++    // The tool keeps its own last-used settings (and MCP passes its own), so the shim's
+     // control-state persistence must not overwrite them.
+     OptOut( this );
+ 
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-
+-    // ---- Setup: router, tabs ----
+-    m_setupPanel = new wxPanel( this );
+-    wxBoxSizer* setup = new wxBoxSizer( wxVERTICAL );
++    m_panel = new AUTOROUTE_PANEL( this, aFrame, this );
+ 
+-    wxBoxSizer* routerRow = new wxBoxSizer( wxHORIZONTAL );
+-    routerRow->Add( new wxStaticText( m_setupPanel, wxID_ANY, _( "Router:" ) ), 0,
+-                    wxALIGN_CENTER_VERTICAL | wxRIGHT, 8 );
+-    m_router = new wxChoice( m_setupPanel, wxID_ANY );
+-    m_router->Append( _( "KiCadRoutingTools (recommended)" ) );
+-    m_router->Append( _( "Freerouting" ) );
+-    routerRow->Add( m_router, 0, wxALIGN_CENTER_VERTICAL );
+-    setup->Add( routerRow, 0, wxALL, 8 );
+-
+-    m_routerInfo = note( m_setupPanel, wxEmptyString );
+-    setup->Add( m_routerInfo, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 8 );
+-
+-    m_book = new wxNotebook( m_setupPanel, wxID_ANY );
+-    m_book->AddPage( buildRoutePage( m_book ), _( "Route" ) );
+-    m_book->AddPage( buildFanoutPage( m_book ), _( "Fan Out" ) );
+-    m_book->AddPage( buildPlanesPage( m_book ), _( "Planes" ) );
+-    m_book->AddPage( buildOptimizePage( m_book ), _( "Optimize" ) );
+-    m_book->AddPage( buildSettingsPage( m_book ), _( "Settings" ) );
+-    setup->Add( m_book, 1, wxEXPAND | wxLEFT | wxRIGHT, 8 );
+-
+-    m_hint = note( m_setupPanel, wxEmptyString );
+-    setup->Add( m_hint, 0, wxALL | wxEXPAND, 8 );
+-    m_setupPanel->SetSizer( setup );
+-    top->Add( m_setupPanel, 1, wxEXPAND );
+-
+-    // ---- Run and result ----
+-    m_runPanel = buildRunPanel();
+-    top->Add( m_runPanel, 1, wxEXPAND );
+-
+-    // ---- Buttons ----
+-    wxBoxSizer* buttons = new wxBoxSizer( wxHORIZONTAL );
+-    m_fitBtn = new wxButton( this, wxID_ANY, _( "Zoom to Fit" ) );
+-    buttons->Add( m_fitBtn, 0, wxRIGHT, 8 );
+-    buttons->AddStretchSpacer();
+-    m_closeBtn = new wxButton( this, wxID_CANCEL, _( "Close" ) );
+-    m_pauseBtn = new wxButton( this, wxID_ANY, _( "Pause" ) );
+-    m_stopBtn = new wxButton( this, wxID_ANY, _( "Stop" ) );
+-    m_discardBtn = new wxButton( this, wxID_ANY, _( "Discard" ) );
+-    m_backBtn = new wxButton( this, wxID_ANY, _( "New Run" ) );
+-    m_keepBtn = new wxButton( this, wxID_ANY, _( "Keep" ) );
+-    m_runBtn = new wxButton( this, wxID_ANY, _( "Route" ) );
+-
+-    for( wxButton* b : { m_closeBtn, m_pauseBtn, m_stopBtn, m_discardBtn, m_backBtn, m_keepBtn,
+-                         m_runBtn } )
+-    {
+-        buttons->Add( b, 0, wxLEFT, 8 );
+-    }
+-
+-    top->Add( new wxStaticLine( this ), 0, wxEXPAND | wxLEFT | wxRIGHT, 8 );
+-    top->Add( buttons, 0, wxEXPAND | wxALL, 8 );
++    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
++    top->Add( m_panel, 1, wxEXPAND );
+     SetSizer( top );
+ 
+-    m_runBtn->SetDefault();
+-    m_runBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { start(); } );
+-    m_pauseBtn->Bind( wxEVT_BUTTON,
+-                      [this]( wxCommandEvent& )
+-                      {
+-                          if( m_job->GetState() == AUTOROUTE_JOB::STATE::PAUSED )
+-                              DoResume();
+-                          else
+-                              DoPause();
+-                      } );
+-    m_stopBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoStop(); } );
+-    m_discardBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoDiscard(); } );
+-    m_keepBtn->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { DoKeep(); } );
+-    m_backBtn->Bind( wxEVT_BUTTON,
+-                     [this]( wxCommandEvent& )
+-                     {
+-                         clearHighlight();
+-                         setView( VIEW::SETUP );
+-                     } );
+-    m_fitBtn->Bind( wxEVT_BUTTON,
+-                    [this]( wxCommandEvent& )
+-                    {
+-                        m_frame->GetToolManager()->RunAction( ACTIONS::zoomFitScreen );
+-                    } );
+-    m_router->Bind( wxEVT_CHOICE, [this]( wxCommandEvent& ) { updateRouterHints(); } );
+-    m_book->Bind( wxEVT_NOTEBOOK_PAGE_CHANGED,
+-                  [this]( wxBookCtrlEvent& aEvent )
+-                  {
+-                      aEvent.Skip();
+-                      updateRunButton();
+-                  } );
+     Bind( wxEVT_CLOSE_WINDOW, &DIALOG_AUTOROUTE::onClose, this );
+-    Bind( wxEVT_TIMER, &DIALOG_AUTOROUTE::onTimer, this );
+-
+-    if( aSettings )
+-        loadSettings( *aSettings );
+-    else if( s_haveLastSettings )
+-        loadSettings( s_lastSettings );
+-    else
+-        loadSettings( AUTOROUTE_SETTINGS() );
+-
+-    setView( VIEW::SETUP );
+     finishDialogSettings();
+-
+-    if( m_autoStart )
+-    {
+-        Bind( wxEVT_INIT_DIALOG,
+-              [this]( wxInitDialogEvent& aEvent )
+-              {
+-                  aEvent.Skip();
+-                  CallAfter(
+-                          [this]()
+-                          {
+-                              start();
+-                              m_autoStartDone = true;
+-                          } );
+-              } );
+-    }
+ }
+ 
+ 
+-DIALOG_AUTOROUTE::~DIALOG_AUTOROUTE()
++void DIALOG_AUTOROUTE::PanelLayoutChanged( bool aRunning )
+ {
+-    m_timer.Stop();
+-    clearHighlight();
+-
+-    if( m_job->GetState() != AUTOROUTE_JOB::STATE::IDLE )
+-        s_lastStatus = m_job->StatusJson().dump();
+-
+-    if( s_open == this )
+-        s_open = nullptr;
+-}
+-
+-
+-DIALOG_AUTOROUTE* DIALOG_AUTOROUTE::Open()
+-{
+-    return s_open;
+-}
+-
+-
+-wxPanel* DIALOG_AUTOROUTE::buildRoutePage( wxNotebook* aBook )
+-{
+-    wxPanel*    page = new wxPanel( aBook );
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-    BOARD*      board = m_frame->GetBoard();
+-
+-    m_routeAll = new wxRadioButton( page, wxID_ANY, _( "Every unrouted net" ), wxDefaultPosition,
+-                                    wxDefaultSize, wxRB_GROUP );
+-    m_routeChosen = new wxRadioButton( page, wxID_ANY, _( "Only these nets:" ) );
+-    top->Add( m_routeAll, 0, wxALL, 6 );
+-    top->Add( m_routeChosen, 0, wxLEFT | wxRIGHT, 6 );
+-
+-    m_routeNets = new NET_CHECKLIST( page, m_frame );
+-    top->Add( m_routeNets, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6 );
+-
+-    m_bus = new wxCheckBox( page, wxID_ANY,
+-                            _( "Route the chosen nets together, side by side like a bus" ) );
+-    top->Add( m_bus, 0, wxALL, 6 );
+-
+-    wxBoxSizer* between = new wxBoxSizer( wxHORIZONTAL );
+-    m_betweenOn = new wxCheckBox( page, wxID_ANY, _( "Only between these parts:" ) );
+-    m_betweenParts = new wxTextCtrl( page, wxID_ANY, wxEmptyString );
+-    m_betweenParts->SetHint( _( "e.g. U1, J3" ) );
+-    wxButton* partsFromSel = new wxButton( page, wxID_ANY, _( "Use Selection" ) );
+-    between->Add( m_betweenOn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6 );
+-    between->Add( m_betweenParts, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6 );
+-    between->Add( partsFromSel, 0, wxALIGN_CENTER_VERTICAL );
+-    top->Add( between, 0, wxEXPAND | wxLEFT | wxRIGHT, 6 );
+-    top->Add( note( page, _( "Routes the nets' connections among two or more parts only; their "
+-                             "pads on other parts are left unrouted." ) ),
+-              0, wxLEFT | wxRIGHT | wxTOP, 6 );
+-
+-    partsFromSel->Bind( wxEVT_BUTTON,
+-                        [this]( wxCommandEvent& )
+-                        {
+-                            wxString refs;
+-
+-                            for( EDA_ITEM* item : m_frame->GetCurrentSelection() )
+-                            {
+-                                FOOTPRINT* fp = dynamic_cast<FOOTPRINT*>( item );
+-
+-                                if( !fp && item->GetParent() )
+-                                    fp = dynamic_cast<FOOTPRINT*>( item->GetParent() );
+-
+-                                if( fp && !refs.Contains( fp->GetReference() ) )
+-                                    refs << ( refs.IsEmpty() ? wxS( "" ) : wxS( ", " ) )
+-                                         << fp->GetReference();
+-                            }
+-
+-                            m_betweenParts->SetValue( refs );
+-                            m_betweenOn->SetValue( !refs.IsEmpty() );
+-                        } );
+-    m_betweenParts->Bind( wxEVT_TEXT,
+-                          [this]( wxCommandEvent& )
+-                          {
+-                              m_betweenOn->SetValue( !m_betweenParts->GetValue().Trim().IsEmpty() );
+-                          } );
+-
+-    wxBoxSizer* lower = new wxBoxSizer( wxHORIZONTAL );
+-    wxBoxSizer* layerCol = new wxBoxSizer( wxVERTICAL );
+-    layerCol->Add( new wxStaticText( page, wxID_ANY, _( "Route on these layers:" ) ), 0,
+-                   wxBOTTOM, 4 );
+-    m_layers = new wxCheckListBox( page, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( 160, 90 ) ) );
+-
+-    for( PCB_LAYER_ID layer : board->GetEnabledLayers().CuStack() )
+-        m_layers->Append( board->GetLayerName( layer ) );
+-
+-    layerCol->Add( m_layers, 1, wxEXPAND );
+-    lower->Add( layerCol, 0, wxEXPAND | wxRIGHT, 16 );
+-
+-    wxBoxSizer* firstCol = new wxBoxSizer( wxVERTICAL );
+-    firstCol->Add( new wxStaticText( page, wxID_ANY, _( "Before routing:" ) ), 0, wxBOTTOM, 4 );
+-    m_planesFirst = new wxCheckBox( page, wxID_ANY, _( "Pour the planes on the Planes tab" ) );
+-    m_fanoutFirst = new wxCheckBox( page, wxID_ANY, _( "Fan out the parts on the Fan Out tab" ) );
+-    firstCol->Add( m_planesFirst, 0, wxBOTTOM, 4 );
+-    firstCol->Add( m_fanoutFirst, 0, wxBOTTOM, 4 );
+-    firstCol->Add( note( page, _( "Fine-pitch chips (0.5 mm pitch and below) usually route only "
+-                                  "after they are fanned out." ) ),
+-                   0, wxTOP, 4 );
+-    lower->Add( firstCol, 1, wxEXPAND );
+-    top->Add( lower, 0, wxEXPAND | wxALL, 6 );
+-
+-    page->SetSizer( top );
+-
+-    auto toggle =
+-            [this]( wxCommandEvent& )
+-            {
+-                m_routeNets->Enable( m_routeChosen->GetValue() );
+-                updateRouterHints();
+-            };
+-
+-    m_routeAll->Bind( wxEVT_RADIOBUTTON, toggle );
+-    m_routeChosen->Bind( wxEVT_RADIOBUTTON, toggle );
+-    return page;
+-}
+-
+-
+-wxPanel* DIALOG_AUTOROUTE::buildFanoutPage( wxNotebook* aBook )
+-{
+-    wxPanel*    page = new wxPanel( aBook );
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-    BOARD*      board = m_frame->GetBoard();
+-
+-    top->Add( note( page, _( "Fanning out pulls a short track (and a via where needed) out of "
+-                             "every pin of a dense part, so the router can reach the pins. "
+-                             "KiCadRoutingTools only." ) ),
+-              0, wxALL | wxEXPAND, 6 );
+-
+-    m_fanoutParts = new wxCheckListBox( page, wxID_ANY, wxDefaultPosition,
+-                                        FromDIP( wxSize( -1, 180 ) ) );
+-
+-    std::vector<std::pair<wxString, FOOTPRINT*>> parts;
+-
+-    for( FOOTPRINT* fp : board->Footprints() )
+-    {
+-        if( fp->Pads().size() >= 8 )
+-            parts.emplace_back( fp->GetReference(), fp );
+-    }
+-
+-    std::sort( parts.begin(), parts.end(),
+-               []( const auto& a, const auto& b ) { return a.first.CmpNoCase( b.first ) < 0; } );
+-
+-    for( const auto& [ref, fp] : parts )
+-    {
+-        int pitch = 0;
+-
+-        for( size_t i = 0; i < fp->Pads().size(); i++ )
+-        {
+-            for( size_t j = i + 1; j < fp->Pads().size(); j++ )
+-            {
+-                int d = ( fp->Pads()[i]->GetPosition() - fp->Pads()[j]->GetPosition() ).EuclideanNorm();
+-
+-                if( d > 0 && ( pitch == 0 || d < pitch ) )
+-                    pitch = d;
+-            }
+-        }
+-
+-        m_fanoutRefs.push_back( ref );
+-        m_fanoutParts->Append( wxString::Format( wxS( "%s    %s    (%zu pads, %s mm pitch)" ), ref,
+-                                                 fp->GetFPID().GetLibItemName().wx_str(),
+-                                                 fp->Pads().size(),
+-                                                 mmText( pcbIUScale.IUTomm( pitch ) ) ) );
+-        m_fanoutParts->SetClientData( m_fanoutParts->GetCount() - 1,
+-                                      reinterpret_cast<void*>( (intptr_t) pitch ) );
+-    }
+-
+-    top->Add( m_fanoutParts, 1, wxEXPAND | wxLEFT | wxRIGHT, 6 );
+-
+-    wxBoxSizer* row = new wxBoxSizer( wxHORIZONTAL );
+-    wxButton*   fine = new wxButton( page, wxID_ANY, _( "Choose Fine-Pitch Parts" ) );
+-    row->Add( fine, 0, wxRIGHT, 16 );
+-    row->Add( new wxStaticText( page, wxID_ANY, _( "Track width:" ) ), 0,
+-              wxALIGN_CENTER_VERTICAL | wxRIGHT, 6 );
+-    m_fanoutWidth = new wxTextCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
+-                                    FromDIP( wxSize( 70, -1 ) ) );
+-    m_fanoutWidth->SetHint( _( "board min" ) );
+-    row->Add( m_fanoutWidth, 0, wxALIGN_CENTER_VERTICAL );
+-    row->Add( new wxStaticText( page, wxID_ANY, _( "mm" ) ), 0, wxALIGN_CENTER_VERTICAL | wxLEFT,
+-              4 );
+-    top->Add( row, 0, wxALL, 6 );
+-
+-    top->Add( note( page, wxString::Format( _( "Leave the width empty to use the board's minimum "
+-                                               "track width (%s mm, Board Setup > Constraints)." ),
+-                                            mmText( pcbIUScale.IUTomm(
+-                                                    board->GetDesignSettings().m_TrackMinWidth ) ) ) ),
+-              0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
+-
+-    page->SetSizer( top );
+-    fine->Bind( wxEVT_BUTTON, [this]( wxCommandEvent& ) { selectFinePitchParts(); } );
+-    m_fanoutParts->Bind( wxEVT_CHECKLISTBOX, [this]( wxCommandEvent& ) { updateRouterHints(); } );
+-    return page;
+-}
+-
+-
+-void DIALOG_AUTOROUTE::selectFinePitchParts()
+-{
+-    int limit = pcbIUScale.mmToIU( 0.51 );
+-
+-    for( unsigned i = 0; i < m_fanoutParts->GetCount(); i++ )
+-    {
+-        int pitch = (int) reinterpret_cast<intptr_t>( m_fanoutParts->GetClientData( i ) );
+-        m_fanoutParts->Check( i, pitch > 0 && pitch <= limit );
+-    }
+-
+-    updateRouterHints();
+-}
+-
+-
+-wxPanel* DIALOG_AUTOROUTE::buildPlanesPage( wxNotebook* aBook )
+-{
+-    wxPanel*    page = new wxPanel( aBook );
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-    BOARD*      board = m_frame->GetBoard();
+-
+-    top->Add( note( page, _( "A plane is a copper zone over the whole board on one layer, "
+-                             "usually ground or a supply on an inner layer. The router connects "
+-                             "pads to it with vias. Add inner layers in Board Setup > Physical "
+-                             "Stackup." ) ),
+-              0, wxALL | wxEXPAND, 6 );
+-
+-    wxBoxSizer* row = new wxBoxSizer( wxHORIZONTAL );
+-    m_planeNet = new wxChoice( page, wxID_ANY );
+-    m_planeLayer = new wxChoice( page, wxID_ANY );
+-
+-    std::vector<wxString> nets;
+-
+-    for( NETINFO_ITEM* net : board->GetNetInfo() )
+-    {
+-        if( net->GetNetCode() > 0 && !net->GetNetname().IsEmpty() )
+-            nets.push_back( net->GetNetname() );
+-    }
+-
+-    std::sort( nets.begin(), nets.end(),
+-               []( const wxString& a, const wxString& b ) { return a.CmpNoCase( b ) < 0; } );
+-
+-    for( const wxString& net : nets )
+-        m_planeNet->Append( net );
+-
+-    for( PCB_LAYER_ID layer : board->GetEnabledLayers().CuStack() )
+-        m_planeLayer->Append( board->GetLayerName( layer ) );
+-
+-    // Sensible first choices: ground, and the first inner layer if there is one.
+-    for( unsigned i = 0; i < m_planeNet->GetCount(); i++ )
+-    {
+-        if( m_planeNet->GetString( i ).Upper() == wxS( "GND" ) )
+-            m_planeNet->SetSelection( i );
+-    }
+-
+-    if( m_planeNet->GetSelection() == wxNOT_FOUND && m_planeNet->GetCount() )
+-        m_planeNet->SetSelection( 0 );
+-
+-    m_planeLayer->SetSelection( m_planeLayer->GetCount() > 2 ? 1 : 0 );
+-
+-    wxButton* add = new wxButton( page, wxID_ANY, _( "Add" ) );
+-    row->Add( m_planeNet, 1, wxRIGHT, 6 );
+-    row->Add( new wxStaticText( page, wxID_ANY, _( "on" ) ), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT,
+-              6 );
+-    row->Add( m_planeLayer, 0, wxRIGHT, 6 );
+-    row->Add( add, 0 );
+-    top->Add( row, 0, wxEXPAND | wxLEFT | wxRIGHT, 6 );
+-
+-    m_planeList = new wxListBox( page, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 120 ) ) );
+-    top->Add( m_planeList, 1, wxEXPAND | wxALL, 6 );
+-
+-    wxBoxSizer* row2 = new wxBoxSizer( wxHORIZONTAL );
+-    wxButton*   remove = new wxButton( page, wxID_ANY, _( "Remove" ) );
+-    wxButton*   setupBtn = new wxButton( page, wxID_ANY, _( "Board Setup..." ) );
+-    row2->Add( remove, 0, wxRIGHT, 8 );
+-    row2->Add( setupBtn, 0 );
+-    top->Add( row2, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
+-
+-    page->SetSizer( top );
+-
+-    add->Bind( wxEVT_BUTTON,
+-               [this]( wxCommandEvent& )
+-               {
+-                   if( m_planeNet->GetSelection() == wxNOT_FOUND
+-                       || m_planeLayer->GetSelection() == wxNOT_FOUND )
+-                   {
+-                       return;
+-                   }
+-
+-                   AR_PLANE plane{ m_planeNet->GetStringSelection(),
+-                                   m_planeLayer->GetStringSelection() };
+-
+-                   for( const AR_PLANE& p : m_planes )
+-                   {
+-                       if( p.layer == plane.layer && p.net == plane.net )
+-                           return;
+-                   }
+-
+-                   m_planes.push_back( plane );
+-                   fillPlanesList();
+-               } );
+-    remove->Bind( wxEVT_BUTTON,
+-                  [this]( wxCommandEvent& )
+-                  {
+-                      int i = m_planeList->GetSelection();
+-
+-                      if( i != wxNOT_FOUND && i < (int) m_planes.size() )
+-                      {
+-                          m_planes.erase( m_planes.begin() + i );
+-                          fillPlanesList();
+-                      }
+-                  } );
+-    setupBtn->Bind( wxEVT_BUTTON,
+-                    [this]( wxCommandEvent& )
+-                    {
+-                        DisplayInfoMessage( this, _( "Close the Autoroute tool, open File > "
+-                                                     "Board Setup > Physical Stackup and choose "
+-                                                     "4 or more copper layers. Then come back "
+-                                                     "here to add the planes." ) );
+-                    } );
+-    return page;
+-}
+-
+-
+-void DIALOG_AUTOROUTE::fillPlanesList()
+-{
+-    m_planeList->Clear();
+-
+-    for( const AR_PLANE& p : m_planes )
+-        m_planeList->Append( wxString::Format( _( "%s on %s" ), p.net, p.layer ) );
+-
+-    updateRouterHints();
+-}
+-
+-
+-wxPanel* DIALOG_AUTOROUTE::buildOptimizePage( wxNotebook* aBook )
+-{
+-    wxPanel*    page = new wxPanel( aBook );
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-
+-    top->Add( note( page, _( "Improve nets that are already routed, including ones you routed by "
+-                             "hand. Freerouting pulls the tracks tight and removes vias it can "
+-                             "do without. KiCadRoutingTools routes the chosen nets again from "
+-                             "scratch. Lock any track that must stay exactly as it is." ) ),
+-              0, wxALL | wxEXPAND, 6 );
+-
+-    m_optimizeAll = new wxRadioButton( page, wxID_ANY, _( "Every routed net" ), wxDefaultPosition,
+-                                       wxDefaultSize, wxRB_GROUP );
+-    m_optimizeChosen = new wxRadioButton( page, wxID_ANY, _( "Only these nets:" ) );
+-    top->Add( m_optimizeAll, 0, wxLEFT | wxRIGHT, 6 );
+-    top->Add( m_optimizeChosen, 0, wxLEFT | wxRIGHT | wxTOP, 6 );
+-
+-    m_optimizeNets = new NET_CHECKLIST( page, m_frame );
+-    top->Add( m_optimizeNets, 1, wxEXPAND | wxALL, 6 );
+-    page->SetSizer( top );
+-
+-    auto toggle =
+-            [this]( wxCommandEvent& )
+-            {
+-                m_optimizeNets->Enable( m_optimizeChosen->GetValue() );
+-                updateRouterHints();
+-            };
+-
+-    m_optimizeAll->Bind( wxEVT_RADIOBUTTON, toggle );
+-    m_optimizeChosen->Bind( wxEVT_RADIOBUTTON, toggle );
+-    return page;
+-}
+-
+-
+-wxPanel* DIALOG_AUTOROUTE::buildSettingsPage( wxNotebook* aBook )
+-{
+-    wxPanel*    page = new wxPanel( aBook );
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-
+-    wxString rules[] = { _( "Exactly the net class sizes" ),
+-                         _( "Down to the board's minimums where needed" ),
+-                         _( "Down to the fab's minimums where needed (reported)" ) };
+-    m_rules = new wxRadioBox( page, wxID_ANY, _( "Track widths and clearances (KiCadRoutingTools)" ),
+-                              wxDefaultPosition, wxDefaultSize, 3, rules, 1 );
+-    top->Add( m_rules, 0, wxEXPAND | wxALL, 6 );
+-
+-    wxFlexGridSizer* grid = new wxFlexGridSizer( 3, 6, 8 );
+-    grid->AddGrowableCol( 2 );
+-
+-    auto label = [&]( const wxString& aText )
+-    {
+-        grid->Add( new wxStaticText( page, wxID_ANY, aText ), 0, wxALIGN_CENTER_VERTICAL );
+-    };
+-
+-    label( _( "Routing grid:" ) );
+-    m_grid = new wxTextCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
+-                             FromDIP( wxSize( 80, -1 ) ) );
+-    grid->Add( m_grid, 0 );
+-    grid->Add( note( page, _( "mm. KiCadRoutingTools only; finer is slower. Freerouting has no "
+-                              "grid." ) ),
+-               0, wxALIGN_CENTER_VERTICAL );
+-
+-    label( _( "Via cost:" ) );
+-    m_viaCost = new wxSpinCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
+-                                FromDIP( wxSize( 100, -1 ) ), wxSP_ARROW_KEYS, 0, 5000, 0 );
+-    grid->Add( m_viaCost, 0 );
+-    grid->Add( note( page, _( "0 for the router's default. Higher means fewer vias and longer "
+-                              "tracks." ) ),
+-               0, wxALIGN_CENTER_VERTICAL );
+-
+-    label( _( "Optimizer passes:" ) );
+-    m_passes = new wxSpinCtrl( page, wxID_ANY, wxEmptyString, wxDefaultPosition,
+-                               FromDIP( wxSize( 100, -1 ) ), wxSP_ARROW_KEYS, 0, 100, 0 );
+-    grid->Add( m_passes, 0 );
+-    grid->Add( note( page, _( "Freerouting only; 0 for its default." ) ), 0,
+-               wxALIGN_CENTER_VERTICAL );
+-    top->Add( grid, 0, wxEXPAND | wxALL, 6 );
+-
+-    m_optimizeAfter = new wxCheckBox( page, wxID_ANY,
+-                                      _( "Optimize after routing (Freerouting)" ) );
+-    m_frFanout = new wxCheckBox( page, wxID_ANY,
+-                                 _( "Fan out every SMD pad before routing (Freerouting)" ) );
+-    m_live = new wxCheckBox( page, wxID_ANY,
+-                             _( "Show routes as they are found (Freerouting)" ) );
+-    m_refill = new wxCheckBox( page, wxID_ANY, _( "Refill zones when the result is kept" ) );
+-    m_ripOthers = new wxCheckBox( page, wxID_ANY,
+-                                  _( "When routing chosen nets, let the router move other nets' "
+-                                     "tracks to make room (KiCadRoutingTools)" ) );
+-
+-    for( wxCheckBox* c : { m_ripOthers, m_optimizeAfter, m_frFanout, m_live, m_refill } )
+-        top->Add( c, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6 );
+-
+-    page->SetSizer( top );
+-    return page;
+-}
+-
+-
+-wxPanel* DIALOG_AUTOROUTE::buildRunPanel()
+-{
+-    wxPanel*    panel = new wxPanel( this );
+-    wxBoxSizer* top = new wxBoxSizer( wxVERTICAL );
+-
+-    m_runTitle = new wxStaticText( panel, wxID_ANY, wxEmptyString );
+-    m_runTitle->SetFont( m_runTitle->GetFont().Larger().Bold() );
+-    top->Add( m_runTitle, 0, wxALL, 8 );
+-
+-    m_stage = new wxStaticText( panel, wxID_ANY, wxEmptyString );
+-    m_stage->SetFont( m_stage->GetFont().Bold() );
+-    top->Add( m_stage, 0, wxLEFT | wxRIGHT | wxEXPAND, 8 );
+-
+-    m_gauge = new wxGauge( panel, wxID_ANY, 100, wxDefaultPosition, FromDIP( wxSize( 380, -1 ) ) );
+-    top->Add( m_gauge, 0, wxEXPAND | wxALL, 8 );
+-
+-    m_counts = new wxStaticText( panel, wxID_ANY, wxEmptyString );
+-    top->Add( m_counts, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8 );
+-
+-    m_steps = new wxListCtrl( panel, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 110 ) ),
+-                              wxLC_REPORT | wxLC_SINGLE_SEL );
+-    m_steps->AppendColumn( _( "Step" ), wxLIST_FORMAT_LEFT, FromDIP( 170 ) );
+-    m_steps->AppendColumn( _( "Status" ), wxLIST_FORMAT_LEFT, FromDIP( 64 ) );
+-    m_steps->AppendColumn( _( "Details" ), wxLIST_FORMAT_LEFT, FromDIP( 150 ) );
+-    top->Add( m_steps, 0, wxEXPAND | wxLEFT | wxRIGHT, 8 );
+-
+-    m_openLabel = new wxStaticText( panel, wxID_ANY, _( "Nets still unrouted (tap one to see it):" ) );
+-    top->Add( m_openLabel, 0, wxLEFT | wxRIGHT | wxTOP, 8 );
+-    m_openNets = new wxListBox( panel, wxID_ANY, wxDefaultPosition, FromDIP( wxSize( -1, 100 ) ) );
+-    top->Add( m_openNets, 0, wxEXPAND | wxLEFT | wxRIGHT, 8 );
+-
+-    top->Add( new wxStaticText( panel, wxID_ANY, _( "Router output:" ) ), 0,
+-              wxLEFT | wxRIGHT | wxTOP, 8 );
+-    m_log = new wxTextCtrl( panel, wxID_ANY, wxEmptyString, wxDefaultPosition,
+-                            FromDIP( wxSize( 390, 120 ) ),
+-                            wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP );
+-    m_log->SetFont( wxFont( m_log->GetFont().GetPointSize() - 1, wxFONTFAMILY_TELETYPE,
+-                            wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL ) );
+-    top->Add( m_log, 1, wxEXPAND | wxALL, 8 );
+-
+-    panel->SetSizer( top );
+-
+-    m_openNets->Bind( wxEVT_LISTBOX,
+-                      [this]( wxCommandEvent& aEvent ) { zoomToNet( aEvent.GetString() ); } );
+-    return panel;
+-}
+-
+-
+-void DIALOG_AUTOROUTE::loadSettings( const AUTOROUTE_SETTINGS& s )
+-{
+-    m_router->SetSelection( s.router == AR_ROUTER::KRT ? 0 : 1 );
+-
+-    m_routeAll->SetValue( s.allNets );
+-    m_routeChosen->SetValue( !s.allNets );
+-    m_routeNets->SetChecked( s.nets );
+-    m_routeNets->Enable( !s.allNets );
+-    m_bus->SetValue( s.bus );
+-
+-    wxString parts;
+-
+-    for( const wxString& ref : s.betweenParts )
+-        parts << ( parts.IsEmpty() ? wxS( "" ) : wxS( ", " ) ) << ref;
+-
+-    m_betweenParts->ChangeValue( parts );
+-    m_betweenOn->SetValue( !s.betweenParts.empty() );
+-
+-    for( unsigned i = 0; i < m_layers->GetCount(); i++ )
+-    {
+-        m_layers->Check( i, s.layers.empty()
+-                                    || std::find( s.layers.begin(), s.layers.end(),
+-                                                  m_layers->GetString( i ) )
+-                                               != s.layers.end() );
+-    }
+-
+-    m_planesFirst->SetValue( s.planesFirst );
+-    m_fanoutFirst->SetValue( s.fanoutFirst );
+-
+-    for( unsigned i = 0; i < m_fanoutParts->GetCount(); i++ )
+-    {
+-        m_fanoutParts->Check( i, std::find( s.fanoutParts.begin(), s.fanoutParts.end(),
+-                                            m_fanoutRefs[i] )
+-                                         != s.fanoutParts.end() );
+-    }
+-
+-    m_fanoutWidth->SetValue( s.fanoutWidthMm > 0 ? mmText( s.fanoutWidthMm ) : wxString() );
+-    m_planes = s.planes;
+-    fillPlanesList();
+-
+-    m_optimizeAll->SetValue( s.optimizeAll );
+-    m_optimizeChosen->SetValue( !s.optimizeAll );
+-    m_optimizeNets->SetChecked( s.optimizeNets );
+-    m_optimizeNets->Enable( !s.optimizeAll );
+-
+-    m_rules->SetSelection( s.rules == AR_RULES::EXACT ? 0 : s.rules == AR_RULES::BOARD ? 1 : 2 );
+-    m_grid->SetValue( mmText( s.gridMm ) );
+-    m_viaCost->SetValue( s.viaCost );
+-    m_passes->SetValue( s.optimizerPasses );
+-    m_optimizeAfter->SetValue( s.optimizeAfter );
+-    m_frFanout->SetValue( s.freeroutingFanout );
+-    m_live->SetValue( s.liveView );
+-    m_refill->SetValue( s.refillZones );
+-    m_ripOthers->SetValue( s.ripOtherNets );
+-
+-    // A first use with no fan-out chosen yet: suggest the fine-pitch parts.
+-    if( !s_haveLastSettings && s.fanoutParts.empty() )
+-        selectFinePitchParts();
+-
+-    switch( s.task )
+-    {
+-    case AR_TASK::ROUTE:    m_book->SetSelection( 0 ); break;
+-    case AR_TASK::FANOUT:   m_book->SetSelection( 1 ); break;
+-    case AR_TASK::PLANES:   m_book->SetSelection( 2 ); break;
+-    case AR_TASK::OPTIMIZE: m_book->SetSelection( 3 ); break;
+-    }
+-
+-    updateRouterHints();
+-}
+-
+-
+-bool DIALOG_AUTOROUTE::readSettings( AUTOROUTE_SETTINGS& s, wxString& aError )
+-{
+-    s.router = m_router->GetSelection() == 1 ? AR_ROUTER::FREEROUTING : AR_ROUTER::KRT;
+-
+-    switch( m_book->GetSelection() )
+-    {
+-    case 1:  s.task = AR_TASK::FANOUT; break;
+-    case 2:  s.task = AR_TASK::PLANES; break;
+-    case 3:  s.task = AR_TASK::OPTIMIZE; break;
+-    default: s.task = AR_TASK::ROUTE; break;
+-    }
+-
+-    s.allNets = m_routeAll->GetValue();
+-    s.nets = m_routeNets->GetChecked();
+-    s.bus = m_bus->GetValue();
+-    s.betweenParts.clear();
+-
+-    if( m_betweenOn->GetValue() )
+-    {
+-        BOARD*            board = m_frame->GetBoard();
+-        wxStringTokenizer tok( m_betweenParts->GetValue(), wxS( ", ;" ), wxTOKEN_STRTOK );
+-
+-        while( tok.HasMoreTokens() )
+-        {
+-            wxString ref = tok.GetNextToken();
+-            bool     found = false;
+-
+-            for( FOOTPRINT* fp : board->Footprints() )
+-                found |= fp->GetReference() == ref;
+-
+-            if( !found )
+-            {
+-                aError = wxString::Format( _( "The board has no part %s." ), ref );
+-                return false;
+-            }
+-
+-            s.betweenParts.push_back( ref );
+-        }
+-
+-        if( s.betweenParts.size() < 2 )
+-        {
+-            aError = _( "Name at least two parts to route between." );
+-            return false;
+-        }
+-    }
+-
+-    s.layers.clear();
+-    bool allLayers = true;
+-
+-    for( unsigned i = 0; i < m_layers->GetCount(); i++ )
+-    {
+-        if( m_layers->IsChecked( i ) )
+-            s.layers.push_back( m_layers->GetString( i ) );
+-        else
+-            allLayers = false;
+-    }
+-
+-    if( s.layers.empty() )
+-    {
+-        aError = _( "Choose at least one layer to route on." );
+-        return false;
+-    }
+-
+-    if( allLayers )
+-        s.layers.clear();
+-
+-    s.planesFirst = m_planesFirst->GetValue();
+-    s.fanoutFirst = m_fanoutFirst->GetValue();
+-
+-    s.fanoutParts.clear();
+-
+-    for( unsigned i = 0; i < m_fanoutParts->GetCount(); i++ )
+-    {
+-        if( m_fanoutParts->IsChecked( i ) )
+-            s.fanoutParts.push_back( m_fanoutRefs[i] );
+-    }
+-
+-    s.fanoutWidthMm = 0;
+-
+-    if( !m_fanoutWidth->GetValue().Trim().IsEmpty()
+-        && ( !m_fanoutWidth->GetValue().ToCDouble( &s.fanoutWidthMm ) || s.fanoutWidthMm <= 0 ) )
+-    {
+-        aError = _( "The fan-out track width must be a number of millimetres." );
+-        return false;
+-    }
+-
+-    s.planes = m_planes;
+-    s.optimizeAll = m_optimizeAll->GetValue();
+-    s.optimizeNets = m_optimizeNets->GetChecked();
+-
+-    if( s.task == AR_TASK::OPTIMIZE && !s.optimizeAll && s.optimizeNets.empty() )
+-    {
+-        aError = _( "Choose at least one net to optimize." );
+-        return false;
+-    }
+-
+-    s.rules = m_rules->GetSelection() == 0 ? AR_RULES::EXACT
+-            : m_rules->GetSelection() == 1 ? AR_RULES::BOARD
+-                                           : AR_RULES::FAB;
+-
+-    if( !m_grid->GetValue().ToCDouble( &s.gridMm ) || s.gridMm < 0.01 || s.gridMm > 1.0 )
+-    {
+-        aError = _( "The routing grid must be between 0.01 and 1 mm." );
+-        return false;
+-    }
+-
+-    s.viaCost = m_viaCost->GetValue();
+-    s.optimizerPasses = m_passes->GetValue();
+-    s.optimizeAfter = m_optimizeAfter->GetValue();
+-    s.freeroutingFanout = m_frFanout->GetValue();
+-    s.liveView = m_live->GetValue();
+-    s.refillZones = m_refill->GetValue();
+-    s.ripOtherNets = m_ripOthers->GetValue();
+-    return true;
+-}
+-
+-
+-void DIALOG_AUTOROUTE::updateRouterHints()
+-{
+-    bool krt = m_router->GetSelection() != 1;
+-
+-    m_routerInfo->SetLabel(
+-            krt ? _( "KiCadRoutingTools by Andy Haas: a grid router with rip-up and reroute, "
+-                     "fan-out of fine-pitch parts, bus routing and plane connections. Runs in its "
+-                     "own process; large boards take minutes." )
+-                : _( "Freerouting: a gridless push-and-shove router with an optimizer. Routes "
+-                     "the whole board at once." ) );
+-    m_routerInfo->Wrap( FromDIP( 560 ) );
+-
+-    m_bus->Enable( krt && m_routeChosen->GetValue() );
+-    m_fanoutFirst->Enable( krt );
+-    m_rules->Enable( krt );
+-    m_grid->Enable( krt );
+-    m_ripOthers->Enable( krt );
+-    m_passes->Enable( !krt );
+-    m_optimizeAfter->Enable( !krt );
+-    m_frFanout->Enable( !krt );
+-    m_live->Enable( !krt );
+-
+-    wxString hint;
+-
+-    if( !krt && m_book->GetSelection() == 1 )
+-        hint = _( "Freerouting cannot fan out single parts. Choose KiCadRoutingTools, or use "
+-                  "Freerouting's fan-out of every SMD pad on the Settings tab." );
+-    else if( krt && !KIPLATFORM::ROUTER_PROCESS::IsRuntimeReady() )
+-        hint = _( "The first run unpacks KiCadRoutingTools (about 150 MB), which takes a minute." );
+-
+-    m_hint->SetLabel( hint );
+-    m_hint->Wrap( FromDIP( 560 ) );
+-    updateRunButton();
+-    Layout();
+-}
+-
+-
+-void DIALOG_AUTOROUTE::updateRunButton()
+-{
+-    switch( m_book->GetSelection() )
+-    {
+-    case 1:  m_runBtn->SetLabel( _( "Fan Out" ) ); break;
+-    case 2:  m_runBtn->SetLabel( _( "Pour Planes" ) ); break;
+-    case 3:  m_runBtn->SetLabel( _( "Optimize" ) ); break;
+-    default: m_runBtn->SetLabel( _( "Route" ) ); break;
+-    }
+-
+-    bool krt = m_router->GetSelection() != 1;
+-    m_runBtn->Enable( !( !krt && m_book->GetSelection() == 1 ) );
+-
+-    if( m_book->GetSelection() == 4 )
+-        m_runBtn->SetLabel( _( "Route" ) );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::start()
+-{
+-    AUTOROUTE_SETTINGS settings;
+-    wxString           error;
+-
+-    // From the Settings tab, the button routes.
+-    if( m_book->GetSelection() == 4 )
+-        m_book->SetSelection( 0 );
+-
+-    if( !readSettings( settings, error ) )
+-    {
+-        m_startError = error;
+-
+-        if( !m_autoStart )
+-            DisplayErrorMessage( this, error );
+-
+-        return;
+-    }
+-
+-    if( !m_job->Start( settings, error ) )
+-    {
+-        m_startError = error;
+-
+-        if( !m_autoStart )
+-            DisplayErrorMessage( this, error );
+-
+-        return;
+-    }
+-
+-    s_lastSettings = settings;
+-    s_haveLastSettings = true;
+-    m_startError.clear();
+-    m_shownLogLines = 0;
+-    m_log->Clear();
+-    setView( VIEW::RUN );
+-    m_timer.Start( 300 );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::setView( VIEW aView )
+-{
+-    m_view = aView;
+-
+-    bool setup = aView == VIEW::SETUP;
+-    bool run = aView == VIEW::RUN;
+-    bool result = aView == VIEW::RESULT;
+-
+-    m_setupPanel->Show( setup );
+-    m_runPanel->Show( !setup );
+-    m_openLabel->Show( result && !m_job->GetOpenNets().empty() );
+-    m_openNets->Show( result && !m_job->GetOpenNets().empty() );
+-
+-    m_closeBtn->Show( setup );
+-    m_runBtn->Show( setup );
+-    m_fitBtn->Show( !setup );
+-    m_pauseBtn->Show( run );
+-    m_stopBtn->Show( run );
+-    m_discardBtn->Show( result && m_job->ChangedBoard() );
+-    m_backBtn->Show( result );
+-    m_keepBtn->Show( result );
+-
+-    if( result )
+-    {
+-        m_openNets->Clear();
+-
+-        for( const wxString& net : m_job->GetOpenNets() )
+-            m_openNets->Append( net );
+-    }
+-
+-    if( !setup )
+-        refreshRunView();
+-
+-    m_runPanel->Layout();
+-    m_setupPanel->Layout();
+     Layout();
+     GetSizer()->Fit( this );
+ 
+-    if( result )
+-        m_log->ShowPosition( m_log->GetLastPosition() );
+-
+-    if( !setup )
+-        moveToCorner();
+-    else
+-        Centre();
+-}
+-
+-
+-void DIALOG_AUTOROUTE::moveToCorner()
+-{
+-    // Sit at the right of the editor, so the board stays in view while it is routed.
+-    wxRect frameRect = m_frame->GetScreenRect();
+-    wxSize size = GetSize();
+-    Move( wxPoint( frameRect.GetRight() - size.x - 24, frameRect.GetTop() + 120 ) );
+-}
+-
+-
+-static wxString duration( long aMs )
+-{
+-    long secs = aMs / 1000;
+-
+-    if( secs < 60 )
+-        return wxString::Format( _( "%ld s" ), secs );
+-
+-    return wxString::Format( wxS( "%ld:%02ld" ), secs / 60, secs % 60 );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::refreshRunView()
+-{
+-    const AUTOROUTE_JOB::PROGRESS& p = m_job->GetProgress();
+-    AUTOROUTE_JOB::STATE           state = m_job->GetState();
+-
+-    wxString title = m_job->GetSettings().task == AR_TASK::OPTIMIZE ? _( "Optimizing with %s" )
+-                                                                    : _( "Routing with %s" );
+-    title = wxString::Format( title, AUTOROUTE_JOB::RouterName( m_job->GetSettings().router ) );
+-
+-    if( state == AUTOROUTE_JOB::STATE::PAUSED )
+-        title += wxS( "  " ) + _( "(paused)" );
+-
+-    m_runTitle->SetLabel( title );
+-
+-    wxString stage = state == AUTOROUTE_JOB::STATE::FAILED && !m_job->GetError().IsEmpty()
+-                             ? p.stage + wxS( "\n" ) + m_job->GetError()
+-                             : p.stage;
+-    m_stage->SetLabel( stage );
+-    m_stage->Wrap( FromDIP( 390 ) );
+-
+-    if( p.total > 0 )
+-    {
+-        m_gauge->SetRange( p.total );
+-        m_gauge->SetValue( std::min( std::max( p.done, 0 ), p.total ) );
+-    }
+-    else if( m_job->IsActive() )
++    if( aRunning )
+     {
+-        m_gauge->Pulse();
++        // Sit at the right of the editor, so the board stays in view while it is routed.
++        wxRect frameRect = m_frame->GetScreenRect();
++        wxSize size = GetSize();
++        Move( wxPoint( frameRect.GetRight() - size.x - 24, frameRect.GetTop() + 120 ) );
+     }
+     else
+     {
+-        m_gauge->SetRange( 1 );
+-        m_gauge->SetValue( state == AUTOROUTE_JOB::STATE::FINISHED ? 1 : 0 );
+-    }
+-
+-    wxArrayString counts;
+-
+-    if( state == AUTOROUTE_JOB::STATE::PREPARING && p.total > 0 )
+-        counts.Add( wxString::Format( _( "%d of %d files" ), p.done, p.total ) );
+-    else if( p.total > 0 && m_job->GetSettings().router == AR_ROUTER::FREEROUTING )
+-        counts.Add( wxString::Format( _( "%d of %d connections" ), p.done, p.total ) );
+-    else if( p.total > 0 && m_job->IsActive() )
+-        counts.Add( wxString::Format( _( "net %d of %d" ), p.done + 1, p.total ) );
+-
+-    if( !p.net.IsEmpty() && m_job->IsActive() )
+-        counts.Add( p.net );
+-
+-    if( p.failed > 0 )
+-        counts.Add( wxString::Format( _( "%d failed" ), p.failed ) );
+-
+-    if( p.vias >= 0 )
+-        counts.Add( wxString::Format( _( "%d vias" ), p.vias ) );
+-
+-    if( p.lengthMm > 0 )
+-        counts.Add( wxString::Format( _( "%.0f mm of track" ), p.lengthMm ) );
+-
+-    counts.Add( duration( p.elapsedMs ) );
+-
+-    wxString countText;
+-
+-    for( size_t i = 0; i < counts.size(); i++ )
+-        countText << ( i ? wxS( "    " ) : wxS( "" ) ) << counts[i];
+-
+-    m_counts->SetLabel( countText );
+-
+-    // Steps
+-    const std::vector<AUTOROUTE_JOB::STEP>& steps = m_job->GetSteps();
+-
+-    if( m_steps->GetItemCount() != (int) steps.size() )
+-    {
+-        m_steps->DeleteAllItems();
+-
+-        for( size_t i = 0; i < steps.size(); i++ )
+-            m_steps->InsertItem( i, steps[i].title );
+-    }
+-
+-    for( size_t i = 0; i < steps.size(); i++ )
+-    {
+-        wxString status;
+-
+-        switch( steps[i].state )
+-        {
+-        case AUTOROUTE_JOB::STEP_STATE::PENDING: status = _( "Waiting" ); break;
+-        case AUTOROUTE_JOB::STEP_STATE::RUNNING:
+-            status = state == AUTOROUTE_JOB::STATE::PAUSED ? _( "Paused" ) : _( "Running" );
+-            break;
+-        case AUTOROUTE_JOB::STEP_STATE::DONE:    status = _( "Done" ); break;
+-        case AUTOROUTE_JOB::STEP_STATE::FAILED:  status = _( "Failed" ); break;
+-        case AUTOROUTE_JOB::STEP_STATE::SKIPPED: status = _( "Skipped" ); break;
+-        }
+-
+-        m_steps->SetItem( i, 0, steps[i].title );
+-        m_steps->SetItem( i, 1, status );
+-        m_steps->SetItem( i, 2, steps[i].detail );
+-    }
+-
+-    // Log: append the new lines only.
+-    const std::deque<wxString>& log = m_job->GetLog();
+-
+-    if( log.size() < m_shownLogLines )
+-    {
+-        m_log->Clear();
+-        m_shownLogLines = 0;
+-    }
+-
+-    if( log.size() > m_shownLogLines )
+-    {
+-        wxString add;
+-
+-        for( size_t i = m_shownLogLines; i < log.size(); i++ )
+-            add << log[i] << wxS( "\n" );
+-
+-        m_log->AppendText( add );
+-        m_shownLogLines = log.size();
+-    }
+-
+-    m_pauseBtn->SetLabel( state == AUTOROUTE_JOB::STATE::PAUSED ? _( "Resume" ) : _( "Pause" ) );
+-    m_pauseBtn->Enable( state == AUTOROUTE_JOB::STATE::RUNNING
+-                        || state == AUTOROUTE_JOB::STATE::PAUSED );
+-    m_stopBtn->Enable( state != AUTOROUTE_JOB::STATE::STOPPING );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::onTimer( wxTimerEvent& aEvent )
+-{
+-    m_job->Poll();
+-
+-    if( m_view == VIEW::RUN && !m_job->IsActive() )
+-    {
+-        m_timer.Stop();
+-        setView( VIEW::RESULT );
+-        return;
++        Centre();
+     }
+-
+-    refreshRunView();
+-}
+-
+-
+-bool DIALOG_AUTOROUTE::DoPause()
+-{
+-    bool ok = m_job->Pause();
+-    refreshRunView();
+-    return ok;
+ }
+ 
+ 
+-bool DIALOG_AUTOROUTE::DoResume()
++void DIALOG_AUTOROUTE::CloseTool( bool aToggleDock )
+ {
+-    bool ok = m_job->Resume();
+-    refreshRunView();
+-    return ok;
+-}
+-
+-
+-void DIALOG_AUTOROUTE::DoStop()
+-{
+-    m_job->Stop();
+-    refreshRunView();
+-}
+-
+-
+-void DIALOG_AUTOROUTE::DoKeep()
+-{
+-    if( m_job->IsActive() )
+-        return;
+-
+-    bool fill = m_job->ChangedBoard() && m_job->GetSettings().refillZones;
+-
+-    clearHighlight();
+     EndModal( wxID_OK );
+ 
+-    if( fill )
+-        m_frame->GetToolManager()->PostAction( PCB_ACTIONS::zoneFillAll );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::DoDiscard()
+-{
+-    if( m_job->IsActive() )
+-        return;
+-
+-    clearHighlight();
+-    m_job->Discard();
+-    setView( VIEW::SETUP );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::onClose( wxCloseEvent& aEvent )
+-{
+-    if( m_job->IsActive() )
++    if( aToggleDock )
+     {
+-        // Closing while a run is active means stop; the result is offered when it ends.
+-        DoStop();
+-        aEvent.Veto();
+-        return;
+-    }
+-
+-    if( m_view == VIEW::RESULT )
+-    {
+-        DoKeep();
+-        return;
+-    }
+-
+-    clearHighlight();
+-    EndModal( wxID_CANCEL );
+-}
+-
+-
+-void DIALOG_AUTOROUTE::zoomToNet( const wxString& aNet )
+-{
+-    BOARD*        board = m_frame->GetBoard();
+-    NETINFO_ITEM* net = board->FindNet( aNet );
+-
+-    if( !net )
+-        return;
+-
+-    BOX2I box;
+-    bool  first = true;
+-
+-    for( FOOTPRINT* fp : board->Footprints() )
+-    {
+-        for( PAD* pad : fp->Pads() )
+-        {
+-            if( pad->GetNetCode() != net->GetNetCode() )
+-                continue;
+-
+-            if( first )
+-                box = pad->GetBoundingBox();
+-            else
+-                box.Merge( pad->GetBoundingBox() );
+-
+-            first = false;
+-        }
++        PCB_EDIT_FRAME* frame = m_frame;
++        frame->CallAfter( [frame]() { AUTOROUTE_PANEL::OpenTool( frame ); } );
+     }
+-
+-    if( first )
+-        return;
+-
+-    box.Inflate( std::max( box.GetWidth(), box.GetHeight() ) / 4 + pcbIUScale.mmToIU( 2 ) );
+-
+-    KIGFX::VIEW*             view = m_frame->GetCanvas()->GetView();
+-    KIGFX::RENDER_SETTINGS*  rs = view->GetPainter()->GetSettings();
+-
+-    rs->SetHighlight( true, net->GetNetCode() );
+-    view->UpdateAllLayersColor();
+-    view->SetViewport( BOX2D( box.GetOrigin(), box.GetSize() ) );
+-    m_frame->GetCanvas()->Refresh();
+ }
+ 
+ 
+-void DIALOG_AUTOROUTE::clearHighlight()
++void DIALOG_AUTOROUTE::onClose( wxCloseEvent& aEvent )
+ {
+-    KIGFX::VIEW* view = m_frame->GetCanvas()->GetView();
+-
+-    if( !view )
+-        return;
+-
+-    KIGFX::RENDER_SETTINGS* rs = view->GetPainter()->GetSettings();
++    // The panel decides: closing stops an active run, keeps a finished one, or just closes.
++    m_panel->HandleCloseRequest();
+ 
+-    if( rs->IsHighlightEnabled() )
+-    {
+-        rs->SetHighlight( false );
+-        view->UpdateAllLayersColor();
+-        m_frame->GetCanvas()->Refresh();
+-    }
++    if( IsModal() )
++        aEvent.Veto();
+ }
+diff --git a/pcbnew/dialogs/dialog_autoroute.h b/pcbnew/dialogs/dialog_autoroute.h
+index dd4c6872..dd76e53c 100644
+--- a/pcbnew/dialogs/dialog_autoroute.h
++++ b/pcbnew/dialogs/dialog_autoroute.h
+@@ -20,167 +20,31 @@
+ #ifndef DIALOG_AUTOROUTE_H
+ #define DIALOG_AUTOROUTE_H
+ 
+-#include <autoroute/autoroute_job.h>
++#include <autoroute/autoroute_panel.h>
+ #include <dialog_shim.h>
+-#include <wx/timer.h>
+-
+-#include <memory>
+-#include <string>
+ 
+ class PCB_EDIT_FRAME;
+-class NET_CHECKLIST;
+-class wxButton;
+-class wxCheckBox;
+-class wxCheckListBox;
+-class wxChoice;
+-class wxGauge;
+-class wxListBox;
+-class wxListCtrl;
+-class wxNotebook;
+-class wxPanel;
+-class wxRadioBox;
+-class wxRadioButton;
+-class wxSpinCtrl;
+-class wxStaticText;
+-class wxTextCtrl;
+ 
+ /**
+- * The Autoroute tool: choose a router and what to do (route, fan out, pour planes, optimize),
+- * then watch the run.  While a run is active the dialog is modal, so the board cannot be edited
+- * underneath the router; the board view still shows the routes as they arrive.  Everything a run
+- * changes is one undo step, kept or discarded at the end.
++ * The Autoroute tool as a modal dialog (AUTOROUTE_PANEL::OpenTool() makes one unless the user
++ * docked the tool).  Being modal is what keeps the board from being edited during a run.
+  */
+-class DIALOG_AUTOROUTE : public DIALOG_SHIM
++class DIALOG_AUTOROUTE : public DIALOG_SHIM, public AUTOROUTE_HOST
+ {
+ public:
+-    /**
+-     * @param aSettings starts from these settings instead of the last ones used.
+-     * @param aAutoStart starts the run as soon as the dialog is shown (used by MCP).
+-     */
+-    DIALOG_AUTOROUTE( PCB_EDIT_FRAME* aFrame, const AUTOROUTE_SETTINGS* aSettings = nullptr,
+-                      bool aAutoStart = false );
+-    ~DIALOG_AUTOROUTE() override;
+-
+-    /// The open Autoroute dialog, or nullptr.
+-    static DIALOG_AUTOROUTE* Open();
++    DIALOG_AUTOROUTE( PCB_EDIT_FRAME* aFrame );
+ 
+-    /// The status (JSON text) of the last run, kept after its dialog closes.
+-    static const std::string& LastStatus() { return s_lastStatus; }
++    AUTOROUTE_PANEL* Panel() { return m_panel; }
+ 
+-    AUTOROUTE_JOB& Job() { return *m_job; }
+-
+-    /// For MCP: the same as the buttons.
+-    bool     DoPause();
+-    bool     DoResume();
+-    void     DoStop();
+-    void     DoKeep();
+-    void     DoDiscard();
+-    wxString StartError() const { return m_startError; }
+-    bool     AutoStartDone() const { return m_autoStartDone; }
++    bool IsDocked() const override { return false; }
++    void PanelLayoutChanged( bool aRunning ) override;
++    void CloseTool( bool aToggleDock ) override;
+ 
+ private:
+-    enum class VIEW
+-    {
+-        SETUP,
+-        RUN,
+-        RESULT
+-    };
+-
+-    wxPanel* buildRoutePage( wxNotebook* aBook );
+-    wxPanel* buildFanoutPage( wxNotebook* aBook );
+-    wxPanel* buildPlanesPage( wxNotebook* aBook );
+-    wxPanel* buildOptimizePage( wxNotebook* aBook );
+-    wxPanel* buildSettingsPage( wxNotebook* aBook );
+-    wxPanel* buildRunPanel();
+-
+-    void loadSettings( const AUTOROUTE_SETTINGS& aSettings );
+-    bool readSettings( AUTOROUTE_SETTINGS& aSettings, wxString& aError );
+-    void updateRouterHints();
+-    void updateRunButton();
+-    void fillPlanesList();
+-    void selectFinePitchParts();
+-
+-    void start();
+-    void setView( VIEW aView );
+-    void refreshRunView();
+-    void moveToCorner();
+-    void zoomToNet( const wxString& aNet );
+-    void clearHighlight();
+-
+-    void onTimer( wxTimerEvent& aEvent );
+     void onClose( wxCloseEvent& aEvent );
+ 
+-    PCB_EDIT_FRAME*                m_frame;
+-    std::unique_ptr<AUTOROUTE_JOB> m_job;
+-    wxTimer                        m_timer;
+-    VIEW                           m_view = VIEW::SETUP;
+-    bool                           m_autoStart = false;
+-    bool                           m_autoStartDone = false;
+-    wxString                       m_startError;
+-    size_t                         m_shownLogLines = 0;
+-    std::vector<wxString>          m_fanoutRefs;      ///< One per row of m_fanoutParts
+-    std::vector<AR_PLANE>          m_planes;
+-
+-    // Setup
+-    wxPanel*        m_setupPanel;
+-    wxChoice*       m_router;
+-    wxStaticText*   m_routerInfo;
+-    wxNotebook*     m_book;
+-    wxStaticText*   m_hint;
+-
+-    wxRadioButton*  m_routeAll;
+-    wxRadioButton*  m_routeChosen;
+-    NET_CHECKLIST*  m_routeNets;
+-    wxCheckBox*     m_bus;
+-    wxCheckBox*     m_betweenOn;
+-    wxTextCtrl*     m_betweenParts;
+-    wxCheckListBox* m_layers;
+-    wxCheckBox*     m_planesFirst;
+-    wxCheckBox*     m_fanoutFirst;
+-
+-    wxCheckListBox* m_fanoutParts;
+-    wxTextCtrl*     m_fanoutWidth;
+-
+-    wxChoice*       m_planeNet;
+-    wxChoice*       m_planeLayer;
+-    wxListBox*      m_planeList;
+-
+-    wxRadioButton*  m_optimizeAll;
+-    wxRadioButton*  m_optimizeChosen;
+-    NET_CHECKLIST*  m_optimizeNets;
+-
+-    wxRadioBox*     m_rules;
+-    wxTextCtrl*     m_grid;
+-    wxSpinCtrl*     m_viaCost;
+-    wxSpinCtrl*     m_passes;
+-    wxCheckBox*     m_optimizeAfter;
+-    wxCheckBox*     m_frFanout;
+-    wxCheckBox*     m_live;
+-    wxCheckBox*     m_refill;
+-    wxCheckBox*     m_ripOthers;
+-
+-    // Run and result
+-    wxPanel*        m_runPanel;
+-    wxStaticText*   m_runTitle;
+-    wxStaticText*   m_stage;
+-    wxGauge*        m_gauge;
+-    wxStaticText*   m_counts;
+-    wxListCtrl*     m_steps;
+-    wxTextCtrl*     m_log;
+-    wxStaticText*   m_openLabel;
+-    wxListBox*      m_openNets;
+-
+-    wxButton*       m_closeBtn;
+-    wxButton*       m_runBtn;
+-    wxButton*       m_fitBtn;
+-    wxButton*       m_pauseBtn;
+-    wxButton*       m_stopBtn;
+-    wxButton*       m_backBtn;
+-    wxButton*       m_discardBtn;
+-    wxButton*       m_keepBtn;
+-
+-    static DIALOG_AUTOROUTE* s_open;
+-    static std::string       s_lastStatus;
++    PCB_EDIT_FRAME*  m_frame;
++    AUTOROUTE_PANEL* m_panel;
+ };
+ 
+ #endif // DIALOG_AUTOROUTE_H
+diff --git a/pcbnew/pcb_edit_frame.cpp b/pcbnew/pcb_edit_frame.cpp
+index 074c4847..7324e1fe 100644
+--- a/pcbnew/pcb_edit_frame.cpp
++++ b/pcbnew/pcb_edit_frame.cpp
+@@ -43,6 +43,9 @@
+ #include <settings/color_settings.h>
+ #include <pgm_base.h>
+ #include <pcb_edit_frame.h>
++#ifdef __ANDROID__
++#include <autoroute/autoroute_panel.h>
++#endif
+ #include <3d_viewer/eda_3d_viewer_frame.h>
+ #include <api/api_handler_common.h>
+ #include <api/api_handler_libraries.h>
+@@ -1683,6 +1686,17 @@ bool PCB_EDIT_FRAME::canCloseWindow( wxCloseEvent& aEvent )
+         return false;
+     }
+ 
++#ifdef __ANDROID__
++    // Closing would kill the router and leave its result half-decided.
++    if( AUTOROUTE_PANEL::IsEditorLocked() )
++    {
++        wxBell();
++        DisplayInfoMessage( this, _( "Finish the autorouting run first: stop it, then keep or "
++                                     "discard its result in the Autoroute tool." ) );
++        return false;
++    }
++#endif
++
+     ZONE_FILLER_TOOL* zoneFillerTool = m_toolManager->GetTool<ZONE_FILLER_TOOL>();
+ 
+     if( zoneFillerTool->IsBusy() )
+@@ -2997,6 +3011,12 @@ bool PCB_EDIT_FRAME::CanAcceptApiCommands()
+     if( interactiveOperationInProgress() )
+         return false;
+ 
++#ifdef __ANDROID__
++    // The board is locked while the Autoroute tool runs, and until its result is decided.
++    if( AUTOROUTE_PANEL::IsEditorLocked() )
++        return false;
++#endif
++
+     return EDA_BASE_FRAME::CanAcceptApiCommands();
+ }
+ 
+diff --git a/pcbnew/pcb_edit_frame.h b/pcbnew/pcb_edit_frame.h
+index 0d59e57e..85065f5b 100644
+--- a/pcbnew/pcb_edit_frame.h
++++ b/pcbnew/pcb_edit_frame.h
+@@ -850,6 +850,8 @@ public:
+ private:
+     friend struct PCB::IFACE;
+     friend class APPEARANCE_CONTROLS;
++    friend class AUTOROUTE_PANEL;          // docks into and locks the editor (Android)
++    friend class DOCKED_AUTOROUTE_HOST;
+ 
+     /**
+      * The export board netlist tool action object.
+diff --git a/pcbnew/tools/board_editor_control.cpp b/pcbnew/tools/board_editor_control.cpp
+index bf3e62f4..dd378b8c 100644
+--- a/pcbnew/tools/board_editor_control.cpp
++++ b/pcbnew/tools/board_editor_control.cpp
+@@ -89,7 +89,7 @@
+ #include <widgets/legacyfiledlg_netlist_options.h>
+ 
+ #ifdef __ANDROID__
+-#include <dialogs/dialog_autoroute.h>
++#include <autoroute/autoroute_panel.h>
+ #include <kiplatform/autorouter.h>
+ #include <kiplatform/router_process.h>
+ #endif
+@@ -684,11 +684,7 @@ int BOARD_EDITOR_CONTROL::AutorouteBoard( const TOOL_EVENT& aEvent )
+         return 0;
+     }
+ 
+-    if( DIALOG_AUTOROUTE::Open() )
+-        return 0;
+-
+-    DIALOG_AUTOROUTE dlg( getEditFrame<PCB_EDIT_FRAME>() );
+-    dlg.ShowModal();
++    AUTOROUTE_PANEL::OpenTool( getEditFrame<PCB_EDIT_FRAME>() );
+ #endif
+     return 0;
+ }
+-- 
+2.54.0 (Apple Git-157)
+

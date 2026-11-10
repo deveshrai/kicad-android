@@ -74,7 +74,13 @@ Full-resolution videos: [schematic](docs/media/video/schematic.mp4),
 
 ## Autoroute
 
-**Route > Autoroute** is one tool for every automatic routing job, with a choice of router:
+**Route > Autoroute** is one tool for every automatic routing job, as a dialog or docked at the
+left of the board editor.  **[The Autoroute manual](docs/AUTOROUTE.md)** covers every option,
+with screenshots and recipes.
+
+<img src="docs/media/autoroute/05-run-docked.png" alt="The Autoroute tool docked at the left of the board editor, routing the RP2350 test board: steps, progress and the router's output, with the editor locked" width="860">
+
+It has a choice of router:
 
 - **KiCadRoutingTools** (the default): a grid router with rip-up and reroute, fan-out of
   fine-pitch parts, bus routing and plane connections.  It runs on the tablet in a process of its
@@ -97,6 +103,9 @@ While a run is active the board is locked, so nothing can be edited underneath t
 run shows its steps, the net being routed, progress and the router's output, and can be paused,
 resumed or stopped.  At the end it lists the nets still unrouted (tap one to see it) and the whole
 run is one undo step: keep it, discard it, or start another run on top.
+
+**Dock to Side** puts the tool in the panel column at the left, the full height of the window
+(it takes the Properties panel's place while it's shown); **Undock** turns it back into a dialog.
 
 On the RP2350A board below (2 layers, a 0.4 mm-pitch QFN-60), with the same rules and KiCad's DRC
 as the judge:

@@ -203,6 +203,57 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Autoroute tool docked, fixes and manual (10.99al, 2026-11-10)
+KiCad patch 0039; user manual in `docs/AUTOROUTE.md`, with screenshots in `docs/media/autoroute`.
+- **Panel and hosts:**
+  - The tool is AUTOROUTE_PANEL (pcbnew/autoroute/autoroute_panel.cpp), held by an
+    AUTOROUTE_HOST: DIALOG_AUTOROUTE (modal), or DOCKED_AUTOROUTE_HOST.
+  - The docked host is an AUI pane, Left layer 5, row 0, position 0, in the Properties column.
+    Properties is hidden while the pane shows and comes back on close. PCB_EDIT_FRAME befriends
+    both for m_auimgr.
+  - AUTOROUTE_PANEL::OpenTool() opens the last-used form. The choice is a file,
+    `cache/autoroute/docked`. Dock to Side / Undock toggle it.
+  - The dialog form gives its tabs their content's min size; only the Settings tab scrolls.
+- **Lock (docked):**
+  - From Start until Keep, Discard or New Run, lockEditor() does the following:
+    - cancels the interactive tool and clears the selection;
+    - disables every other AUI pane, the toolbars included, and the menu bar's tops;
+    - pushes event blockers: on the canvas for left/right clicks and keys (wheel and gestures
+      still zoom), and on the frame for keys outside the panel.
+  - PCB_EDIT_FRAME::CanAcceptApiCommands() and the MCP pcb_move_footprint/pcb_run_drc return busy
+    while `AUTOROUTE_PANEL::IsEditorLocked()`.
+  - canCloseWindow refuses while locked. Verified: pcb_move_footprint and kicad_api answered busy
+    during a docked run, and moving a part worked straight after Keep.
+- **Fixes:**
+  - Crash (SIGSEGV in DIALOG_AUTOROUTE::clearHighlight from ~EDA_BASE_FRAME): a finished run's
+    tool was still open when kicad_open_project switched projects. The panel now leaves a frame
+    that IsBeingDeleted alone, and kicad_open_project refuses while any modal dialog is open.
+    MCP keep/discard close the tool.
+  - kicad_screenshot drew Qt's QMessageBox at its widget position. Android shows it as a native
+    AlertDialog centred on the app, so it's now drawn centred.
+  - Progress lines with "(N ripped)" weren't parsed, so the counter stuck.
+  - The log box stopped after 400 lines: the job keeps a 400-line deque, so the panel now counts
+    by GetLogTotal().
+  - Freerouting optimize-only runs hit its pre-flight guard "optimizer only runs on completely
+    routed boards". Autorouter.java turns `optimizer.enablePreflightGuards` off when routing is off.
+  - Labels are wrapped by hand (wrapText): wxStaticText::Wrap() after SetLabel doesn't take on
+    wxQt.
+- **Not reproduced in 10.99ak** (dropped from known issues):
+  - the "Board Changed on Disk" Reload button: it reloaded 1,609 tracks fine with unsaved edits;
+  - stale pcb_run_drc after a reload or a revert;
+  - DRC markers counting as unsaved edits.
+- **Still open:**
+  - kicad_screenshot can show stale frame widgets: the docked panel's setup view and ungreyed
+    toolbars during a run, while the screen is right. The manual's screenshots are adb screencaps
+    cropped to the app window (crop 2800x1536 at y=128 on the tablet).
+  - Freerouting's optimize changed little on the boards tried: one segment on its own 2-layer
+    result.
+- **Manual's example board:** `work/rp2350` (on the tablet as Download/rp2350-autoroute, with a
+  scratch copy in Download/rp2350-manual).
+  - Fan out U1 and J1, then route everything: about 8 min on the tablet, 43 of 58 nets.
+  - After the GND pours refill: 19 of 179 connections left, and 11 starved-thermal DRC errors.
+  - The display bus (GPIO14-22 between U1 and J3, as a bus): 17 s, 8 of 9 nets.
+
 ## Autoroute tool (10.99ak, 2026-11-10)
 The user found Freerouting weak even on easy boards. Route > Autoroute is now a tool for both
 routers. KiCad patch 0038, Freerouting patch 0003, `android/router`, `scripts/build-python-android.sh`.
@@ -289,13 +340,8 @@ routers. KiCad patch 0038, Freerouting patch 0003, `android/router`, `scripts/bu
     and discard undoes it.
   - Freerouting optimize-only of two nets: it left the board intact, but changed nothing either;
     not proven to improve anything yet.
-- **Known issues:**
-  - The run view is about 860 px wide on the tablet and covers part of the board.
-  - Bugs found in 10.99aj while testing, not fixed yet:
-    - The "Board Changed on Disk" Reload button did not reload (RevertDocument did).
-    - `pcb_run_drc` graded a stale board right after a revert.
-    - DRC markers count as unsaved edits.
-    - kicad_screenshot draws native dialogs at the wrong place in DeX/windowed mode.
+- **Known issues:** see 10.99al above; the wide run view and the 10.99aj bugs listed here are
+  fixed there or didn't reproduce.
 
 ## Crash fix: tree item data on wxQt (10.99ai)
 The user hit a crash on 2026-11-07 (10.99ah) in the PCB editor's Tools > DRC Rule Editor.
