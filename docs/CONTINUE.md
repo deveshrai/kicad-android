@@ -74,8 +74,8 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 7. **Later:**
    - touch gestures in the 3D viewer
    - long-press as right click
-   - 3D models are downloadable since 10.99aq (setup wizard > Library Files); Configure Paths is
-     still broken
+   - 3D models are downloadable since 10.99aq (setup wizard > Library Files); Configure Paths
+     works since 10.99ar
 
 Start by giving the user a short status summary and asking which item to take, unless they have
 already said.
@@ -87,8 +87,7 @@ taskbar, and the README, badges, release notes and repo description say the app 
 and Googlebook OS, with a laptop-and-tablet hero (`scripts/make-hero.py`).
 - **Not tested on a Googlebook;** the APK is arm64 only.  Say "for Android and Googlebook OS" in
   every published text from now on.
-- **Dialog frame follow-ups:** resizing from the edges; `kicad_screenshot` doesn't draw the
-  frame; once, right after launch on the tablet, Preferences showed a black band under its title
+- **Dialog frame follow-ups:** (10.99ar added resizing and kicad_screenshot frames) once, right after launch on the tablet, Preferences showed a black band under its title
   bar that went away when the dialog was moved (a stale first frame?); not seen again.
 - **P10 items still open:**
   - (10.99ao fixed the hotkey names, the launcher labels, the layer pair presets and the
@@ -96,10 +95,7 @@ and Googlebook OS, with a laptop-and-tablet hero (`scripts/make-hero.py`).
   - The drill dialog has no background; panels cover the canvas on the Fold; the soft keyboard
     covers the focused field (on the emulator it also opens for grid cell editors with a
     hardware keyboard attached).
-  - Plot Schematic: the Color theme choice is empty on a fresh install (emulator).
 - **Open:**
-  - BACK on the 3D viewer sends the app to the background.
-  - `RunAction` of an action that needs a parameter crashes without one (API only).
   - A freeze seen once after BACK and relaunch with dialogs open; not reproduced.
 - **Tablet:** a stray debug app `org.kicad.kicad` (versionName 10.99am) is installed; uninstalling
   it was denied.  The user said (2026-11-13) they will remove it themselves.  Don't launch it.
