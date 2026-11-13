@@ -1,7 +1,7 @@
 From 3443ddcbd8c7bcb5185be84671e59138619dd5b6 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 3 Nov 2026 13:28:13 +0530
-Subject: [PATCH 25/44] Symbol properties: embed picked datasheets into the
+Subject: [PATCH 25/45] Symbol properties: embed picked datasheets into the
  symbol, not a throwaway copy
 
 The URL editor embeds into the first files of the stack, which was the

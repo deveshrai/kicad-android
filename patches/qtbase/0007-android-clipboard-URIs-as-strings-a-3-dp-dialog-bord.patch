@@ -1,0 +1,52 @@
+From 6f907fcc9458ff161406a0d91044c5bd9f231df8 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 14 Nov 2026 01:57:32 +0530
+Subject: [PATCH] android: clipboard URIs as strings; a 3 dp dialog border to
+ resize by
+
+QAndroidPlatformClipboard passed a URL to QtClipboardManager.setClipboardUri()
+as a QByteArray, which goes to Java as byte[], so the call failed with
+NoSuchMethodError and nothing reached the clipboard.  Pass a QString.
+
+The border of decorated windows is 3 dp instead of 1 dp, so that it can
+be taken hold of: QtWindow resizes the window by dragging it.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/plugins/platforms/android/qandroidplatformclipboard.cpp | 5 ++++-
+ src/plugins/platforms/android/qandroidplatformwindow.cpp    | 3 ++-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/plugins/platforms/android/qandroidplatformclipboard.cpp b/src/plugins/platforms/android/qandroidplatformclipboard.cpp
+index 9bf18ff0..613372f2 100644
+--- a/src/plugins/platforms/android/qandroidplatformclipboard.cpp
++++ b/src/plugins/platforms/android/qandroidplatformclipboard.cpp
+@@ -81,7 +81,10 @@ void QAndroidPlatformClipboard::setClipboardMimeData(QMimeData *data)
+     if (data->hasUrls()) {
+         QList<QUrl> urls = data->urls();
+         for (const auto &u : std::as_const(urls))
+-            m_clipboardManager.callMethod<void>("setClipboardUri", context, u.toEncoded());
++            // The Java method takes a String; a QByteArray goes as byte[], so the call failed
++            // with NoSuchMethodError and nothing reached the clipboard
++            m_clipboardManager.callMethod<void>("setClipboardUri", context,
++                                                QString::fromUtf8(u.toEncoded()));
+     } else if (data->hasHtml()) { // html can contain text
+         m_clipboardManager.callMethod<void>("setClipboardHtml",
+                                             context, data->text(), data->html());
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.cpp b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+index a92afde2..0d8a29e3 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+@@ -188,7 +188,8 @@ void QAndroidPlatformWindow::updateDecoration()
+         // Whole device independent pixels, so that QWindow::frameMargins() is exact.
+         // The strip is 1.75 lines of text tall, and tall enough for a finger.
+         const qreal factor = QHighDpiScaling::factor(window());
+-        const int border = qMax(1, qRound(factor));
++        // 3 dp: wide enough to take hold of with a mouse or pen to resize the window
++        const int border = qMax(1, qRound(3 * factor));
+         const qreal textHeight = QFontMetricsF(QGuiApplication::font()).height() * factor;
+         const qreal fingerHeight = 30 * QtAndroid::pixelDensity();
+         const int strip = qRound(qCeil(qMax(textHeight * 1.75, fingerHeight) / factor) * factor);
+-- 
+2.54.0 (Apple Git-157)
+

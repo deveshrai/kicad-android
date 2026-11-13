@@ -1,0 +1,518 @@
+From 7d211d68c2f39d3000cf1e8584394228675b0ecc Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 14 Nov 2026 01:57:32 +0530
+Subject: [PATCH 45/45] Android: BACK key, files in the media index, raytrace
+ preview, fixes
+
+- BACK in a frame cancels the running tool, else closes the frame (with
+  the usual save prompt); the project manager leaves it to Android.
+- A thread hands files KiCad writes in the open project, Documents and
+  Download to MediaScannerConnection, so other apps' pickers list them
+  (a STEP export did not show in another app's importer).
+- Raytracing on Android keeps the previous image (preview or background)
+  where blocks are not traced yet, instead of black.
+- Plot Schematic starts from the editor's colour theme when it has none
+  saved (the choice was blank on a fresh install).
+- Actions that dereference a string parameter return when run by name
+  without one (RunAction over the API crashed).
+- kicad_screenshot draws the frame and title strip of dialogs.
+- The library tables page wraps its text (wxStaticText::Wrap ignores a
+  repeated width, so a reset label stayed unwrapped and was cut off).
+- After the setup wizard the project manager is shown maximized again:
+  it came up at three quarters of the screen until the next start.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../raytracing/render_3d_raytrace_base.cpp    |   7 +
+ .../raytracing/render_3d_raytrace_gl.cpp      |  26 +++-
+ common/eda_base_frame.cpp                     |  15 +++
+ .../startwizard_provider_libraries.cpp        |  11 ++
+ eeschema/dialogs/dialog_plot_schematic.cpp    |  11 ++
+ eeschema/tools/symbol_editor_control.cpp      |   4 +
+ gerbview/tools/gerbview_control.cpp           |   3 +
+ kicad/kicad.cpp                               |  25 ++++
+ libs/kiplatform/os/android/environment.cpp    | 125 ++++++++++++++++++
+ libs/kiplatform/port/wxqt/ui.cpp              |  62 +++++++++
+ pcbnew/tools/pcb_control.cpp                  |   8 ++
+ pcbnew/tools/pcb_selection_tool.cpp           |   3 +
+ 12 files changed, 299 insertions(+), 1 deletion(-)
+
+diff --git a/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_base.cpp b/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_base.cpp
+index 1e9394b0..efdd2a8a 100644
+--- a/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_base.cpp
++++ b/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_base.cpp
+@@ -188,7 +188,14 @@ void RENDER_3D_RAYTRACE_BASE::render( uint8_t* ptrPBO )
+         if( m_cameraLight )
+             m_cameraLight->SetDirection( -m_camera.GetDir() );
+ 
++#ifdef __ANDROID__
++        // The window's buffer doesn't keep the last frame on Android, so pixels made transparent
++        // here showed black until their block was traced.  The pixel buffer keeps the previous
++        // image (the preview, or the last render) instead, and the blocks replace it as they come.
++        if( false )
++#else
+         if( m_boardAdapter.m_Cfg->m_Render.engine == RENDER_ENGINE::OPENGL )
++#endif
+         {
+             // Set all pixels of PBO transparent (Alpha to 0)
+             // This way it will draw the full buffer but only shows the updated (
+diff --git a/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_gl.cpp b/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_gl.cpp
+index d99df30e..7e4f24bf 100644
+--- a/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_gl.cpp
++++ b/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_gl.cpp
+@@ -315,7 +315,31 @@ uint8_t* RENDER_3D_RAYTRACE_GL::mapPixels()
+         const size_t size = size_t( m_realBufferSize.x ) * size_t( m_realBufferSize.y ) * 4;
+ 
+         if( m_clientPixels.size() != size )
+-            m_clientPixels.assign( size, 0 );
++        {
++            // Start from the background, which the blocks then cover as they are traced
++            m_clientPixels.resize( size );
++
++            const SFVEC4F top = m_boardAdapter.m_BgColorTop;
++            const SFVEC4F bottom = m_boardAdapter.m_BgColorBot;
++            const unsigned int width = m_realBufferSize.x;
++            const unsigned int height = m_realBufferSize.y;
++
++            for( unsigned int y = 0; y < height; ++y )
++            {
++                // Row 0 is the bottom of the window
++                const float t = height > 1 ? float( y ) / float( height - 1 ) : 0.0f;
++                const uint8_t rgba[4] = {
++                    uint8_t( std::clamp( ( bottom.r + ( top.r - bottom.r ) * t ) * 255.0f, 0.0f, 255.0f ) ),
++                    uint8_t( std::clamp( ( bottom.g + ( top.g - bottom.g ) * t ) * 255.0f, 0.0f, 255.0f ) ),
++                    uint8_t( std::clamp( ( bottom.b + ( top.b - bottom.b ) * t ) * 255.0f, 0.0f, 255.0f ) ),
++                    255
++                };
++                uint8_t* row = &m_clientPixels[size_t( y ) * width * 4];
++
++                for( unsigned int x = 0; x < width; ++x )
++                    std::copy( rgba, rgba + 4, row + size_t( x ) * 4 );
++            }
++        }
+ 
+         return m_clientPixels.data();
+     }
+diff --git a/common/eda_base_frame.cpp b/common/eda_base_frame.cpp
+index 99c780b1..908eb4bc 100644
+--- a/common/eda_base_frame.cpp
++++ b/common/eda_base_frame.cpp
+@@ -579,6 +579,21 @@ void EDA_BASE_FRAME::OnCharHook( wxKeyEvent& aKeyEvent )
+ {
+     wxLogTrace( kicadTraceKeyEvent, wxS( "EDA_BASE_FRAME::OnCharHook %s" ), dump( aKeyEvent ) );
+ 
++#ifdef __ANDROID__
++    // The BACK key (or back gesture), as Android apps use it: cancel the running tool, else
++    // leave this window (it asks to save changes as on closing).  The project manager leaves
++    // it unhandled, so Android sends the app to the background as for any app's last screen.
++    if( aKeyEvent.GetKeyCode() == WXK_BROWSER_BACK && m_ident != KICAD_MAIN_FRAME_T )
++    {
++        if( !ToolStackIsEmpty() && m_toolManager )
++            m_toolManager->CancelTool();
++        else
++            CallAfter( [this]() { Close( false ); } );
++
++        return;
++    }
++#endif
++
+     // Key events can be filtered here.
+     // Currently no filtering is made.
+     aKeyEvent.Skip();
+diff --git a/common/startwizard/startwizard_provider_libraries.cpp b/common/startwizard/startwizard_provider_libraries.cpp
+index d90336bd..7b0d2841 100644
+--- a/common/startwizard/startwizard_provider_libraries.cpp
++++ b/common/startwizard/startwizard_provider_libraries.cpp
+@@ -62,6 +62,13 @@ public:
+         m_bmpWarning->Show( m_showWarning );
+         m_stWarning->Show( m_showWarning );
+ 
++#ifdef __ANDROID__
++        // Wrap before the page takes its size: wrapped later, in OnSize(), the lines ran past
++        // the page and the labels kept the height of the unwrapped text, so text was cut off
++        m_stIntro->Wrap( FromDIP( 600 ) );
++        m_stWarning->Wrap( FromDIP( 600 ) - m_bmpWarning->GetSize().x - FromDIP( 18 ) );
++#endif
++
+         GetSizer()->Fit( this );
+         SetSize( GetBestSize() );
+     }
+@@ -196,6 +203,10 @@ public:
+ #elif defined( __ANDROID__ )
+         // The panel is wider than the page it scrolls in, so its client width cut the wrapped
+         // lines off; wrap to the page width that the panel's maximum size sets
++        // SetLabel() above undid the wrap, and Wrap() does nothing for the width it wrapped to
++        // last: reset it first
++        m_stIntro->Wrap( -1 );
++        m_stWarning->Wrap( -1 );
+         m_stIntro->Wrap( FromDIP( 600 ) );
+         m_stWarning->Wrap( FromDIP( 600 ) - m_bmpWarning->GetSize().x - FromDIP( 18 ) );
+ #else
+diff --git a/eeschema/dialogs/dialog_plot_schematic.cpp b/eeschema/dialogs/dialog_plot_schematic.cpp
+index 1780de0c..30c88650 100644
+--- a/eeschema/dialogs/dialog_plot_schematic.cpp
++++ b/eeschema/dialogs/dialog_plot_schematic.cpp
+@@ -120,6 +120,17 @@ bool DIALOG_PLOT_SCHEMATIC::TransferDataToWindow()
+             // The default line width is stored in mils in config
+             m_defaultLineWidth.SetValue( schIUScale.MilsToIU( cfg->m_Drawing.default_line_thickness ) );
+         }
++
++        // The dialog keeps the theme chosen last; the first time there is none, and the choice
++        // was blank.  Start from the editor's own theme.
++        if( m_colorTheme->GetSelection() == wxNOT_FOUND && m_colorTheme->GetCount() > 0 )
++        {
++            COLOR_SETTINGS* current = cfg ? Pgm().GetSettingsManager().GetColorSettings( cfg->m_ColorTheme )
++                                          : nullptr;
++
++            if( !current || !m_colorTheme->SetStringSelection( current->GetName() ) )
++                m_colorTheme->SetSelection( 0 );
++        }
+     }
+     else
+     {
+diff --git a/eeschema/tools/symbol_editor_control.cpp b/eeschema/tools/symbol_editor_control.cpp
+index a606ca5f..678ba05e 100644
+--- a/eeschema/tools/symbol_editor_control.cpp
++++ b/eeschema/tools/symbol_editor_control.cpp
+@@ -316,6 +316,10 @@ int SYMBOL_EDITOR_CONTROL::AddLibrary( const TOOL_EVENT& aEvent )
+ 
+ int SYMBOL_EDITOR_CONTROL::DdAddLibrary( const TOOL_EVENT& aEvent )
+ {
++    // No parameter when the action is run by name (the API, a hotkey): nothing to add
++    if( !aEvent.Parameter<wxString*>() )
++        return 0;
++
+     wxString libFile = *aEvent.Parameter<wxString*>();
+ 
+     if( m_frame->IsType( FRAME_SCH_SYMBOL_EDITOR ) )
+diff --git a/gerbview/tools/gerbview_control.cpp b/gerbview/tools/gerbview_control.cpp
+index eb8832d1..29f1a440 100644
+--- a/gerbview/tools/gerbview_control.cpp
++++ b/gerbview/tools/gerbview_control.cpp
+@@ -614,6 +614,9 @@ int GERBVIEW_CONTROL::LoadGerbFiles( const TOOL_EVENT& aEvent )
+ {
+     // The event parameter is a string containing names of dropped files.
+     // Each file name has been enclosed with "", so file names with space character are allowed.
++    if( !aEvent.Parameter<wxString*>() )
++        return 0;
++
+     wxString files = *aEvent.Parameter<wxString*>();
+     // ie : files = "file1""another file""file3"...
+ 
+diff --git a/kicad/kicad.cpp b/kicad/kicad.cpp
+index aa4981bb..00f0fea0 100644
+--- a/kicad/kicad.cpp
++++ b/kicad/kicad.cpp
+@@ -25,6 +25,7 @@
+ 
+ 
+ #include <wx/dialog.h>
++#include <wx/display.h>
+ #include <wx/filename.h>
+ #include <wx/log.h>
+ #include <wx/app.h>
+@@ -478,6 +479,30 @@ bool PGM_KICAD::OnPgmInit()
+         frame->Show( true );
+         frame->Raise();
+ 
++#ifdef __ANDROID__
++        // After the setup wizard the frame came up at about three quarters of the screen until
++        // the next start: the wizard, shown over it, makes it visible early, and Qt's Android
++        // window applies the maximized size only as a window is shown.  Show it again.
++        frame->CallAfter(
++                [frame]()
++                {
++                    const wxRect area = wxDisplay( wxDisplay::GetFromWindow( frame ) == wxNOT_FOUND
++                                                           ? 0u
++                                                           : (unsigned) wxDisplay::GetFromWindow( frame ) )
++                                                .GetGeometry();
++                    const wxRect rect = frame->GetScreenRect();
++
++                    if( rect.width < area.width * 0.95 || rect.height < area.height * 0.85 )
++                    {
++                        frame->Show( false );
++                        frame->Maximize( false );
++                        frame->Maximize( true );
++                        frame->Show( true );
++                        frame->Raise();
++                    }
++                } );
++#endif
++
+ #if defined( KICAD_NATIVE_MODEL_PREVIEW ) && defined( __WINDOWS__ )
+         frame->CallAfter( [frame] { MaybeShowModelPreviewSetupPrompt( frame ); } );
+ #endif
+diff --git a/libs/kiplatform/os/android/environment.cpp b/libs/kiplatform/os/android/environment.cpp
+index d3d0b209..90dd2cc8 100644
+--- a/libs/kiplatform/os/android/environment.cpp
++++ b/libs/kiplatform/os/android/environment.cpp
+@@ -43,7 +43,13 @@
+ #include <android/api-level.h>
+ #include <android/asset_manager_jni.h>
+ 
++#include <atomic>
++#include <chrono>
+ #include <cstdio>
++#include <filesystem>
++#include <mutex>
++#include <thread>
++#include <vector>
+ #include <sstream>
+ #include <string>
+ 
+@@ -262,6 +268,123 @@ bool extractAssetTree( AAssetManager* aMgr, const std::string& aTree, const std:
+ }
+ 
+ 
++/**
++ * Files KiCad writes to shared storage (exports, plots, saved projects) are not in Android's
++ * media index until something adds them, so other apps' file pickers don't list them (the
++ * SolidCraft STEP import found no file).  The writers are many and mostly plain fopen(), so
++ * rather than hook each one, a thread looks every few seconds at the open project's folder
++ * (KIPRJMOD, a few levels deep) and the top of Documents and Download, and hands every file
++ * changed since the last look to MediaScannerConnection.scanFile().
++ */
++void scanFiles( const std::vector<std::string>& aPaths )
++{
++    if( aPaths.empty() )
++        return;
++
++    QJniEnvironment env;
++    QJniObject      ctx = QNativeInterface::QAndroidApplication::context();
++
++    if( !ctx.isValid() || !env.isValid() )
++        return;
++
++    jclass       stringClass = env->FindClass( "java/lang/String" );
++    jobjectArray paths = env->NewObjectArray( static_cast<jsize>( aPaths.size() ), stringClass, nullptr );
++
++    for( size_t i = 0; i < aPaths.size(); ++i )
++    {
++        jstring path = env->NewStringUTF( aPaths[i].c_str() );
++        env->SetObjectArrayElement( paths, static_cast<jsize>( i ), path );
++        env->DeleteLocalRef( path );
++    }
++
++    QJniObject::callStaticMethod<void>(
++            "android/media/MediaScannerConnection", "scanFile",
++            "(Landroid/content/Context;[Ljava/lang/String;[Ljava/lang/String;"
++            "Landroid/media/MediaScannerConnection$OnScanCompletedListener;)V",
++            ctx.object(), paths, nullptr, nullptr );
++
++    env->DeleteLocalRef( paths );
++    env->DeleteLocalRef( stringClass );
++    env.checkAndClearExceptions();
++}
++
++
++void collectChanged( const std::filesystem::path& aDir, int aDepth,
++                     std::filesystem::file_time_type aSince, std::vector<std::string>& aOut )
++{
++    namespace fs = std::filesystem;
++    std::error_code ec;
++
++    for( fs::directory_iterator it( aDir, fs::directory_options::skip_permission_denied, ec ), end;
++         !ec && it != end; it.increment( ec ) )
++    {
++        const fs::path& path = it->path();
++        const std::string name = path.filename().string();
++
++        if( name.empty() || name[0] == '.' || name[0] == '~' )
++            continue;   // hidden files, KiCad's lock files
++
++        if( it->is_directory( ec ) )
++        {
++            if( aDepth > 0 )
++                collectChanged( path, aDepth - 1, aSince, aOut );
++        }
++        else if( it->is_regular_file( ec ) && it->last_write_time( ec ) > aSince && !ec )
++        {
++            aOut.push_back( path.string() );
++
++            if( aOut.size() >= 2000 )
++                return;
++        }
++    }
++}
++
++
++void startMediaIndexer()
++{
++    static std::once_flag once;
++
++    std::call_once( once,
++            []()
++            {
++                std::thread(
++                        []()
++                        {
++                            namespace fs = std::filesystem;
++                            const std::string shared = "/storage/emulated/0";
++                            auto              since = fs::file_time_type::clock::now();
++
++                            for( ;; )
++                            {
++                                std::this_thread::sleep_for( std::chrono::seconds( 4 ) );
++
++                                const auto now = fs::file_time_type::clock::now();
++                                std::vector<std::string> changed;
++
++                                for( const char* top : { "/Documents", "/Download" } )
++                                    collectChanged( shared + top, 0, since, changed );
++
++                                if( const char* project = getenv( "KIPRJMOD" ) )
++                                {
++                                    std::string dir( project );
++
++                                    // Only shared storage needs indexing, and the top folders
++                                    // were looked at already
++                                    if( dir.rfind( "/storage/", 0 ) == 0
++                                        && dir != shared + "/Documents" && dir != shared + "/Download" )
++                                    {
++                                        collectChanged( dir, 3, since, changed );
++                                    }
++                                }
++
++                                since = now;
++                                scanFiles( changed );
++                            }
++                        } ).detach();
++            } );
++}
++
++
+ /**
+  * KiCad reads its stock data (schemas, templates, drawing sheets, ...) from a directory.  The
+  * APK carries it as assets under kicad-data/, and the bundled symbol/footprint libraries under
+@@ -358,6 +481,8 @@ void KIPLATFORM::ENV::Init()
+             requestAllFilesAccessOnce( home );
+     }
+ 
++    startMediaIndexer();
++
+     wxString stockData = extractStockData();
+ 
+     if( !stockData.IsEmpty() )
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index 4327e410..8043adca 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -57,6 +57,9 @@
+ #include <QCursor>
+ #include <QGuiApplication>
+ #include <QPalette>
++#include <QFont>
++#include <QPen>
++#include <QFontMetrics>
+ #include <QScreen>
+ #include <QStyleHints>
+ #include <QApplication>
+@@ -994,6 +997,65 @@ bool KIPLATFORM::UI::GrabAppImage( wxImage& aImage )
+         if( qobject_cast<QMessageBox*>( aWidget ) )
+             at = QPoint( ( image.width() - part.width() ) / 2, ( image.height() - part.height() ) / 2 );
+ 
++        // The frame and title strip that the platform draws around a dialog (Qt's Android
++        // plugin, in QtWindow) are not part of the widget: draw them the same way, from the frame
++        // margins it reports and the colours it takes from the palette
++        if( QWindow* window = aWidget->windowHandle(); window && !qobject_cast<QMessageBox*>( aWidget ) )
++        {
++            const QMargins margins = window->frameMargins();
++
++            if( !margins.isNull() )
++            {
++                const auto blend = []( const QColor& aBase, const QColor& aOther, qreal aAmount )
++                {
++                    return QColor::fromRgbF( aBase.redF() + ( aOther.redF() - aBase.redF() ) * aAmount,
++                                             aBase.greenF() + ( aOther.greenF() - aBase.greenF() ) * aAmount,
++                                             aBase.blueF() + ( aOther.blueF() - aBase.blueF() ) * aAmount );
++                };
++
++                const QPalette palette = QGuiApplication::palette();
++                const QColor   bg = palette.color( QPalette::Active, QPalette::Window );
++                const QColor   fg = palette.color( QPalette::Active, QPalette::WindowText );
++                const int      left = qRound( margins.left() * dpr );
++                const int      top = qRound( margins.top() * dpr );
++                const int      right = qRound( margins.right() * dpr );
++                const int      bottom = qRound( margins.bottom() * dpr );
++                const QRect    outer( at.x() - left, at.y() - top, part.width() + left + right,
++                                      part.height() + top + bottom );
++                const QRect    strip( outer.left() + left, outer.top() + left, outer.width() - left - right,
++                                      top - left );
++
++                painter.fillRect( outer, blend( bg, fg, 0.4 ) );
++                painter.fillRect( strip, blend( bg, fg, 0.14 ) );
++
++                QFont font = QGuiApplication::font();
++                font.setBold( true );
++                font.setPixelSize( qMax( 1, qRound( strip.height() * 0.44 ) ) );
++                painter.setFont( font );
++                painter.setPen( fg );
++
++                const int pad = qRound( strip.height() * 0.4 );
++                const bool cross = window->flags() & Qt::WindowCloseButtonHint;
++                const QRect text( strip.left() + pad, strip.top(),
++                                  strip.width() - pad - ( cross ? strip.height() : pad ), strip.height() );
++
++                painter.drawText( text, Qt::AlignVCenter | Qt::AlignLeft,
++                                  QFontMetrics( font ).elidedText( window->title(), Qt::ElideRight,
++                                                                   text.width() ) );
++
++                if( cross )
++                {
++                    const QPointF c( strip.right() - strip.height() / 2.0, strip.center().y() );
++                    const qreal   arm = strip.height() * 0.16;
++                    QPen          pen( fg, qMax( 2.0, strip.height() * 0.05 ) );
++
++                    painter.setPen( pen );
++                    painter.drawLine( c + QPointF( -arm, -arm ), c + QPointF( arm, arm ) );
++                    painter.drawLine( c + QPointF( -arm, arm ), c + QPointF( arm, -arm ) );
++                }
++            }
++        }
++
+         painter.drawImage( at, part );
+     };
+ 
+diff --git a/pcbnew/tools/pcb_control.cpp b/pcbnew/tools/pcb_control.cpp
+index 54746ab5..97c63051 100644
+--- a/pcbnew/tools/pcb_control.cpp
++++ b/pcbnew/tools/pcb_control.cpp
+@@ -189,6 +189,10 @@ int PCB_CONTROL::SaveFpToBoard( const TOOL_EVENT& aEvent )
+ 
+ int PCB_CONTROL::DdAddLibrary( const TOOL_EVENT& aEvent )
+ {
++    // No parameter when the action is run by name (the API, a hotkey): nothing to do
++    if( !aEvent.Parameter<wxString*>() )
++        return 0;
++
+     const wxString fn = *aEvent.Parameter<wxString*>();
+     static_cast<PCB_BASE_EDIT_FRAME*>( m_frame )->AddLibrary( _( "Add Footprint Library" ), fn,
+                                                               LIBRARY_TABLE_SCOPE::PROJECT );
+@@ -198,6 +202,10 @@ int PCB_CONTROL::DdAddLibrary( const TOOL_EVENT& aEvent )
+ 
+ int PCB_CONTROL::DdImportFootprint( const TOOL_EVENT& aEvent )
+ {
++    // No parameter when the action is run by name (the API, a hotkey): nothing to do
++    if( !aEvent.Parameter<wxString*>() )
++        return 0;
++
+     const wxString fn = *aEvent.Parameter<wxString*>();
+     static_cast<FOOTPRINT_EDIT_FRAME*>( m_frame )->ImportFootprint( fn );
+     m_frame->Zoom_Automatique( false );
+diff --git a/pcbnew/tools/pcb_selection_tool.cpp b/pcbnew/tools/pcb_selection_tool.cpp
+index 9ef15ccd..49b0a68f 100644
+--- a/pcbnew/tools/pcb_selection_tool.cpp
++++ b/pcbnew/tools/pcb_selection_tool.cpp
+@@ -3365,6 +3365,9 @@ void PCB_SELECTION_TOOL::doSyncSelection( const std::vector<BOARD_ITEM*>& aItems
+ int PCB_SELECTION_TOOL::selectSheetContents( const TOOL_EVENT& aEvent )
+ {
+     ClearSelection( true /*quiet mode*/ );
++    if( !aEvent.Parameter<wxString*>() )
++        return 0;
++
+     wxString sheetPath = *aEvent.Parameter<wxString*>();
+ 
+     selectAllItemsOnSheet( sheetPath );
+-- 
+2.54.0 (Apple Git-157)
+

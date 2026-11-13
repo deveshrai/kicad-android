@@ -1,7 +1,7 @@
 From 1ae0abb01cda074b7723787a2f549c93e80da5fb Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 9 Nov 2026 13:31:52 +0530
-Subject: [PATCH 34/44] Modern GAL: keep antialiased edges in a supersampled
+Subject: [PATCH 34/45] Modern GAL: keep antialiased edges in a supersampled
  target
 
 With High Quality antialiasing the layer targets are drawn at twice the size and averaged,

@@ -1,7 +1,7 @@
 From 33c0a34125b0b8ba0a24deb6dc480906fccf3693 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 00:19:23 +0530
-Subject: [PATCH 11/44] Android: look for stock libraries and templates in the
+Subject: [PATCH 11/45] Android: look for stock libraries and templates in the
  stock data dir
 
 Assisted-by: Claude Opus 5.5

@@ -1,7 +1,7 @@
 From 3d5cd6f41cd15564a4580e118deea65f351fc3af Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 9 Nov 2026 13:31:52 +0530
-Subject: [PATCH 37/44] MCP server: fill in documents, screenshots, open
+Subject: [PATCH 37/45] MCP server: fill in documents, screenshots, open
  projects, render lights
 
 - kicad_api completes a request's document specifiers (top level or in an ItemHeader) from the

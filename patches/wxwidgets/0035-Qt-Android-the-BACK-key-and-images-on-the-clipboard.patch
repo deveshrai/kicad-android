@@ -1,0 +1,200 @@
+From 361b5bce8c878f45b5f567b9b6e1e4de2eea5762 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 14 Nov 2026 01:57:32 +0530
+Subject: [PATCH] Qt/Android: the BACK key, and images on the clipboard
+
+The BACK key (and back gesture) comes from Qt as Qt::Key_Back, which wxQt
+did not map.  It is WXK_BROWSER_BACK now, and WXK_ESCAPE inside a dialog,
+so that dialogs cancel on it as on Escape.  An unhandled BACK still sends
+the app to the background (Qt's Android plugin does that).
+
+Android's clipboard holds text, HTML and URIs, not images.  A copied
+image is written as a PNG to the app's cache and its content URI, from
+the FileProvider that wxLaunchDefaultApplication() already uses, goes on
+the clipboard with it.  wxQtAndroidContentUri() is that helper.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/wx/qt/private/utils.h |  8 ++++++++
+ src/qt/clipbrd.cpp            | 34 ++++++++++++++++++++++++++++++++++
+ src/qt/converter.cpp          |  5 +++++
+ src/qt/utils.cpp              | 26 +++++++++++++++++++++++---
+ src/qt/window.cpp             | 14 ++++++++++++++
+ 5 files changed, 84 insertions(+), 3 deletions(-)
+
+diff --git a/include/wx/qt/private/utils.h b/include/wx/qt/private/utils.h
+index 25f0418..1a6ffed 100644
+--- a/include/wx/qt/private/utils.h
++++ b/include/wx/qt/private/utils.h
+@@ -27,4 +27,12 @@ void wxMissingImplementation( const char fileName[], unsigned lineNumber,
+ #define wxMISSING_FUNCTION() \
+     wxMISSING_IMPLEMENTATION( __func__ )
+ 
++#ifdef __ANDROID__
++class QString;
++
++// A content:// URI for a local file, served by the app's FileProvider (authority
++// <package>.qtprovider), as other apps can't open file:// URIs; empty on failure
++QString wxQtAndroidContentUri(const QString& path);
++#endif
++
+ #endif // _WX_QT_UTILS_H_
+diff --git a/src/qt/clipbrd.cpp b/src/qt/clipbrd.cpp
+index b25d2ee..4b8f5a4 100644
+--- a/src/qt/clipbrd.cpp
++++ b/src/qt/clipbrd.cpp
+@@ -18,6 +18,15 @@
+ #include "wx/scopedarray.h"
+ #include "wx/scopeguard.h"
+ #include "wx/qt/private/converter.h"
++#include "wx/qt/private/utils.h"
++
++#ifdef __ANDROID__
++#include <QtCore/QDateTime>
++#include <QtCore/QDir>
++#include <QtCore/QStandardPaths>
++#include <QtCore/QUrl>
++#include <QtGui/QImage>
++#endif
+ 
+ // ----------------------------------------------------------------------------
+ // wxClipboard ctor/dtor
+@@ -90,6 +99,31 @@ bool wxClipboard::AddData( wxDataObject *data )
+     data->QtAddDataTo(*MimeData);
+     delete data;
+ 
++#ifdef __ANDROID__
++    // Android's clipboard holds text, HTML and URIs, not images: put a copied image in a PNG in
++    // the app's cache and the clipboard gets its content URI, which apps that take images paste
++    if ( MimeData->hasImage() && !MimeData->hasUrls() )
++    {
++        const QImage image = qvariant_cast<QImage>(MimeData->imageData());
++        const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
++                            + QStringLiteral("/clipboard");
++        // A new name each time: apps cache what they read from a URI
++        const QString path = dir + QStringLiteral("/image-%1.png")
++                                   .arg(QDateTime::currentMSecsSinceEpoch());
++
++        QDir(dir).removeRecursively();
++        QDir().mkpath(dir);
++
++        if ( !image.isNull() && image.save(path, "PNG") )
++        {
++            const QString uri = wxQtAndroidContentUri(path);
++
++            if ( !uri.isEmpty() )
++                MimeData->setUrls({ QUrl(uri) });
++        }
++    }
++#endif
++
+     QtClipboard->setMimeData(MimeData, (QClipboard::Mode)Mode());
+ 
+     return true;
+diff --git a/src/qt/converter.cpp b/src/qt/converter.cpp
+index 2497167..b356bd1 100644
+--- a/src/qt/converter.cpp
++++ b/src/qt/converter.cpp
+@@ -168,6 +168,11 @@ wxKeyCode wxQtConvertKeyCode( int key, Qt::KeyboardModifiers modifiers )
+             return WXK_RETURN;
+         case Qt::Key_Escape:
+             return WXK_ESCAPE;
++#ifdef __ANDROID__
++        // The BACK key (and the back gesture)
++        case Qt::Key_Back:
++            return WXK_BROWSER_BACK;
++#endif
+         case Qt::Key_Cancel:
+             return WXK_CANCEL;
+         case Qt::Key_Clear:
+diff --git a/src/qt/utils.cpp b/src/qt/utils.cpp
+index b294643..8b5107f 100644
+--- a/src/qt/utils.cpp
++++ b/src/qt/utils.cpp
+@@ -149,11 +149,11 @@ namespace
+ // apps (FileUriExposedException), so nothing opens.  Share the file through the FileProvider
+ // that Qt's manifest declares (authority <package>.qtprovider) instead, with its MIME type and
+ // a read grant.  Returns false (and clears the Java exception) when no app can open it.
+-bool wxQtAndroidOpenFile(const QString& path)
++QJniObject wxQtAndroidContentUriObject(const QString& path)
+ {
+     QJniObject ctx = QNativeInterface::QAndroidApplication::context();
+     if ( !ctx.isValid() )
+-        return false;
++        return QJniObject();
+ 
+     QJniEnvironment env;
+     QJniObject file("java/io/File", "(Ljava/lang/String;)V",
+@@ -167,9 +167,23 @@ bool wxQtAndroidOpenFile(const QString& path)
+     if ( env.checkAndClearExceptions() || !uri.isValid() )
+     {
+         wxLogDebug("No content URI for %s", wxQtConvertString(path));
+-        return false;
++        return QJniObject();
+     }
+ 
++    return uri;
++}
++
++bool wxQtAndroidOpenFile(const QString& path)
++{
++    QJniObject ctx = QNativeInterface::QAndroidApplication::context();
++    if ( !ctx.isValid() )
++        return false;
++
++    QJniEnvironment env;
++    QJniObject uri = wxQtAndroidContentUriObject(path);
++    if ( !uri.isValid() )
++        return false;
++
+     QString mime;
+     const int dot = path.lastIndexOf('.');
+     if ( dot >= 0 )
+@@ -199,6 +213,12 @@ bool wxQtAndroidOpenFile(const QString& path)
+     return true;
+ }
+ } // anonymous namespace
++
++QString wxQtAndroidContentUri(const QString& path)
++{
++    QJniObject uri = wxQtAndroidContentUriObject(path);
++    return uri.isValid() ? uri.toString() : QString();
++}
+ #endif // __ANDROID__
+ 
+ bool wxLaunchDefaultApplication(const wxString& path, int WXUNUSED( flags ) )
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index f8c5bd5..7536bba 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -37,6 +37,7 @@
+ #include "wx/qt/private/converter.h"
+ #include "wx/qt/private/compat.h"
+ #include "wx/qt/private/winevent.h"
++#include "wx/dialog.h"
+ 
+ 
+ #define TRACE_QT_WINDOW "qtwindow"
+@@ -1741,6 +1742,19 @@ void wxWindowQt::QtFillKeyEvent( wxKeyEvent& e, const QKeyEvent *event ) const
+     // TODO: m_x, m_y
+     e.m_keyCode = wxQtConvertKeyCode( event->key(), event->modifiers() );
+ 
++#ifdef __ANDROID__
++    // BACK in a dialog cancels it, as Escape does: dialogs (wxDialog's own Escape handling and
++    // apps' Escape hooks) know Escape, not WXK_BROWSER_BACK.  Elsewhere apps see
++    // WXK_BROWSER_BACK, and if nothing handles it Qt sends the app to the background.
++    if ( e.m_keyCode == WXK_BROWSER_BACK )
++    {
++        wxWindow* top = wxGetTopLevelParent( const_cast<wxWindowQt*>( this ) );
++
++        if ( top && top->IsTopLevel() && wxDynamicCast( top, wxDialog ) )
++            e.m_keyCode = WXK_ESCAPE;
++    }
++#endif
++
+     if ( event->text().isEmpty() )
+         e.m_uniChar = 0;
+     else
+-- 
+2.54.0 (Apple Git-157)
+

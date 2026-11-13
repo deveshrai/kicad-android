@@ -35,6 +35,7 @@ import android.text.TextUtils;
 import android.view.DisplayCutout;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -86,6 +87,14 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
     private boolean m_decorDragging = false;
     private boolean m_decorPressedOnClose = false;
     private boolean m_decorPressedOnTitle = false;
+    // Resizing by the border: the edges taken hold of (RESIZE_*), 0 when moving or idle
+    private static final int RESIZE_LEFT = 1;
+    private static final int RESIZE_RIGHT = 2;
+    private static final int RESIZE_BOTTOM = 4;
+    private int m_resizeEdges = 0;
+    private int m_decorPressClientWidth;
+    private int m_decorPressClientHeight;
+    private long m_lastResizeReport = 0;
     private float m_decorPressRawX;
     private float m_decorPressRawY;
     private int m_decorPressClientX;
@@ -370,12 +379,14 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
             m_decorPressed = true;
             m_decorDragging = false;
             m_decorPressedOnClose = onCloseButton(event.getX(), event.getY());
-            // The border is too thin to mean anything but a slip of the finger
-            m_decorPressedOnTitle = event.getY() < m_decorTop;
+            m_resizeEdges = resizeEdgesAt(event.getX(), event.getY());
+            m_decorPressedOnTitle = m_resizeEdges == 0 && event.getY() < m_decorTop;
             m_decorPressRawX = event.getRawX();
             m_decorPressRawY = event.getRawY();
             m_decorPressClientX = m_clientX;
             m_decorPressClientY = m_clientY;
+            m_decorPressClientWidth = m_clientWidth;
+            m_decorPressClientHeight = m_clientHeight;
             return true;
         }
 
@@ -389,10 +400,14 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
         case MotionEvent.ACTION_MOVE:
             if (!m_decorDragging) {
                 final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
-                if (m_decorPressedOnTitle && m_hasGeometry && m_clientWidth > 0
-                        && (Math.abs(dx) > slop || Math.abs(dy) > slop)) {
+                if ((m_decorPressedOnTitle || m_resizeEdges != 0) && m_hasGeometry
+                        && m_clientWidth > 0 && (Math.abs(dx) > slop || Math.abs(dy) > slop)) {
                     m_decorDragging = true;
                 }
+            }
+            if (m_decorDragging && m_resizeEdges != 0) {
+                resizeBy(Math.round(dx), Math.round(dy), false);
+                break;
             }
             if (m_decorDragging)
                 moveClientTo(m_decorPressClientX + Math.round(dx),
@@ -400,7 +415,11 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
             break;
         case MotionEvent.ACTION_UP:
             m_decorPressed = false;
-            if (m_decorDragging) {
+            if (m_decorDragging && m_resizeEdges != 0) {
+                m_decorDragging = false;
+                resizeBy(Math.round(dx), Math.round(dy), true);
+                m_resizeEdges = 0;
+            } else if (m_decorDragging) {
                 m_decorDragging = false;
                 moveClientTo(m_decorPressClientX + Math.round(dx),
                              m_decorPressClientY + Math.round(dy));
@@ -412,6 +431,7 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
             break;
         case MotionEvent.ACTION_CANCEL:
             m_decorPressed = false;
+            m_resizeEdges = 0;
             if (m_decorDragging) {
                 m_decorDragging = false;
                 decorationGeometry(getId(), m_clientX, m_clientY, m_clientWidth, m_clientHeight,
@@ -422,6 +442,109 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
             break;
         }
         return true;
+    }
+
+    // The edges of the border at a point in this view, as RESIZE_* flags.  The corners take the
+    // strip's height along the sides, so that they are easier to take hold of.
+    private int resizeEdgesAt(float x, float y)
+    {
+        if (!hasDecoration() || m_decorSide <= 0 || inClientArea(x, y))
+            return 0;
+
+        final int corner = m_decorTop;
+        final int w = getWidth();
+        final int h = getHeight();
+        int edges = 0;
+
+        if (y >= m_decorTop || y >= h - corner) {
+            if (x < m_decorSide)
+                edges |= RESIZE_LEFT;
+            else if (x >= w - m_decorSide)
+                edges |= RESIZE_RIGHT;
+        }
+
+        if (y >= h - m_decorSide) {
+            edges |= RESIZE_BOTTOM;
+
+            if (x < corner)
+                edges |= RESIZE_LEFT;
+            else if (x >= w - corner)
+                edges |= RESIZE_RIGHT;
+        }
+
+        return edges;
+    }
+
+    // Resizes the window by the drag on its border.  Qt hears of the new size as it goes (a few
+    // times a second, so the content is laid out again while dragging) and at the end.
+    private void resizeBy(int dx, int dy, boolean finished)
+    {
+        int x = m_decorPressClientX;
+        int width = m_decorPressClientWidth;
+        int height = m_decorPressClientHeight;
+        final int minWidth = Math.max(m_minClientWidth, 4 * m_decorTop);
+        final int minHeight = Math.max(m_minClientHeight, m_decorTop);
+
+        if ((m_resizeEdges & RESIZE_RIGHT) != 0)
+            width = Math.max(minWidth, width + dx);
+
+        if ((m_resizeEdges & RESIZE_LEFT) != 0) {
+            final int newWidth = Math.max(minWidth, width - dx);
+            x += width - newWidth;
+            width = newWidth;
+        }
+
+        if ((m_resizeEdges & RESIZE_BOTTOM) != 0)
+            height = Math.max(minHeight, height + dy);
+
+        // Not past the parent's edges
+        if (getParent() instanceof View) {
+            final View parent = (View) getParent();
+            final int left = m_decorSide;
+            if (x < left) {
+                width -= left - x;
+                x = left;
+            }
+            width = Math.min(width, parent.getWidth() - x - m_decorSide);
+            height = Math.min(height, parent.getHeight() - m_clientY - m_decorSide);
+        }
+
+        if (width <= 0 || height <= 0)
+            return;
+
+        m_clientX = x;
+        m_clientWidth = width;
+        m_clientHeight = height;
+        applyGeometry();
+
+        final long now = System.currentTimeMillis();
+        if (finished || now - m_lastResizeReport > 150) {
+            m_lastResizeReport = now;
+            decorationGeometry(getId(), m_clientX, m_clientY, m_clientWidth, m_clientHeight,
+                               m_geometrySerial);
+        }
+    }
+
+    // Resize arrows over the border for a mouse or pen
+    @Override
+    public PointerIcon onResolvePointerIcon(MotionEvent event, int pointerIndex)
+    {
+        final int edges = resizeEdgesAt(event.getX(pointerIndex), event.getY(pointerIndex));
+        int type = 0;
+
+        if (edges == (RESIZE_BOTTOM | RESIZE_RIGHT))
+            type = PointerIcon.TYPE_TOP_LEFT_DIAGONAL_DOUBLE_ARROW;
+        else if (edges == (RESIZE_BOTTOM | RESIZE_LEFT))
+            type = PointerIcon.TYPE_TOP_RIGHT_DIAGONAL_DOUBLE_ARROW;
+        else if (edges == RESIZE_BOTTOM)
+            type = PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW;
+        else if (edges != 0)
+            type = PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW;
+
+        if (type != 0)
+            return PointerIcon.getSystemIcon(getContext(), type);
+
+        return super.onResolvePointerIcon(event, pointerIndex);
     }
 
     // Moves the window while it is dragged.  Qt hears of the new position when the drag ends.

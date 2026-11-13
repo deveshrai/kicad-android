@@ -1,7 +1,7 @@
 From ff0691794ded51f27ab0d42897ff868ec6598213 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 13 Nov 2026 16:20:39 +0530
-Subject: [PATCH 42/44] Android: tappable launcher names, room in layer pair
+Subject: [PATCH 42/45] Android: tappable launcher names, room in layer pair
  presets, wider sheet properties
 
 Project manager: on Android a tap on a launcher's name or description

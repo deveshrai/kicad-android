@@ -203,6 +203,41 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Everything on the open list (10.99ar, 2026-11-14)
+KiCad 0045, wx 0035, qtbase 0007, QtWindow.java.  Checked on the emulator (fresh installs) and the
+tablet.
+- **BACK key:** wxQt maps `Qt::Key_Back` to `WXK_BROWSER_BACK`, and to `WXK_ESCAPE` inside a
+  wxDialog (so dialogs cancel).  `EDA_BASE_FRAME::OnCharHook` (Android): cancel the running tool,
+  else `Close( false )` (save prompt as usual); the project manager skips it, and Qt's plugin then
+  backgrounds the app (`moveTaskToBack` when nothing accepted the key).  Checked: 3D viewer closes,
+  a route in progress ends, the board editor closes, the schematic editor asks to save.
+- **Media index:** `startMediaIndexer()` in kiplatform's Android `ENV::Init`: every 4 s, files
+  changed since the last look in `/storage/emulated/0/{Documents,Download}` (top level) and in
+  `$KIPRJMOD` (3 levels, shared storage only) go to `MediaScannerConnection.scanFile()` (lock and
+  hidden files skipped, at most 2000 per pass).  Checked: a new file in the project folder was in
+  MediaStore within 10 s.
+- **Clipboard images:** wx `wxClipboard::AddData` writes a copied image to
+  `<cache>/clipboard/image-<ms>.png` and adds its FileProvider content URI; Qt's plugin passed the
+  URI as `byte[]` (NoSuchMethodError, qtbase 0007).  Checked: Samsung's clipboard took it.
+- **Raytrace preview:** on Android the PBO isn't cleared to alpha 0 at a new render; the client
+  buffer starts as the background gradient, so untraced blocks show the last image or background.
+- **Dialog resizing:** the border is 3 dp; QtWindow `resizeEdgesAt()` (left, right, bottom; the
+  corners take the strip's height), `resizeBy()` reports to Qt every 150 ms and at the end,
+  clamped to the minimum size and the parent; resize pointer icons via `onResolvePointerIcon`.
+  Checked: Footprint Properties widened by 300 px, relaid out, and back to its minimum.
+- **kicad_screenshot** draws the frame and strip from `QWindow::frameMargins()` and the palette.
+- **Configure Paths:** editing cells, Cancel and BACK all work now (fixed along the way by the
+  key and dialog work); checked on the emulator.
+- **Plot Schematic** colour theme: the editor's theme when none is saved (was blank).
+- **RunAction without a parameter:** the five handlers that dereferenced a `wxString*` return.
+- **Library tables page:** `wxStaticTextBase::Wrap()` returns early for the width it wrapped to
+  last, so the page's `OnSize` (`SetLabel` then `Wrap(same)`) left the text unwrapped and clipped;
+  on Android it resets with `Wrap(-1)` first.
+- **Project manager after the wizard:** it came up at ~3/4 of the screen; a `CallAfter` after
+  `Show()` re-shows it maximized when it is smaller than the display.
+- **3D preview in Footprint Properties:** works with the downloaded models (SOIC-8 shown).
+- **Drawing Sheet Editor black canvas:** not reproduced on a second try.
+
 ## Library Files page and Run Setup Wizard (10.99aq, 2026-11-13)
 The user's request: 3D models as an option, and an update option for the bundled libraries (they
 first asked to drop the bundled libraries, then kept them once that saved only 65 MB of 437).

@@ -1,7 +1,7 @@
 From 5fb17667bff0d945e36004865a792a17f03d5eff Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 5 Nov 2026 04:00:14 +0530
-Subject: [PATCH 29/44] Touch input on the canvas on Android
+Subject: [PATCH 29/45] Touch input on the canvas on Android
 
 One finger is the left mouse button: its press waits until the finger
 moves past a small slop, lifts (a click) or rests 120 ms, so that a second
