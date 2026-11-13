@@ -1,0 +1,100 @@
+From ff0691794ded51f27ab0d42897ff868ec6598213 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 16:20:39 +0530
+Subject: [PATCH 42/42] Android: tappable launcher names, room in layer pair
+ presets, wider sheet properties
+
+Project manager: on Android a tap on a launcher's name or description
+launches it, like its icon.  Upstream leaves the texts inert on desktop;
+on a touch screen the name is what people tap.  The texts are only as wide
+as their words, and the click is deferred and looked up by id like the
+button's own.
+
+Select Copper Layer Pair: with no presets the presets grid's best size was
+its header alone, and on a two-layer board nothing else made the dialog
+taller; it now has room for four rows.
+
+Drawing Sheet Editor: the Properties pane's saved default width (150 px)
+is not scaled and left room for only the first letters at tablet font
+sizes; on Android it is at least 320 DIP.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ kicad/dialogs/panel_kicad_launcher.cpp | 25 +++++++++++++++++++++++++
+ pagelayout_editor/pl_editor_frame.cpp  |  6 ++++++
+ pcbnew/sel_layer.cpp                   |  6 ++++++
+ 3 files changed, 37 insertions(+)
+
+diff --git a/kicad/dialogs/panel_kicad_launcher.cpp b/kicad/dialogs/panel_kicad_launcher.cpp
+index d8f6d66c..adc4b86d 100644
+--- a/kicad/dialogs/panel_kicad_launcher.cpp
++++ b/kicad/dialogs/panel_kicad_launcher.cpp
+@@ -135,6 +135,31 @@ void PANEL_KICAD_LAUNCHER::CreateLaunchers()
+                 // The bug fix below makes this handler active for the entire window width.  Without any visual
+                 // feedback that's a bit odd.  Disabling for now.
+                 // label->Bind( wxEVT_LEFT_UP, handler );
++#ifdef __ANDROID__
++                // On a touch screen the name is what people tap.  The texts are only as wide as
++                // their words, so this does not make the whole row live.  Deferred and looked up
++                // by id like the button's own click, as a click can rebuild the launchers.
++                auto onTextClick =
++                        [this, id]( wxMouseEvent& aEvent )
++                        {
++                            aEvent.Skip();
++
++                            CallAfter(
++                                    [this, id]()
++                                    {
++                                        wxWindow* button = m_scrolledWindow->FindWindow( id );
++
++                                        if( !button || !button->IsEnabled() )
++                                            return;
++
++                                        wxCommandEvent click( wxEVT_BUTTON, id );
++                                        onLauncherButtonClick( click );
++                                    } );
++                        };
++
++                label->Bind( wxEVT_LEFT_UP, onTextClick );
++                help->Bind( wxEVT_LEFT_UP, onTextClick );
++#endif
+ 
+                 m_toolsSizer->Add( btn, 1, wxALIGN_CENTER_VERTICAL );
+ 
+diff --git a/pagelayout_editor/pl_editor_frame.cpp b/pagelayout_editor/pl_editor_frame.cpp
+index 07ec1fbb..55ea8655 100644
+--- a/pagelayout_editor/pl_editor_frame.cpp
++++ b/pagelayout_editor/pl_editor_frame.cpp
+@@ -200,6 +200,12 @@ PL_EDITOR_FRAME::PL_EDITOR_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
+     m_auimgr.AddPane( m_tbRight, EDA_PANE().VToolbar().Name( "RightToolbar" )
+                       .Right().Layer( 2 ) );
+ 
++#ifdef __ANDROID__
++    // The saved default (150 px) is not scaled, and at tablet font sizes it leaves room for
++    // only the first letters of each property and value
++    m_propertiesFrameWidth = std::max( m_propertiesFrameWidth, FromDIP( 320 ) );
++#endif
++
+     m_auimgr.AddPane( m_propertiesPagelayout, EDA_PANE().Palette().Name( "Props" )
+                       .Right().Layer( 3 )
+                       .Caption( _( "Properties" ) )
+diff --git a/pcbnew/sel_layer.cpp b/pcbnew/sel_layer.cpp
+index 405d81cf..11a0e9fb 100644
+--- a/pcbnew/sel_layer.cpp
++++ b/pcbnew/sel_layer.cpp
+@@ -710,6 +710,12 @@ public:
+ 
+         SetFocus();
+ 
++        // With no presets yet the grid's best size is its header alone, and on a two-layer board
++        // nothing else makes the dialog taller: leave room for a few rows.
++        const int rowHeight = m_presetsGrid->GetDefaultRowSize();
++        m_presetsGrid->SetMinSize( wxSize( m_presetsGrid->GetMinSize().x,
++                                           m_presetsGrid->GetColLabelSize() + 4 * rowHeight ) );
++
+         GetSizer()->SetSizeHints( this );
+         Center();
+     }
+-- 
+2.54.0 (Apple Git-157)
+

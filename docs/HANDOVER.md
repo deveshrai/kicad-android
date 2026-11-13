@@ -203,6 +203,24 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## P10: hotkey names, launcher labels, layer pair presets, sheet properties (10.99ao, 2026-11-13)
+KiCad patch 0042, wx patch 0033.  Checked on the emulator (the user was using the tablet).
+- **Hotkeys list cut names short in the middle** ("Move B...rd Down", "PCB ...itor", "D...n"),
+  only some of them, in wide columns.  Cause: `wxDataViewCustomRendererBase::WXCallRender` makes
+  a left-aligned cell's text rect exactly `GetTextExtent()` wide (QFontMetrics advance of the
+  whole string, with kerning), and `wxControl::Ellipsize()` then compares against the generic
+  `GetPartialTextExtents()`, which sums single-character widths (no kerning) and came out a few
+  px wider for strings with kerning pairs.  wx 0033: on wxQt the generic `wxTextMeasure` measures
+  each prefix as a whole (up to 512 characters).  Only `src/generic/textmeasure.cpp` changes, so
+  no KiCad rebuild; wx is a shared library.
+- **Launcher labels:** on Android a tap on a launcher's name or description starts it (upstream
+  keeps them inert on desktop).  Deferred and looked up by id, like the button's own click.
+- **Select Copper Layer Pair:** the presets grid gets a minimum height of four rows (with no
+  presets its best size was the header alone).
+- **Drawing Sheet Editor:** the Properties pane is at least 320 DIP wide on Android (the saved
+  default is 150 px).
+- **Seen on the emulator:** the drawing sheet canvas is black until the first touch.
+
 ## Dialog frames and Googlebook OS (10.99an, 2026-11-13)
 Dialogs were bare rectangles: Android has no window manager for the windows inside an activity,
 so nothing drew a frame or a title, and a dialog could not be moved.  qtbase patch 0005 and

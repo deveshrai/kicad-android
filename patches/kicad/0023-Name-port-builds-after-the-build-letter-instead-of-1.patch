@@ -1,7 +1,7 @@
 From caa2ab0d11cdbe199be09c31d348eddb4d117a0d Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 2 Nov 2026 14:54:21 +0530
-Subject: [PATCH 23/41] Name port builds after the build letter instead of
+Subject: [PATCH 23/42] Name port builds after the build letter instead of
  10.99.0-unknown
 
 The port builds from a shallow clone without tags, so git describe fails

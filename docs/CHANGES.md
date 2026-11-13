@@ -22,7 +22,7 @@ This document explains the changes by area.  Each patch has a full commit messag
 
 KiCad's whole UI is written against wxWidgets, and wx has no Android port.  Its Qt port (wxQt)
 does run on Qt for Android, but it is the least-used wx port, so most of the work was fixing it
-(`patches/wxwidgets`, 32 patches):
+(`patches/wxwidgets`, 33 patches):
 
 - **Build:**
   - cross-compiling from macOS (0003, 0005)
@@ -58,7 +58,8 @@ does run on Qt for Android, but it is the least-used wx port, so most of the wor
   - tree item data freed twice (0026), and deleted tree items in selection events (0027)
 - **Fonts:** Android sizes fonts in pixels, so wx reported a 2 pt size and editors were unreadable
   (0019).
-- **Text:** narrow strings are UTF-8 on Android (0029).
+- **Text:** narrow strings are UTF-8 on Android (0029); partial text extents that include
+  kerning, so data view cells don't ellipsize text that fits (0033).
 - **Files:** `wxFileName::Mkdir()` starts below the deepest existing directory (0025).
 
 ## 2. Platform layer: `kiplatform`

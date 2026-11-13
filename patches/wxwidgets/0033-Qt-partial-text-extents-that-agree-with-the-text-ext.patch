@@ -1,0 +1,59 @@
+From 1d03b8fc6fe25d84d81857fed1cef79692ce5435 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 16:20:39 +0530
+Subject: [PATCH] Qt: partial text extents that agree with the text extent
+
+The generic wxTextMeasure added up the widths of single characters, which
+leaves out kerning, so the last offset could be a few pixels wider than
+GetTextExtent() of the whole string.  wxDataViewCtrl makes a left-aligned
+cell's text rectangle exactly GetTextExtent() wide, so wxControl::Ellipsize()
+shortened text that fitted, in the middle ("Move B...rd Down", "D...n" for
+"Down" in a wide column of KiCad's hotkey list), and only for strings with
+kerning pairs.  On wxQt, measure each prefix as a whole instead; long texts
+keep the generic version.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/generic/textmeasure.cpp | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/src/generic/textmeasure.cpp b/src/generic/textmeasure.cpp
+index 33d8be4..d1db86c 100644
+--- a/src/generic/textmeasure.cpp
++++ b/src/generic/textmeasure.cpp
+@@ -59,6 +59,32 @@ bool wxTextMeasure::DoGetPartialTextExtents(const wxString& text,
+                                             wxArrayInt& widths,
+                                             double scaleX)
+ {
++#ifdef __WXQT__
++    // Measure each prefix as a whole, as GetTextExtent() measures the full string.  The generic
++    // version adds up the widths of single characters, which leaves out kerning, so its last
++    // offset could be a few pixels wider than the string's own extent.  wxDataViewCtrl makes a
++    // left-aligned cell's text rectangle exactly that extent wide, and ellipsized text that fit
++    // ("Move B...rd Down" in a wide column).  Long texts keep the cheaper generic version.
++    if ( text.length() <= 512 )
++    {
++        wxString prefix;
++        prefix.reserve(text.length());
++
++        size_t n = 0;
++        for ( const auto c : text )
++        {
++            prefix += c;
++
++            wxCoord w = 0;
++            wxCoord h = 0;
++            DoGetTextExtent(prefix, &w, &h, nullptr, nullptr);
++            widths[n++] = w;
++        }
++
++        return true;
++    }
++#endif // __WXQT__
++
+     return wxTextMeasureBase::DoGetPartialTextExtents(text, widths, scaleX);
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

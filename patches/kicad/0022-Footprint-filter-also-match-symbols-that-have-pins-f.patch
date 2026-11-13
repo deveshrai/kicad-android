@@ -1,7 +1,7 @@
 From 9c5da4cfd2f172fef9ae35f0fe30cc1600ba38b0 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 2 Nov 2026 13:26:48 +0530
-Subject: [PATCH 22/41] Footprint filter: also match symbols that have pins for
+Subject: [PATCH 22/42] Footprint filter: also match symbols that have pins for
  digit-less pad numbers
 
 GetNumberedPadCount() skips pads such as USB-C 'SH', but the chooser counts

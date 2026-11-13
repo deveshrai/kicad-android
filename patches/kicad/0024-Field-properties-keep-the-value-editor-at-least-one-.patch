@@ -1,7 +1,7 @@
 From c55665e5479412e8ed4bf24b0d95b00b6a302a24 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 3 Nov 2026 12:41:17 +0530
-Subject: [PATCH 24/41] Field properties: keep the value editor at least one
+Subject: [PATCH 24/42] Field properties: keep the value editor at least one
  text line high on wxQt
 
 wxQt's Scintilla can report a line height of a few pixels before it has

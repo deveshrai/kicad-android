@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99an; next: ao).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ao; next: ap).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -91,12 +91,8 @@ and Googlebook OS, with a laptop-and-tablet hero (`scripts/make-hero.py`).
   frame; once, right after launch on the tablet, Preferences showed a black band under its title
   bar that went away when the dialog was moved (a stale first frame?); not seen again.
 - **P10 items still open:**
-  - Select Layer Pair: the presets grid is squashed.
-  - Preferences > Hotkeys: some names are cut short in the middle ("Move B...rd Down",
-    "PCB ...itor", hotkey "D...n") although the column has room; others as long are not.  Looks
-    like a text width measurement problem in the generic data view on wxQt, not column width.
-  - Drawing Sheet Editor: the Properties panel is too narrow.
-  - Project manager launchers: only the icon launches, not the text beside it.
+  - (10.99ao fixed the hotkey names, the launcher labels, the layer pair presets and the
+    Drawing Sheet Editor's Properties width.)
   - The drill dialog has no background; panels cover the canvas on the Fold; the soft keyboard
     covers the focused field (on the emulator it also opens for grid cell editors with a
     hardware keyboard attached).
@@ -106,4 +102,4 @@ and Googlebook OS, with a laptop-and-tablet hero (`scripts/make-hero.py`).
   - `RunAction` of an action that needs a parameter crashes without one (API only).
   - A freeze seen once after BACK and relaunch with dialogs open; not reproduced.
 - **Tablet:** a stray debug app `org.kicad.kicad` (versionName 10.99am) is installed; uninstalling
-  it was denied, so the user has to remove it.  Don't launch it.
+  it was denied.  The user said (2026-11-13) they will remove it themselves.  Don't launch it.
