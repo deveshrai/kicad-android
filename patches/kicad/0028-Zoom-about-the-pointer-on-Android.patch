@@ -1,7 +1,7 @@
 From d7f9d2f48219d9ac392bd0d1037c53dfdc756abd Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 5 Nov 2026 03:07:05 +0530
-Subject: [PATCH 28/45] Zoom about the pointer on Android
+Subject: [PATCH 28/46] Zoom about the pointer on Android
 
 "Center and warp cursor on zoom" (on by default) recentres the view on the
 cursor and then warps the pointer to the centre.  Android apps can't move

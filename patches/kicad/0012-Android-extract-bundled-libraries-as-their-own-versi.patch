@@ -1,7 +1,7 @@
 From 166331897cab4118bad9c19c24ccc7fb47a0cafa Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 14:08:19 +0530
-Subject: [PATCH 12/45] Android: extract bundled libraries as their own
+Subject: [PATCH 12/46] Android: extract bundled libraries as their own
  versioned asset tree
 
 Assisted-by: Claude Opus 5.5

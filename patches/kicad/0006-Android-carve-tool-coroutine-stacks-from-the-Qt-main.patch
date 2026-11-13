@@ -1,7 +1,7 @@
 From 67a4ffc996fc2834b86b6367df3903174e2783f6 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 20:41:48 +0530
-Subject: [PATCH 06/45] Android: carve tool coroutine stacks from the Qt
+Subject: [PATCH 06/46] Android: carve tool coroutine stacks from the Qt
  main-loop thread stack
 
 The Android runtime rejects Java frames and JNI references outside the

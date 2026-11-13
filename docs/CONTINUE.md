@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ar; next: as).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99as; next: at).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.

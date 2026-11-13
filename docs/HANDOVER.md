@@ -203,6 +203,20 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Grid dots at a fractional display scale (10.99as, 2026-11-14)
+KiCad 0046.  The user saw uneven grid dots on the tablet (gaps, doubled dots, moiré zoomed out).
+- The tablet runs at density 280 (scale 1.75), so `GAL::m_gridLineWidth` = 1.75 * 1 + 0.25 = 2
+  backing pixels.  The emulator's scale of 2 hides both bugs below.
+- `grid.frag` `pixelAlignDist()`: in a supersampled target (High Quality AA) it centred every
+  width on a pixel, so a 2 px dot was a faint 3x3 blob (weights 1-2-1).  Even widths now snap to
+  `floor( along ) + 0.5`, a pixel edge.
+- `GAL_MODERN` gave the frame, grid and cursor UBOs a viewport of `w * m_dpiScale` unrounded,
+  while `RENDER_THREAD::ComputeBackingResolution()` floors it; the shader's pixel cells drifted
+  up to a pixel against the target's.  The viewports are floored the same way now.
+- Checked on the tablet (scratch board): every minor dot a solid 2x2, every major dot 4x4, at
+  five zoom levels; the PCB canvas looks as before.  Measured with a component scan of
+  screenshots (scratchpad `dots2.py`), not by eye.
+
 ## Everything on the open list (10.99ar, 2026-11-14)
 KiCad 0045, wx 0035, qtbase 0007, QtWindow.java.  Checked on the emulator (fresh installs) and the
 tablet.

@@ -104,6 +104,9 @@ KiCad's "Modern" GAL draws through Qt's RHI, which already has a Vulkan backend.
   - the window is sized to the canvas viewport (0009)
   - two RHI fixes for surfaces whose size is off by a rounding step, or never reaches the
     requested size (0015, 0017)
+  - at a fractional display scale (the Galaxy Tab's 1.75) the shaders get the rounded backing
+    size, and even-width grid dots and lines centre on a pixel edge in the supersampled target,
+    so the grid is sharp and even (0046)
 - **Speed:**
   - pointer motion is coalesced, so the interactive router keeps up with the pointer (0026)
   - a Qt backing store hands its pixels to the compositor directly, instead of copying the whole

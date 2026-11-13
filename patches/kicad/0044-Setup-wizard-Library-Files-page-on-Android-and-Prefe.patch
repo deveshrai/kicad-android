@@ -1,7 +1,7 @@
 From 1f7ed6caa09d50a896ad73e9021a5a99bc399354 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 13 Nov 2026 21:14:04 +0530
-Subject: [PATCH 44/45] Setup wizard: Library Files page on Android, and
+Subject: [PATCH 44/46] Setup wizard: Library Files page on Android, and
  Preferences > Run Setup Wizard
 
 Android: the app bundles the symbol and footprint libraries and the

@@ -1,7 +1,7 @@
 From eaa1a899b336af3c43926878f2d752c7d48f64d6 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 6 Nov 2026 22:03:22 +0530
-Subject: [PATCH 30/45] Integrated autorouter on Android (Route > Autoroute
+Subject: [PATCH 30/46] Integrated autorouter on Android (Route > Autoroute
  Board)
 
 The Android app carries Freerouting's routing core, run in the app's own Java

@@ -1,0 +1,75 @@
+From 2a16ac74da19c7a8bae3cb4ae5c34a9fb0003cfe Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 14 Nov 2026 02:21:08 +0530
+Subject: [PATCH 46/46] Android: sharp, even grid dots at fractional display
+ scales
+
+At a display scale of 1.75 (density 280) the grid line width becomes
+1.75 * 1 + 0.25 = 2 backing pixels.  Two things went wrong:
+
+- In a supersampled target (High Quality antialiasing) the grid shader
+  centred every line on a pixel whatever its width, so a 2 px dot covered
+  one pixel and half of each neighbour: a faint 3x3 blob.  Even widths now
+  centre on a pixel edge, as they do without supersampling.
+
+- The frame, grid and cursor uniforms gave the shaders a viewport of
+  width * scale, unrounded, while RENDER_THREAD::ComputeBackingResolution()
+  sizes the target at floor( width * scale ).  The shader's pixels drifted
+  up to a pixel against the target's across the canvas, so dots came out
+  missing or doubled in places and the grid showed moire.  The viewport is
+  now the rounded backing size.
+
+Integer scales (the emulator's 2) were not affected.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/gal/gal_modern.cpp    | 12 +++++++-----
+ common/rhi/shaders/grid.frag |  2 ++
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/common/gal/gal_modern.cpp b/common/gal/gal_modern.cpp
+index 435fba9e..d4cf3ccc 100644
+--- a/common/gal/gal_modern.cpp
++++ b/common/gal/gal_modern.cpp
+@@ -4248,9 +4248,11 @@ void GAL_MODERN::PopulateCameraUBOs( FRAME_DRAW_DESC& aDesc ) const
+     RhiAdjustProjectionForBackend( fp, m_deviceProxy.GetBackend() );
+ 
+     // Shaders size antialiased edges in backing pixels, m_dpiScale times the logical size the
+-    // projection uses
+-    float bw = w * m_dpiScale;
+-    float bh = h * m_dpiScale;
++    // projection uses, rounded down as RENDER_THREAD::ComputeBackingResolution() sizes the target.
++    // At a fractional scale such as 1.75 the unrounded size puts the shader's pixels up to a pixel
++    // away from the target's, and the grid dots come out uneven.
++    float bw = std::fmax( std::floor( w * static_cast<float>( m_dpiScale ) ), 1.0f );
++    float bh = std::fmax( std::floor( h * static_cast<float>( m_dpiScale ) ), 1.0f );
+     aDesc.frameUBO.viewport[0] = bw;
+     aDesc.frameUBO.viewport[1] = bh;
+     aDesc.frameUBO.viewScale = static_cast<float>( m_zoomFactor );
+@@ -4305,8 +4307,8 @@ void GAL_MODERN::PopulateCursorUBO( FRAME_DRAW_DESC& aDesc ) const
+     aDesc.cursorUBO.cursorPos[0] = static_cast<float>( cursorScreen.x / ( w * 0.5 ) - 1.0 );
+     float ndcY = static_cast<float>( 1.0 - cursorScreen.y / ( h * 0.5 ) );
+     aDesc.cursorUBO.cursorPos[1] = flipY ? -ndcY : ndcY;
+-    aDesc.cursorUBO.viewport[0]  = w * m_dpiScale;
+-    aDesc.cursorUBO.viewport[1]  = h * m_dpiScale;
++    aDesc.cursorUBO.viewport[0]  = std::fmax( std::floor( w * static_cast<float>( m_dpiScale ) ), 1.0f );
++    aDesc.cursorUBO.viewport[1]  = std::fmax( std::floor( h * static_cast<float>( m_dpiScale ) ), 1.0f );
+     // Dimmed while no tool has asked for it and it shows only because it is always shown
+     const COLOR4D cursorColor = getCursorColor();
+ 
+diff --git a/common/rhi/shaders/grid.frag b/common/rhi/shaders/grid.frag
+index e2ae07e9..3a05d73b 100644
+--- a/common/rhi/shaders/grid.frag
++++ b/common/rhi/shaders/grid.frag
+@@ -39,6 +39,8 @@ float pixelAlignDist( float signedPixelDist, float fragmentOffset, float lineWid
+ 
+     if( renderScale <= 1.0 && lineWidth > 1.5 )
+         snapped = mod( lineWidth, 2.0 ) < 0.5 ? floor( along + 1.0 ) - 0.5 : floor( along ) + 1.0;
++    else if( lineWidth > 1.5 && mod( lineWidth, 2.0 ) < 0.5 )
++        snapped = floor( along ) + 0.5;  // An even line centres on a pixel edge, or it smears over a pixel each side
+ 
+     return abs( snapped * toward - fragmentOffset );
+ }
+-- 
+2.54.0 (Apple Git-157)
+
