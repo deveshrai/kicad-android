@@ -1,0 +1,92 @@
+From 9e37ac5f39bc50dd036750fca5fc2fdb5f03c03b Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 20:06:31 +0530
+Subject: [PATCH] android: drop stale decoration geometry reports; keep the
+ minimum size
+
+QtWindow reports a geometry back to Qt after it moves a decorated window
+clear of the system bars or at the end of a drag.  Those reports are
+queued, and a dialog that Qt resized several times while it was being
+shown (wx sizes a dialog in steps) got an older report applied after the
+newer geometry, so it ended up with the size of an earlier step.  Each
+geometry given to QtWindow now carries a serial number, and a report
+made from an older one is dropped.
+
+The window's minimum size goes to QtWindow with the geometry, and the
+fit no longer makes a window smaller than that; Qt would only put it
+back.  This replaces the earlier rule of not shrinking a size twice.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../platforms/android/qandroidplatformwindow.cpp    | 13 ++++++++++---
+ .../platforms/android/qandroidplatformwindow.h      |  4 +++-
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.cpp b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+index e2a69f67..a92afde2 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+@@ -256,7 +256,9 @@ void QAndroidPlatformWindow::setGeometry(const QRect &requestedRect)
+             w = rect.width();
+             h = rect.height();
+         }
+-        m_nativeQtWindow.callMethod<void>("setGeometry", x, y, w, h);
++        const QSize minimum = QHighDpi::toNativePixels(window()->minimumSize(), window());
++        m_nativeQtWindow.callMethod<void>("setGeometry", x, y, w, h, jint(++m_geometrySerial),
++                                          jint(minimum.width()), jint(minimum.height()));
+     }
+ 
+     QWindowSystemInterface::handleGeometryChange(window(), rect);
+@@ -551,7 +553,7 @@ void QAndroidPlatformWindow::safeAreaMarginsChanged(JNIEnv *env, jobject object,
+ // QtWindow moved the window, at the end of a drag on its title strip, or moved or shrank it
+ // to keep it clear of the system bars.  It has the new client geometry already.
+ void QAndroidPlatformWindow::decorationGeometry(JNIEnv *env, jobject object, jint windowId,
+-                                                jint x, jint y, jint w, jint h)
++                                                jint x, jint y, jint w, jint h, jint serial)
+ {
+     Q_UNUSED(env)
+     Q_UNUSED(object)
+@@ -559,12 +561,17 @@ void QAndroidPlatformWindow::decorationGeometry(JNIEnv *env, jobject object, jin
+     if (!qGuiApp)
+         return;
+ 
+-    QMetaObject::invokeMethod(qGuiApp, [windowId, x, y, w, h]() {
++    QMetaObject::invokeMethod(qGuiApp, [windowId, x, y, w, h, serial]() {
+         QWindow *window = QtAndroid::windowFromId(windowId);
+         if (!window || !window->handle())
+             return;
+ 
++        // QtWindow worked from a geometry that Qt has replaced since: the newer one wins
++        auto *platformWindow = static_cast<QAndroidPlatformWindow *>(window->handle());
+         const QRect rect(x, y, w, h);
++        if (serial != platformWindow->m_geometrySerial)
++            return;
++
+         if (rect.isEmpty() || rect == window->handle()->geometry())
+             return;
+ 
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.h b/src/plugins/platforms/android/qandroidplatformwindow.h
+index 330845fd..2aec252e 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.h
++++ b/src/plugins/platforms/android/qandroidplatformwindow.h
+@@ -117,6 +117,8 @@ protected:
+     // The title strip and the border that QtWindow draws around a dialog, in native
+     // pixels; null for a window without them
+     QMargins m_frameMargins;
++    // Numbers the geometries given to QtWindow, see decorationGeometry()
++    int m_geometrySerial = 0;
+ 
+ private:
+     static void setSurface(JNIEnv *env, jobject obj, jint windowId, QtJniTypes::Surface surface);
+@@ -126,7 +128,7 @@ private:
+     static void safeAreaMarginsChanged(JNIEnv *env, jobject obj, QtJniTypes::Insets insets, jint  id);
+     Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(safeAreaMarginsChanged)
+     static void decorationGeometry(JNIEnv *env, jobject obj, jint windowId, jint x, jint y,
+-                                   jint w, jint h);
++                                   jint w, jint h, jint serial);
+     Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(decorationGeometry)
+     static void decorationClose(JNIEnv *env, jobject obj, jint windowId);
+     Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(decorationClose)
+-- 
+2.54.0 (Apple Git-157)
+

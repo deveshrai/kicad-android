@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ao; next: ap).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ap; next: aq).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -65,12 +65,12 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
    - The drill dialog has no background.
    - Panels cover the canvas on the Fold.
    - The soft keyboard covers the focused field.
-6. **P11: other desktop-GL code.**  Find the remaining desktop-OpenGL users and make them work on
-   Android:
-   - the 3D model preview in footprint properties
-   - the raytracer's display pass
+6. **P11: other desktop-GL code.**  10.99ap: the raytracer works and 3D image export works
+   (see HANDOVER).  Left:
+   - the 3D model preview in footprint properties with a real model (none on the tablet)
    - the OpenGL GAL fallback
-   - 3D screenshots
+   - raytracing shows black for blocks not rendered yet
+   - files KiCad writes don't reach MediaStore, so other apps' pickers miss them until a scan
 7. **Later:**
    - touch gestures in the 3D viewer
    - long-press as right click

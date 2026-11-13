@@ -1,0 +1,46 @@
+From 6175899f2e7ae05d5387b1d43299655bd0251d6b Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 20:06:31 +0530
+Subject: [PATCH] Qt: top-level size hints are for the whole window
+
+wx size hints, like GetSize(), include the window frame, but wxQt passed
+them straight to QWidget::setMinimumSize()/setMaximumSize(), which are
+for the widget, that is the client area.  With a frame (dialogs have one
+on Android since the platform plugin draws it) a minimum size capped to
+the room on the screen kept the window taller than that room by the
+title bar, and a dialog's buttons ended up under the taskbar.  Take the
+frame off the hints, as wxQtSetClientSize() does for the size.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/toplevel.cpp | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/qt/toplevel.cpp b/src/qt/toplevel.cpp
+index 7fb7bea..42dc0bd 100644
+--- a/src/qt/toplevel.cpp
++++ b/src/qt/toplevel.cpp
+@@ -246,8 +246,18 @@ void wxTopLevelWindowQt::DoSetSizeHints( int minW, int minH,
+     incW = wxMax(0, incW);
+     incH = wxMax(0, incH);
+ 
+-    GetHandle()->setMinimumSize(minW, minH);
+-    GetHandle()->setMaximumSize(maxW, maxH);
++    // wx's size hints are for the whole window, like GetSize(), but Qt's are for the widget,
++    // which is the client area: take the frame off, as wxQtSetClientSize() does for the size.
++    // Without it a minimum size capped to the room on the screen kept the window that much
++    // taller than the room.
++    const QSize frame = GetHandle()->frameSize() - GetHandle()->size();
++    const auto clientHint = [](int hint, int frameExtent)
++    {
++        return (hint > 0 && hint != QWIDGETSIZE_MAX) ? wxMax(0, hint - frameExtent) : hint;
++    };
++
++    GetHandle()->setMinimumSize(clientHint(minW, frame.width()), clientHint(minH, frame.height()));
++    GetHandle()->setMaximumSize(clientHint(maxW, frame.width()), clientHint(maxH, frame.height()));
+     GetHandle()->setSizeIncrement(incW, incH);
+ 
+     wxTopLevelWindowBase::DoSetSizeHints(minW, minH, maxW, maxH, incW, incH);
+-- 
+2.54.0 (Apple Git-157)
+

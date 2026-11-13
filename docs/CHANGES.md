@@ -22,7 +22,7 @@ This document explains the changes by area.  Each patch has a full commit messag
 
 KiCad's whole UI is written against wxWidgets, and wx has no Android port.  Its Qt port (wxQt)
 does run on Qt for Android, but it is the least-used wx port, so most of the work was fixing it
-(`patches/wxwidgets`, 33 patches):
+(`patches/wxwidgets`, 34 patches):
 
 - **Build:**
   - cross-compiling from macOS (0003, 0005)
@@ -42,6 +42,7 @@ does run on Qt for Android, but it is the least-used wx port, so most of the wor
   - combo box sizing (0013)
   - no size grip in dialogs (0028)
   - room for the icons in trees (0030)
+  - top-level size hints that leave out the frame, as Qt expects (0034)
   - a frame and a title bar for dialogs, which you drag to move the dialog: Qt's Android plugin
     reports them as the window's frame margins (qtbase 0005), and the replacement `QtWindow`
     class in `android/qt-patches` draws them
@@ -113,7 +114,11 @@ KiCad's "Modern" GAL draws through Qt's RHI, which already has a Vulkan backend.
 The 3D viewer uses fixed-function desktop OpenGL, which Android doesn't have.
 [gl4es](https://github.com/ptitSeb/gl4es), unmodified, provides it as `libGL.so` on top of the
 GLES context of Qt's `QOpenGLWidget`.  KiCad keeps the library loaded, and loads its 3D model
-plugins straight from the APK (0027).
+plugins straight from the APK (0027).  Raytracing draws its image as a textured quad, as gl4es's
+`glDrawPixels` can't read a pixel buffer (0043).
+
+The board editor exports STEP, GLB and the other 3D formats in-process: an Android app can't run
+kicad-cli as a separate program (0043).
 
 ## 6. Input on a tablet
 

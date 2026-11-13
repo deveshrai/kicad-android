@@ -1,7 +1,7 @@
 From 9a6667d23c24aa214555f43e5118fe9eed1adce1 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 9 Nov 2026 13:31:52 +0530
-Subject: [PATCH 36/42] Editors reload documents changed on disk
+Subject: [PATCH 36/43] Editors reload documents changed on disk
 
 The schematic and board editors kept showing (and would later save over) their in-memory copy
 when another program changed the files, for example an AI agent editing them through MCP.

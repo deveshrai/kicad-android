@@ -1,7 +1,7 @@
 From 8b62921a908a541098949eca813243e7bdd28577 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 7 Nov 2026 08:10:25 +0530
-Subject: [PATCH 33/42] Import and export library packages (parts-site zips)
+Subject: [PATCH 33/43] Import and export library packages (parts-site zips)
 
 File > Import Library Package... takes the zip a parts site (SnapEDA, Ultra Librarian,
 SamacSys, Digi-Key, Mouser...) offers for KiCad and makes the part usable in one step: the

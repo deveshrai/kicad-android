@@ -1,7 +1,7 @@
 From 3d6eafd484b3ac5eb39c1d4e3b08c72c3407b08d Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 10 Nov 2026 22:18:59 +0530
-Subject: [PATCH 39/42] Autoroute tool: dock it at the left; fixes from testing
+Subject: [PATCH 39/43] Autoroute tool: dock it at the left; fixes from testing
 
 The Autoroute tool is now a panel that lives in a dialog or docked in the
 board editor's left panel column (in place of the Properties panel while

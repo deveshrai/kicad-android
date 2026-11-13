@@ -76,9 +76,11 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
     private int m_clientWidth = -1;
     private int m_clientHeight = -1;
     private boolean m_hasGeometry = false;
-    // The size fitInParent() last made smaller: if Qt asks for it again, the window keeps it
-    private int m_shrunkFromWidth = -1;
-    private int m_shrunkFromHeight = -1;
+    // Numbers Qt's geometries; reports to Qt carry the one they started from
+    private int m_geometrySerial = 0;
+    // The window's minimum size: fitInParent() makes it no smaller
+    private int m_minClientWidth = 0;
+    private int m_minClientHeight = 0;
     // A press on the title strip: a drag moves the window, a tap on the cross closes it
     private boolean m_decorPressed = false;
     private boolean m_decorDragging = false;
@@ -89,7 +91,7 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
     private int m_decorPressClientX;
     private int m_decorPressClientY;
 
-    private static native void decorationGeometry(int id, int x, int y, int w, int h);
+    private static native void decorationGeometry(int id, int x, int y, int w, int h, int serial);
     private static native void decorationClose(int id);
     private static native void setSurface(int windowId, Surface surface);
     private static native void safeAreaMarginsChanged(Insets insets, int id);
@@ -402,7 +404,8 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
                 m_decorDragging = false;
                 moveClientTo(m_decorPressClientX + Math.round(dx),
                              m_decorPressClientY + Math.round(dy));
-                decorationGeometry(getId(), m_clientX, m_clientY, m_clientWidth, m_clientHeight);
+                decorationGeometry(getId(), m_clientX, m_clientY, m_clientWidth, m_clientHeight,
+                                   m_geometrySerial);
             } else if (m_decorPressedOnClose && onCloseButton(event.getX(), event.getY())) {
                 decorationClose(getId());
             }
@@ -411,7 +414,8 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
             m_decorPressed = false;
             if (m_decorDragging) {
                 m_decorDragging = false;
-                decorationGeometry(getId(), m_clientX, m_clientY, m_clientWidth, m_clientHeight);
+                decorationGeometry(getId(), m_clientX, m_clientY, m_clientWidth, m_clientHeight,
+                                   m_geometrySerial);
             }
             break;
         default:
@@ -662,16 +666,11 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
         if (maxX - minX <= 2 * m_decorSide || maxY - minY <= m_decorTop + m_decorSide)
             return;
 
-        int width = Math.min(m_clientWidth, maxX - minX - 2 * m_decorSide);
-        int height = Math.min(m_clientHeight, maxY - minY - m_decorTop - m_decorSide);
-        if (m_clientWidth == m_shrunkFromWidth && m_clientHeight == m_shrunkFromHeight) {
-            // The app wants this size even so (a minimum size, say): don't fight it
-            width = m_clientWidth;
-            height = m_clientHeight;
-        } else if (width != m_clientWidth || height != m_clientHeight) {
-            m_shrunkFromWidth = m_clientWidth;
-            m_shrunkFromHeight = m_clientHeight;
-        }
+        // Not below the minimum size, which Qt would put back, and so on round
+        final int width = Math.max(Math.min(m_clientWidth, maxX - minX - 2 * m_decorSide),
+                                   Math.min(m_clientWidth, m_minClientWidth));
+        final int height = Math.max(Math.min(m_clientHeight, maxY - minY - m_decorTop - m_decorSide),
+                                    Math.min(m_clientHeight, m_minClientHeight));
         final int outerWidth = width + 2 * m_decorSide;
         final int outerHeight = height + m_decorTop + m_decorSide;
         int outerX = m_clientX - m_decorSide;
@@ -691,7 +690,7 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
         m_clientWidth = width;
         m_clientHeight = height;
         applyGeometry();
-        decorationGeometry(getId(), x, y, width, height);
+        decorationGeometry(getId(), x, y, width, height, m_geometrySerial);
     }
 
     @Override
@@ -743,7 +742,19 @@ class QtWindow extends QtLayout implements QtSurfaceInterface {
     @UsedFromNativeCode
     void setGeometry(final int x, final int y, final int w, final int h)
     {
+        setGeometry(x, y, w, h, 0, 0, 0);
+    }
+
+    // serial numbers Qt's requests, so that a report made from an older one can be told apart;
+    // minWidth and minHeight are the window's minimum size
+    @UsedFromNativeCode
+    void setGeometry(final int x, final int y, final int w, final int h, final int serial,
+                     final int minWidth, final int minHeight)
+    {
         QtNative.runAction(()-> {
+            m_geometrySerial = serial;
+            m_minClientWidth = minWidth;
+            m_minClientHeight = minHeight;
             m_clientX = x;
             m_clientY = y;
             m_clientWidth = w;

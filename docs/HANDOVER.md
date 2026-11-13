@@ -203,6 +203,42 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## P11: raytracing, STEP export, dialogs above the taskbar (10.99ap, 2026-11-13)
+KiCad patch 0043, wx patch 0034, qtbase patch 0006.  Checked on the tablet.
+- **Raytracing crashed** (SIGSEGV in gl4es `glDrawPixels`, `raster.c:596`): the raytracer
+  writes into a pixel unpack buffer and calls `glDrawPixels(..., 0)`; gl4es reads the 0 as a
+  client pointer.  On Android `RENDER_3D_RAYTRACE_GL` keeps the pixels in a `std::vector`
+  (`mapPixels()`/`unmapPixels()`) and draws them as a textured quad in window coordinates
+  (`drawClientPixels()`).
+  - The quad came out black until another, untextured glBegin/glEnd draw followed it before
+    the texture was unbound (found with a red test square).  glFlush after the quad did not
+    help, nor did vertex arrays.  So one transparent pixel is drawn after it.  Not understood
+    inside gl4es; gl4es stays unmodified.
+  - The pixels are valid (logged), the alpha test reference is 0.2, the viewport is right.
+  - While a render runs, blocks not rendered yet are black instead of showing the preview.
+  - Export Image from the 3D viewer writes the raytraced view (1376x816 for a 1404x835
+    request).  Copy to clipboard does nothing visible (Android's clipboard takes no images).
+- **STEP export from the board editor** ran kicad-cli as a child process: `execvp(base.apk!
+  /lib/arm64-v8a/kicad-cli.so)` fails (error 2).  On Android `DIALOG_EXPORT_STEP` runs
+  `EXPORTER_STEP` in-process on the open board (`exportInProcess()`), with the parameters from
+  `fillJob()` (shared with the job editor), and shows the messages in a message box.
+  - Checked: the STEP of work/rp2350's scratch copy is 95.000 x 65.000 mm, holes 2.7 mm at
+    (106,66) (189,66) (106,119) (189,119), corner radius 8 mm, body 1.51 mm (the dielectric of the
+    1.6 mm stackup; copper and mask are off by default).  Imported into the user's SolidCraft
+    (Insert > Insert STEP): Properties gave 95.00 x 65.00 x 1.51 mm, 168 vertices, 9136.88 mm3.
+  - The 3D models aren't on the tablet, so components are skipped ("Could not add 3D model").
+  - **Other apps' pickers did not list the new STEP** until a media scan
+    (`am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://...`).  Files that
+    KiCad writes are not added to MediaStore; worth a `MediaScannerConnection.scanFile()` after
+    exports.
+- **Footprint Properties reached under the taskbar** (OK/Cancel hidden), two causes:
+  - wxQt passed top-level size hints, which include the frame in wx, as the widget's
+    (client) minimum size, so the window stayed a title bar taller than its cap (wx 0034).
+  - QtWindow's queued fit reports could arrive after a newer geometry from Qt and undo it;
+    each geometry now has a serial and stale reports are dropped, and the fit respects the
+    window's minimum size, passed with the geometry (qtbase 0006).
+- **3D preview in Footprint Properties:** shows the footprint; no model on the tablet to check.
+
 ## P10: hotkey names, launcher labels, layer pair presets, sheet properties (10.99ao, 2026-11-13)
 KiCad patch 0042, wx patch 0033.  Checked on the emulator (the user was using the tablet).
 - **Hotkeys list cut names short in the middle** ("Move B...rd Down", "PCB ...itor", "D...n"),

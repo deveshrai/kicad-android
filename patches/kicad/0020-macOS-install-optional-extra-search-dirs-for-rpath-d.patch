@@ -1,7 +1,7 @@
 From 0b47951847a331890ea6e412e992c95f4320dd05 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 20:26:32 +0530
-Subject: [PATCH 20/42] macOS install: optional extra search dirs for @rpath
+Subject: [PATCH 20/43] macOS install: optional extra search dirs for @rpath
  dependencies
 
 KICAD_MACOS_DEPENDENCY_DIRS (colon-separated) is passed to

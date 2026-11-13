@@ -1,7 +1,7 @@
 From 55c7d7799e435f7fd189d5b5c2926bd88116b2b1 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 13 Nov 2026 10:31:11 +0530
-Subject: [PATCH 40/42] Android: fixes from a crash hunt on the tablet
+Subject: [PATCH 40/43] Android: fixes from a crash hunt on the tablet
 
 Launchers: the Gerber Viewer, the calculator tools and the drawing sheet
 editor are started in-process from COMMON_CONTROL::Execute(), as there is
