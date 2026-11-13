@@ -238,6 +238,15 @@ KiCad patch 0044.  Checked on the emulator (fresh data) and on the tablet (page 
 - **HTTPS on Android:** OpenSSL can't use `/system/etc/security/cacerts` as CAPATH (files are named
   by the old MD5 subject hash), so `KICAD_CURL_EASY` passes the concatenated system certificates
   as `CURLOPT_CAINFO_BLOB`.  This also fixes every other curl use (PCM, update checks).
+- **STEP with 3D parts, checked (2026-11-13, tablet):** 3D models installed through the page
+  (595 MB in 20 s, unpacked in about a minute, 105 libraries).  The scratch RP2350 board's STEP
+  (board body + components) took 6 s, 3.35 MB, 58 instances; imported into SolidCraft as 12
+  bodies with colours, bounding box 95.00 x 65.00 x 11.64 mm.  Read independently on the Mac
+  with OpenCascade (cadquery-ocp): same box (z -1.51..10.14), and the switches, U2, U3, Y1, L1,
+  J2 and J3 at their footprint positions (y negated) to 0.01 mm, with the package sizes.
+  - J1 (HRO TYPE-C-31-M-12) and U1 (QFN-60 7x7) have no model in kicad-packages3D 10.0.8 (404 on
+    GitLab): the footprints name models the library lacks.
+  - The new STEP showed in SolidCraft's picker only after a media scan (see 10.99ap).
 - **Library tables page:** its intro wrapped to the panel's width, which is wider than the page,
   so lines were cut off; on Android it wraps at 600 DIP.  Not re-checked on a fresh install.
 
