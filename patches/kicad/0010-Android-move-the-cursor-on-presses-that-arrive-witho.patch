@@ -1,7 +1,7 @@
 From ab8ed160fa81f51c260e3addefe7c17334a01dc2 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 31 Oct 2026 23:14:32 +0530
-Subject: [PATCH 10/40] Android: move the cursor on presses that arrive without
+Subject: [PATCH 10/41] Android: move the cursor on presses that arrive without
  a motion event
 
 Touch and stylus presses have no preceding motion, so tools acted at the

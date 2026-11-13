@@ -42,6 +42,9 @@ does run on Qt for Android, but it is the least-used wx port, so most of the wor
   - combo box sizing (0013)
   - no size grip in dialogs (0028)
   - room for the icons in trees (0030)
+  - a frame and a title bar for dialogs, which you drag to move the dialog: Qt's Android plugin
+    reports them as the window's frame margins (qtbase 0005), and the replacement `QtWindow`
+    class in `android/qt-patches` draws them
 - **Android integration:**
   - the system document picker, with files returned as paths (0011, 0023)
   - opening files in other apps through a FileProvider (0018)
@@ -95,7 +98,7 @@ KiCad's "Modern" GAL draws through Qt's RHI, which already has a Vulkan backend.
 
 - **Surface:**
   - each canvas gets its own Vulkan window, composited as a TextureView so it stacks correctly
-    with dialogs and popups (0008, 0014; `android/qt-patches/bytecode` patches `QtWindow`)
+    with dialogs and popups (0008, 0014; `android/qt-patches/.../QtWindow.java` replaces `QtWindow`)
   - the window is sized to the canvas viewport (0009)
   - two RHI fixes for surfaces whose size is off by a rounding step, or never reaches the
     requested size (0015, 0017)

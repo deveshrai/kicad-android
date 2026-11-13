@@ -1,7 +1,7 @@
 From bc9c8c418b582edd067288599b69b47d593fa378 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 6 Nov 2026 23:39:21 +0530
-Subject: [PATCH 31/40] Built-in MCP server (Preferences > MCP Server)
+Subject: [PATCH 31/41] Built-in MCP server (Preferences > MCP Server)
 
 An MCP server inside KiCad (Streamable HTTP with JSON responses), so Claude Code
 or another MCP client can read and change the design while the user watches.

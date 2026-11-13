@@ -1,0 +1,310 @@
+From e52f580fe97fb3262696fc8b03487a86a4eab2f4 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 15:20:04 +0530
+Subject: [PATCH] android: a frame and a title bar for dialogs
+
+There is no window manager for the windows inside an Android activity,
+so a dialog was drawn as a bare rectangle: no frame, no title, and no
+way to move it.
+
+Report frame margins for top-level dialogs (Qt::Dialog windows that are
+not frameless, not maximized or full screen, and not customized without
+a title): a title strip 1.75 lines of the application font tall, at
+least 30 dp, and a 1 dp border.  QtWindow is given the margins, the
+title and colours from the application palette, makes its view larger
+than the client area by the margins, and draws the strip and the border
+in them.  Dragging the strip moves the window; QtWindow also moves, and
+if need be shrinks, a decorated window to keep it between the system
+bars, as a window manager would.  It reports the new client rect through
+decorationGeometry().  The cross in the strip sends a close event through
+decorationClose().
+
+The client area stays the window's geometry, so frameGeometry(), pos()
+and move() of widgets include the frame as on desktop.  A position that
+includes the frame (WindowFrameInclusive) is shifted by the margins
+before it reaches QtWindow.
+
+QT_ANDROID_NO_WINDOW_DECORATION=1 turns the frames off.
+
+The Java side is in KiCad Android's QtWindow.java replacement
+(android/qt-patches), as this tree's jar is not rebuilt.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../android/qandroidplatformwindow.cpp        | 159 +++++++++++++++++-
+ .../android/qandroidplatformwindow.h          |  12 ++
+ 2 files changed, 169 insertions(+), 2 deletions(-)
+
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.cpp b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+index 1e7ee812..e2a69f67 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+@@ -9,12 +9,16 @@
+ 
+ #include "androidjnimain.h"
+ #include "qandroidinputcontext.h"
++#include <QtCore/qmath.h>
+ #include <QtCore/qthread.h>
+ 
+ #include <qguiapplication.h>
+ #include <qpa/qwindowsysteminterface.h>
++#include <QtGui/qfontmetrics.h>
++#include <QtGui/qpalette.h>
+ #include <private/qhighdpiscaling_p.h>
+ #include <private/qjnihelpers_p.h>
++#include <private/qwindow_p.h>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -59,6 +63,9 @@ void QAndroidPlatformWindow::initialize()
+             isForeignWindow(), m_nativeParentQtWindow, listener);
+     m_nativeViewId = m_nativeQtWindow.callMethod<jint>("getId");
+ 
++    // Before the first geometry: with a frame, a position can be the frame's
++    updateDecoration();
++
+     // the surfaceType is overwritten in QAndroidPlatformOpenGLWindow ctor so let's save
+     // the fact that it's a raster window for now
+     m_isRaster = window->surfaceType() == QSurface::RasterSurface;
+@@ -136,8 +143,106 @@ void QAndroidPlatformWindow::setSafeAreaMargins(const QMargins safeMargins)
+     m_safeAreaMargins = safeMargins;
+ }
+ 
+-void QAndroidPlatformWindow::setGeometry(const QRect &rect)
++// Android has no window manager for the windows inside an activity, so without this a
++// dialog is a bare rectangle: no frame, no title, and no way to move it.  QtWindow draws
++// a title strip and a border around a dialog's client area, and moves the window when
++// the strip is dragged.  Here they are the window's frame margins, so QWidget's
++// frameGeometry(), pos() and move() count them in.
++bool QAndroidPlatformWindow::wantsDecoration() const
++{
++    static const bool disabled = qEnvironmentVariableIntValue("QT_ANDROID_NO_WINDOW_DECORATION");
++    if (disabled || !QtAndroid::isQtApplication() || isForeignWindow()
++        || !m_nativeQtWindow.isValid()) {
++        return false;
++    }
++
++    const QWindow *w = window();
++    if (!w->isTopLevel() || w->type() != Qt::Dialog)
++        return false;
++
++    const Qt::WindowFlags flags = w->flags();
++    if (flags & (Qt::FramelessWindowHint | Qt::BypassWindowManagerHint
++                 | Qt::ExpandedClientAreaHint)) {
++        return false;
++    }
++    if ((flags & Qt::CustomizeWindowHint) && !(flags & Qt::WindowTitleHint))
++        return false;
++
++    return !(w->windowStates() & (Qt::WindowMaximized | Qt::WindowFullScreen));
++}
++
++static jint blendedColor(const QColor &base, const QColor &other, qreal amount)
++{
++    const auto mix = [amount](int a, int b) { return qRound(a + (b - a) * amount); };
++    return jint(qRgb(mix(base.red(), other.red()), mix(base.green(), other.green()),
++                     mix(base.blue(), other.blue())));
++}
++
++void QAndroidPlatformWindow::updateDecoration()
++{
++    if (!m_nativeQtWindow.isValid())
++        return;
++
++    QMargins margins;
++    if (wantsDecoration()) {
++        // Whole device independent pixels, so that QWindow::frameMargins() is exact.
++        // The strip is 1.75 lines of text tall, and tall enough for a finger.
++        const qreal factor = QHighDpiScaling::factor(window());
++        const int border = qMax(1, qRound(factor));
++        const qreal textHeight = QFontMetricsF(QGuiApplication::font()).height() * factor;
++        const qreal fingerHeight = 30 * QtAndroid::pixelDensity();
++        const int strip = qRound(qCeil(qMax(textHeight * 1.75, fingerHeight) / factor) * factor);
++        margins = QMargins(border, strip + border, border, border);
++    }
++
++    if (margins.isNull() && m_frameMargins.isNull())
++        return;
++
++    const bool marginsChanged = margins != m_frameMargins;
++    m_frameMargins = margins;
++
++    const QPalette palette = QGuiApplication::palette();
++    const QColor background = palette.color(QPalette::Active, QPalette::Window);
++    const QColor text = palette.color(QPalette::Active, QPalette::WindowText);
++    const bool closeButton = window()->flags() & Qt::WindowCloseButtonHint;
++
++    m_nativeQtWindow.callMethod<void>("setTitle", window()->title());
++    m_nativeQtWindow.callMethod<void>("setDecoration", jint(margins.top()), jint(margins.left()),
++                                      blendedColor(background, text, 0.14),
++                                      blendedColor(text, background, 0.0),
++                                      blendedColor(background, text, 0.4),
++                                      jboolean(closeButton));
++
++    // QWidget takes the frame margins from move and resize events
++    if (marginsChanged && window()->isVisible() && !geometry().isEmpty())
++        QWindowSystemInterface::handleGeometryChange(window(), geometry());
++}
++
++QMargins QAndroidPlatformWindow::frameMargins() const
++{
++    return m_frameMargins;
++}
++
++void QAndroidPlatformWindow::setWindowTitle(const QString &title)
+ {
++    if (m_nativeQtWindow.isValid() && !isEmbeddingContainer())
++        m_nativeQtWindow.callMethod<void>("setTitle", title);
++}
++
++void QAndroidPlatformWindow::setGeometry(const QRect &requestedRect)
++{
++    // QtWindow and QWindow::geometry() get the client area.  A position that includes
++    // the frame comes from QWindow::setFramePosition(), or from a QWidget that was moved
++    // before it had a window.
++    QRect rect = requestedRect;
++    if (!m_frameMargins.isNull() && !rect.isNull()) {
++        QWindowPrivate *windowPrivate = qt_window_private(window());
++        if (windowPrivate->positionPolicy == QWindowPrivate::WindowFrameInclusive) {
++            rect.translate(m_frameMargins.left(), m_frameMargins.top());
++            windowPrivate->positionPolicy = QWindowPrivate::WindowFrameExclusive;
++        }
++    }
++
+     if (!isEmbeddingContainer()) {
+         Q_ASSERT(m_nativeQtWindow.isValid());
+ 
+@@ -173,6 +278,9 @@ void QAndroidPlatformWindow::setVisible(bool visible)
+                 setGeometry(platformScreen()->geometry());
+             else if (states & Qt::WindowMaximized)
+                 setGeometry(platformScreen()->availableGeometry());
++            // The palette can have changed since the window was created
++            if (visible)
++                updateDecoration();
+             requestActivateWindow();
+         }
+     }
+@@ -195,6 +303,9 @@ void QAndroidPlatformWindow::setWindowState(Qt::WindowStates state)
+ {
+     QPlatformWindow::setWindowState(state);
+ 
++    if (!isEmbeddingContainer())
++        updateDecoration();
++
+     if (window()->isVisible())
+         updateSystemUiVisibility(state, window()->flags());
+ }
+@@ -203,6 +314,9 @@ void QAndroidPlatformWindow::setWindowFlags(Qt::WindowFlags flags)
+ {
+     QPlatformWindow::setWindowFlags(flags);
+ 
++    if (!isEmbeddingContainer())
++        updateDecoration();
++
+     if (window()->isVisible())
+         updateSystemUiVisibility(window()->windowStates(), flags);
+ }
+@@ -434,6 +548,45 @@ void QAndroidPlatformWindow::safeAreaMarginsChanged(JNIEnv *env, jobject object,
+     }
+ }
+ 
++// QtWindow moved the window, at the end of a drag on its title strip, or moved or shrank it
++// to keep it clear of the system bars.  It has the new client geometry already.
++void QAndroidPlatformWindow::decorationGeometry(JNIEnv *env, jobject object, jint windowId,
++                                                jint x, jint y, jint w, jint h)
++{
++    Q_UNUSED(env)
++    Q_UNUSED(object)
++
++    if (!qGuiApp)
++        return;
++
++    QMetaObject::invokeMethod(qGuiApp, [windowId, x, y, w, h]() {
++        QWindow *window = QtAndroid::windowFromId(windowId);
++        if (!window || !window->handle())
++            return;
++
++        const QRect rect(x, y, w, h);
++        if (rect.isEmpty() || rect == window->handle()->geometry())
++            return;
++
++        QWindowSystemInterface::handleGeometryChange(window, rect);
++    }, Qt::QueuedConnection);
++}
++
++// The cross in the title strip
++void QAndroidPlatformWindow::decorationClose(JNIEnv *env, jobject object, jint windowId)
++{
++    Q_UNUSED(env)
++    Q_UNUSED(object)
++
++    if (!qGuiApp)
++        return;
++
++    QMetaObject::invokeMethod(qGuiApp, [windowId]() {
++        if (QWindow *window = QtAndroid::windowFromId(windowId))
++            QWindowSystemInterface::handleCloseEvent(window);
++    }, Qt::QueuedConnection);
++}
++
+ static void updateWindows(JNIEnv *env, jobject object)
+ {
+     Q_UNUSED(env)
+@@ -505,7 +658,9 @@ bool QAndroidPlatformWindow::registerNatives(QJniEnvironment &env)
+                 Q_JNI_NATIVE_METHOD(updateWindows),
+                 Q_JNI_NATIVE_SCOPED_METHOD(setSurface, QAndroidPlatformWindow),
+                 Q_JNI_NATIVE_SCOPED_METHOD(windowFocusChanged, QAndroidPlatformWindow),
+-                Q_JNI_NATIVE_SCOPED_METHOD(safeAreaMarginsChanged, QAndroidPlatformWindow)
++                Q_JNI_NATIVE_SCOPED_METHOD(safeAreaMarginsChanged, QAndroidPlatformWindow),
++                Q_JNI_NATIVE_SCOPED_METHOD(decorationGeometry, QAndroidPlatformWindow),
++                Q_JNI_NATIVE_SCOPED_METHOD(decorationClose, QAndroidPlatformWindow)
+             })) {
+         qCCritical(lcQpaWindow) << "RegisterNatives failed for"
+                                 << QtJniTypes::Traits<QtJniTypes::QtWindow>::className();
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.h b/src/plugins/platforms/android/qandroidplatformwindow.h
+index 5d8975e3..330845fd 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.h
++++ b/src/plugins/platforms/android/qandroidplatformwindow.h
+@@ -50,6 +50,8 @@ public:
+ 
+     void setWindowState(Qt::WindowStates state) override;
+     void setWindowFlags(Qt::WindowFlags flags) override;
++    void setWindowTitle(const QString &title) override;
++    QMargins frameMargins() const override;
+     void setParent(const QPlatformWindow *window) override;
+ 
+     WId winId() const override;
+@@ -88,6 +90,8 @@ protected:
+     void sendExpose() const;
+     bool blockedByModal() const;
+     bool isEmbeddingContainer() const;
++    bool wantsDecoration() const;
++    void updateDecoration();
+     virtual void clearSurface() {}
+     static void incrementSurfacesCount();
+     static void decrementSurfacesCount();
+@@ -110,6 +114,9 @@ protected:
+     QMutex m_destructionMutex;
+ 
+     QMargins m_safeAreaMargins;
++    // The title strip and the border that QtWindow draws around a dialog, in native
++    // pixels; null for a window without them
++    QMargins m_frameMargins;
+ 
+ private:
+     static void setSurface(JNIEnv *env, jobject obj, jint windowId, QtJniTypes::Surface surface);
+@@ -118,6 +125,11 @@ private:
+     Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(windowFocusChanged)
+     static void safeAreaMarginsChanged(JNIEnv *env, jobject obj, QtJniTypes::Insets insets, jint  id);
+     Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(safeAreaMarginsChanged)
++    static void decorationGeometry(JNIEnv *env, jobject obj, jint windowId, jint x, jint y,
++                                   jint w, jint h);
++    Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(decorationGeometry)
++    static void decorationClose(JNIEnv *env, jobject obj, jint windowId);
++    Q_DECLARE_JNI_NATIVE_METHOD_IN_CURRENT_SCOPE(decorationClose)
+ 
+     [[nodiscard]] QMutexLocker<QMutex> destructionGuard();
+ };
+-- 
+2.54.0 (Apple Git-157)
+

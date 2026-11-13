@@ -139,7 +139,7 @@ Build lessons (all handled in scripts/patches):
         the device waits until the surface extent equals it (a 2px frame mismatch = black canvas)
       - SurfaceViews sit behind the activity window, so all Qt windows are TextureViews:
         `QT_ANDROID_SURFACE_CONTAINER_TYPE=TextureView` plus a QtWindow bytecode patch for child
-        windows (`android/qt-patches/bytecode/patch_qtwindow.py`)
+        windows (`android/qt-patches/org/qtproject/qt/android/QtWindow.java`)
       - pointer/paint events arriving at the Vulkan window are forwarded to the viewport, keys to
         the canvas; popups (selection clarifier) composite over the GPU canvas correctly
       - verified on API 35 emulator (gfxstream -> MoltenVK, Apple M3): render, wheel zoom, Home,

@@ -203,6 +203,74 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Dialog frames and Googlebook OS (10.99an, 2026-11-13)
+Dialogs were bare rectangles: Android has no window manager for the windows inside an activity,
+so nothing drew a frame or a title, and a dialog could not be moved.  qtbase patch 0005 and
+`android/qt-patches/org/qtproject/qt/android/QtWindow.java`; KiCad patch 0041.
+
+- **Where:** in Qt's Android platform plugin and its `QtWindow` view, not in wxQt.  Every
+  `Qt::Dialog` window gets the frame, wx dialogs and Qt's own alike, and no wx or KiCad rebuild
+  was needed.  (Doing it in wxDialog with an inner content widget, like wxFrame's central
+  widget, means overriding the client area maths throughout wxQt.)
+- **C++ (`qandroidplatformwindow.cpp`):**
+  - `wantsDecoration()`: a top-level `Qt::Dialog` of a Qt application, not frameless, not
+    `CustomizeWindowHint` without `WindowTitleHint`, not maximized or full screen.
+    `QT_ANDROID_NO_WINDOW_DECORATION=1` turns it off.
+  - `frameMargins()` returns the title strip (1.75 lines of the app font, at least 30 dp) and a
+    1 dp border, in whole device independent pixels.  QWidget picks them up as its frame strut,
+    so `frameGeometry()`, `pos()` and `move()` (which wxQt uses for top-level windows) include
+    them and `geometry()` stays the client area.  DIALOG_SHIM's Android clamp therefore fits the
+    whole frame inside the main window.
+  - `setGeometry()` still gives QtWindow the client rect; a frame-inclusive position (from
+    `QWindow::setFramePosition()` or a widget moved before it had a window) is shifted by the
+    margins first.
+  - `setWindowTitle()` and `updateDecoration()` pass the title, the margins and colours from the
+    application palette to Java.  A margin change after the window is shown is reported as a
+    geometry change, since QWidget only reads the margins in move and resize events.
+  - Natives `decorationGeometry(id, x, y, w, h)` (`handleGeometryChange` with QtWindow's new
+    client rect, after a drag or a fit, below) and `decorationClose(id)` (`handleCloseEvent`),
+    both queued to the GUI thread.
+- **Java (`QtWindow.java`, a full copy of Qt 6.12's file):**
+  - The view is the client rect grown by the margins; `onMeasure`/`onLayout` put the children
+    (surface, QtEditText, native views, child windows) in the client area; `onDraw` paints the
+    border, the strip, the title (ellipsized) and a cross.
+  - Touches that start on the strip drag the window (raw coordinates, touch slop first, clamped
+    so the strip stays below the status bar and reachable); a tap on the cross closes it.  Other
+    touches and generic motion events are offset into client coordinates before
+    `QtInputDelegate`; hover over the frame is swallowed.
+  - `fitInParent()`, after each geometry from Qt and on attach: Qt places dialogs inside the
+    screen, which on Android includes the system bars, so tall dialogs reached under the status
+    bar (the "Plot dialog under the status bar" item).  A decorated window is moved, and made
+    smaller if it doesn't fit, to stay between the status bar and the navigation bar or taskbar
+    (`getSafeInsets`, not the IME), and Qt is told the new rect.  If Qt asks again for the size
+    it just shrank, it gets it (no tug of war with a minimum size).
+  - `getLocationOnScreen()` returns the client area's corner, since Qt's text handles and edit
+    popup add Qt coordinates to it.
+  - It also holds the TextureView change (window surfaces are always TextureViews) that the
+    bytecode patch `android/qt-patches/bytecode/patch_qtwindow.py` used to make; that script is
+    gone, and `scripts/build-kicad-apk.sh` replaces `QtWindow*.class` in the jar.
+- **KiCad 0041:**
+  - The startup wizard called `SetWindowStyleFlag( wxRESIZE_BORDER )`, which drops
+    `wxCAPTION` (no title bar on any platform); it now adds the flag to its style.
+  - "Ω⋅m" uses U+00B7 on Android: Android's fonts have no U+22C5.
+  - `KIPLATFORM::UI::GetUsableScreenRect()` (Android): the top-level frame's screen rect less
+    its QWindow's `safeAreaMargins()`.  DIALOG_SHIM's Android fit uses it instead of the frame's
+    whole rect, so a dialog's size and minimum size are capped to the room between the status
+    bar and the navigation bar, and it is centred there.  Before, Symbol Properties on the
+    emulator was 1570 px tall in a 1600 px screen and its title sat under the status bar.
+- **Checked on the emulator (2026-11-13; the tablet was not connected):** Preferences has the
+  strip with title and cross; dragging moves it and taps inside land on the right control
+  afterwards; the cross closes it with a mouse click; reopened, it fits inside the main window;
+  typing in its filter box works with touch and mouse focus.  Message boxes are Android
+  AlertDialogs and keep their own look.
+- **Known gaps:** no resizing from the edges; `kicad_screenshot` composes from widgets and does
+  not draw the frame; the strip colours are taken when the dialog is shown, not on a live theme
+  change.
+- **Googlebook OS:** README, badges, release notes and the repo description now say the app is
+  for Android and Googlebook OS (the user's request).  Not tested on a Googlebook; the APK is
+  arm64 only.  The README hero (`docs/media/hero-laptop-tablet.png`, drawn by
+  `scripts/make-hero.py` from app-window screenshots) shows a laptop and a tablet.
+
 ## Crash fixes: submenus and tree selection (10.99am, 2026-11-12)
 The user reported a crash on 10.99al; the tablet's crash buffer (`adb logcat -b crash -d`) held
 two different ones, each seen more than once.

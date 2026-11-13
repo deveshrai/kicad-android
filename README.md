@@ -2,7 +2,8 @@
 
 # KiCad Android
 
-**The real KiCad 10.99 EDA suite, running natively on Android tablets and foldables.**
+**The real KiCad 10.99 EDA suite for Android and Googlebook OS, running natively on tablets,
+foldables and laptops.**
 
 Schematics, PCB layout with the interactive router, 3D viewer and Gerber output, built from
 upstream KiCad sources.
@@ -10,11 +11,12 @@ upstream KiCad sources.
 [![Release](https://img.shields.io/github/v/release/deveshrai/kicad-android?include_prereleases&label=APK)](https://github.com/deveshrai/kicad-android/releases)
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
 ![Android 10+](https://img.shields.io/badge/Android-10%2B%20arm64-3DDC84?logo=android&logoColor=white)
+![Googlebook OS](https://img.shields.io/badge/Googlebook%20OS-arm64-4285F4?logo=google&logoColor=white)
 ![KiCad 10.99](https://img.shields.io/badge/KiCad-10.99%20(master)-314CB0)
 
-<a href="#a-whole-board-over-mcp-esp32-s3-in-uno-format"><img src="docs/media/esp32s3-uno-tablet.png" alt="KiCad's board editor on a Galaxy Tab showing the routed ESP32-S3 board in Arduino Uno format, with GND pours and no unrouted connections" width="860"></a>
+<a href="#a-whole-board-over-mcp-esp32-s3-in-uno-format"><img src="docs/media/hero-laptop-tablet.png" alt="KiCad Android on a laptop and a tablet: the schematic editor with the ESP32-S3 Uno board's schematic on the laptop, and the board editor with its routed PCB on the tablet" width="860"></a>
 
-<sub>An ESP32-S3 board in Arduino Uno format, designed on a Galaxy Tab S12+ from an empty schematic to Gerbers, every step driven by Claude Code through KiCad's built-in MCP server.</sub>
+<sub>An ESP32-S3 board in Arduino Uno format, designed on a Galaxy Tab S12+ from an empty schematic to Gerbers, every step driven by Claude Code through KiCad's built-in MCP server.  The screens are real screenshots, from the Android emulator in a laptop-shaped window and from the tablet, shown in drawn device frames.</sub>
 
 </div>
 
@@ -234,12 +236,15 @@ in [`work/esp32s3-uno`](work/esp32s3-uno).
 ## Install
 
 1. Download the APK from [**Releases**](https://github.com/deveshrai/kicad-android/releases).
-   It needs an arm64 device with Android 10 or newer.
+   It is for Android and Googlebook OS: it needs an arm64 device with Android 10 or newer, or
+   an arm64 Googlebook.  It is tested on Galaxy tablets and foldables; it has not been tried on
+   a Googlebook yet, so please report how it goes.
 2. Let your browser or file manager install apps, then open the APK.
 3. On first start, grant **All files access**, so KiCad can open projects in shared storage
    (`Documents`).
 
-A keyboard and mouse are recommended: a Bluetooth or USB keyboard, or Samsung DeX.
+A keyboard and mouse are recommended: a Googlebook's own, a Bluetooth or USB keyboard, or
+Samsung DeX.
 
 <details>
 <summary><b>3D models</b> (not bundled, the full set is several GB)</summary>

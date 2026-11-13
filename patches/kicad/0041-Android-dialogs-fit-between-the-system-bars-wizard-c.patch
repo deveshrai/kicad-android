@@ -1,0 +1,178 @@
+From 2e6fcdfd4c98cabc40150982212061d5829130dd Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 15:20:04 +0530
+Subject: [PATCH 41/41] Android: dialogs fit between the system bars; wizard
+ caption; Ohm-metre dot
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DIALOG_SHIM fitted dialogs on Android into the top-level frame's screen
+rect.  The frames are maximized edge to edge, so that rect includes the
+status bar and the navigation bar or taskbar, and tall dialogs (Plot,
+Symbol Properties) opened with their top under the status bar and their
+buttons cut off.  KIPLATFORM::UI::GetUsableScreenRect() gives the frame's
+rect less its QWindow's safe area margins; the dialog's size and minimum
+size are capped to that and the dialog is centred in it.
+
+The startup wizard set its style to wxRESIZE_BORDER alone, which drops
+wxCAPTION and wxCLOSE_BOX from wxDEFAULT_DIALOG_STYLE: a window without a
+title bar on any platform that honours the style.  Add the flag to the
+existing style instead.
+
+Android's system fonts have no U+22C5 DOT OPERATOR, so "Ω⋅m" in the
+calculator showed an empty box.  Use U+00B7 MIDDLE DOT there on Android.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/dialog_shim.cpp                        |  5 ++--
+ common/startwizard/startwizard.cpp            |  2 +-
+ libs/kiplatform/include/kiplatform/ui.h       | 10 ++++++++
+ libs/kiplatform/port/wxqt/ui.cpp              | 25 +++++++++++++++++++
+ .../calculator_panels/panel_cable_size.cpp    |  5 ++++
+ .../calculator_panels/panel_track_width.cpp   |  5 ++++
+ .../calculator_panels/panel_via_size.cpp      |  5 ++++
+ 7 files changed, 54 insertions(+), 3 deletions(-)
+
+diff --git a/common/dialog_shim.cpp b/common/dialog_shim.cpp
+index ff76d093..ec7d7d07 100644
+--- a/common/dialog_shim.cpp
++++ b/common/dialog_shim.cpp
+@@ -590,10 +590,11 @@ bool DIALOG_SHIM::Show( bool show )
+ #ifdef __ANDROID__
+         // The screen's work area includes the status bar (edge-to-edge) and, in DeX or split
+         // screen, space outside the app's window.  The app's top-level frame is maximized into
+-        // exactly the area it may use, so fit dialogs inside it and centre them there.
++        // exactly the area it may use, less the system bars over it, so fit dialogs inside that
++        // and centre them there.
+         if( wxWindow* top = m_parent ? wxGetTopLevelParent( m_parent ) : nullptr )
+         {
+-            wxRect area = top->GetScreenRect();
++            wxRect area = KIPLATFORM::UI::GetUsableScreenRect( top );
+ 
+             if( area.width > 0 && area.height > 0 )
+             {
+diff --git a/common/startwizard/startwizard.cpp b/common/startwizard/startwizard.cpp
+index 30622323..4385ff06 100644
+--- a/common/startwizard/startwizard.cpp
++++ b/common/startwizard/startwizard.cpp
+@@ -185,7 +185,7 @@ void STARTWIZARD::CheckAndRun( wxWindow* aParent )
+     wxLog::FlushActive();
+ 
+     m_wizard = new wxWizard( aParent, wxID_ANY, _( "KiCad Setup" ) );
+-    m_wizard->SetWindowStyleFlag( wxRESIZE_BORDER );
++    m_wizard->SetWindowStyleFlag( m_wizard->GetWindowStyleFlag() | wxRESIZE_BORDER );
+ 
+     STARTWIZARD_WELCOME_PAGE* firstPage = new STARTWIZARD_WELCOME_PAGE( m_wizard );
+     wxWizardPageSimple* lastPage = nullptr;
+diff --git a/libs/kiplatform/include/kiplatform/ui.h b/libs/kiplatform/include/kiplatform/ui.h
+index 712b451d..990937d2 100644
+--- a/libs/kiplatform/include/kiplatform/ui.h
++++ b/libs/kiplatform/include/kiplatform/ui.h
+@@ -361,6 +361,16 @@ namespace KIPLATFORM
+          */
+         uint64_t CreateVulkanSurface( void* aNativeHandle, void* aVkInstance );
+ 
++        /**
++         * The part of the screen that windows over @p aWindow's top-level window may use, in
++         * screen coordinates: that window's screen rect without the system bars (status bar,
++         * navigation bar or taskbar) and display cutouts that Android draws over it.
++         *
++         * The top-level frames are maximized edge to edge, so their screen rect, like the
++         * display's client area, includes the status bar.
++         */
++        wxRect GetUsableScreenRect( const wxWindow* aWindow );
++
+         /// What InjectTouchMouse() delivers
+         enum class TOUCH_MOUSE
+         {
+diff --git a/libs/kiplatform/port/wxqt/ui.cpp b/libs/kiplatform/port/wxqt/ui.cpp
+index 2a00915b..4327e410 100644
+--- a/libs/kiplatform/port/wxqt/ui.cpp
++++ b/libs/kiplatform/port/wxqt/ui.cpp
+@@ -449,6 +449,31 @@ bool KIPLATFORM::UI::SupportsKeyState()
+ 
+ 
+ #ifdef __ANDROID__
++wxRect KIPLATFORM::UI::GetUsableScreenRect( const wxWindow* aWindow )
++{
++    wxWindow* top = aWindow ? wxGetTopLevelParent( const_cast<wxWindow*>( aWindow ) ) : nullptr;
++
++    if( !top )
++        return wxRect();
++
++    wxRect rect = top->GetScreenRect();
++
++    if( QWidget* widget = top->GetHandle() )
++    {
++        if( QWindow* window = widget->windowHandle() )
++        {
++            const QMargins margins = window->safeAreaMargins();
++            rect.x += margins.left();
++            rect.y += margins.top();
++            rect.width -= margins.left() + margins.right();
++            rect.height -= margins.top() + margins.bottom();
++        }
++    }
++
++    return rect;
++}
++
++
+ namespace
+ {
+ // Android doesn't let apps move the pointer. Keep a virtual pointer instead: a warp (e.g. the
+diff --git a/pcb_calculator/calculator_panels/panel_cable_size.cpp b/pcb_calculator/calculator_panels/panel_cable_size.cpp
+index deac5189..072f595f 100644
+--- a/pcb_calculator/calculator_panels/panel_cable_size.cpp
++++ b/pcb_calculator/calculator_panels/panel_cable_size.cpp
+@@ -44,7 +44,12 @@ PANEL_CABLE_SIZE::PANEL_CABLE_SIZE( wxWindow* parent, wxWindowID id, const wxPoi
+ {
+     buildCableList();
+ 
++#ifdef __ANDROID__
++    // Android's fonts have no U+22C5 DOT OPERATOR; U+00B7 MIDDLE DOT looks the same
++    m_stUnitOhmMeter->SetLabel( wxT( "Ω·m" ) );
++#else
+     m_stUnitOhmMeter->SetLabel( wxT( "Ω⋅m" ) );
++#endif
+     m_stUnitDegC->SetLabel( wxT( "°C" ) );
+     m_stUnitOhm->SetLabel( wxT( "Ω" ) );
+     m_stUnitmmSq->SetLabel( wxT( "mm²" ) );
+diff --git a/pcb_calculator/calculator_panels/panel_track_width.cpp b/pcb_calculator/calculator_panels/panel_track_width.cpp
+index 604a11fe..93b41e84 100644
+--- a/pcb_calculator/calculator_panels/panel_track_width.cpp
++++ b/pcb_calculator/calculator_panels/panel_track_width.cpp
+@@ -54,7 +54,12 @@ PANEL_TRACK_WIDTH::PANEL_TRACK_WIDTH( wxWindow* parent, wxWindowID id,
+         m_TWNested( false )
+ {
+     m_trackTempUnits->SetLabel( wxT( "°C" ) );
++#ifdef __ANDROID__
++    // Android's fonts have no U+22C5 DOT OPERATOR; U+00B7 MIDDLE DOT looks the same
++    m_resistivityUnits->SetLabel( wxT( "Ω·m" ) );
++#else
+     m_resistivityUnits->SetLabel( wxT( "Ω⋅m" ) );
++#endif
+ 
+     m_extTrackResUnits->SetLabel( wxT( "Ω" ) );
+     m_intTrackResUnits->SetLabel( wxT( "Ω" ) );
+diff --git a/pcb_calculator/calculator_panels/panel_via_size.cpp b/pcb_calculator/calculator_panels/panel_via_size.cpp
+index b30f9a06..8cab7e54 100644
+--- a/pcb_calculator/calculator_panels/panel_via_size.cpp
++++ b/pcb_calculator/calculator_panels/panel_via_size.cpp
+@@ -58,7 +58,12 @@ PANEL_VIA_SIZE::PANEL_VIA_SIZE( wxWindow* parent, wxWindowID id,
+                                 long style, const wxString& name ) :
+         PANEL_VIA_SIZE_BASE( parent, id, pos, size, style, name )
+ {
++#ifdef __ANDROID__
++    // Android's fonts have no U+22C5 DOT OPERATOR; U+00B7 MIDDLE DOT looks the same
++    m_viaResistivityUnits->SetLabel( wxT( "Ω·m" ) );
++#else
+     m_viaResistivityUnits->SetLabel( wxT( "Ω⋅m" ) );
++#endif
+     m_viaTempUnits->SetLabel( wxT( "°C" ) );
+     m_viaResUnits->SetLabel( wxT( "Ω" ) );
+     m_viaThermalResUnits->SetLabel( wxT( "°C/W" ) );
+-- 
+2.54.0 (Apple Git-157)
+

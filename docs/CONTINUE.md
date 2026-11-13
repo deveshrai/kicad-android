@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99am; next: an).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99an; next: ao).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -61,8 +61,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
      importer sorts by extension, so they should work); a "library package" entry in the symbol
      and footprint editors' library context menus; delete a package again.
 5. **P10: UI sweep.** Fields too big, too small, or not scaling.  Check at the Fold's 2.625 scale.
-   Known so far:
-   - The Plot dialog sits under the status bar, and its buttons are clipped.
+   Known so far (10.99an fixed the Plot dialog under the status bar):
    - The drill dialog has no background.
    - Panels cover the canvas on the Fold.
    - The soft keyboard covers the focused field.
@@ -81,18 +80,27 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 Start by giving the user a short status summary and asking which item to take, unless they have
 already said.
 
-## State after 10.99am (2026-11-13)
-10.99am is published: two crash fixes and the fixes from a crash hunt on the tablet (HANDOVER,
-"Fixes from the crash hunt"; findings in `build/findings-am.md`).
-- **Next, 10.99an (P10):** a frame and a draggable title strip for dialogs in wxQt (an inner
-  content widget, like wxFrame's central widget).  Dialogs have neither on Android, so their
-  edges vanish on the dark theme.
-- **P10 items found in the hunt:**
+## State after 10.99an (2026-11-13)
+10.99an is published: dialogs have a frame and a draggable title bar with a close cross (HANDOVER,
+"Dialog frames and Googlebook OS"), dialogs fit between the status bar and the navigation bar or
+taskbar, and the README, badges, release notes and repo description say the app is for Android
+and Googlebook OS, with a laptop-and-tablet hero (`scripts/make-hero.py`).
+- **Not tested on a Googlebook;** the APK is arm64 only.  Say "for Android and Googlebook OS" in
+  every published text from now on.
+- **Dialog frame follow-ups:** resizing from the edges; `kicad_screenshot` doesn't draw the
+  frame; once, right after launch on the tablet, Preferences showed a black band under its title
+  bar that went away when the dialog was moved (a stale first frame?); not seen again.
+- **P10 items still open:**
   - Select Layer Pair: the presets grid is squashed.
-  - Preferences > Hotkeys: the "Hotkey" column is too narrow.
+  - Preferences > Hotkeys: some names are cut short in the middle ("Move B...rd Down",
+    "PCB ...itor", hotkey "D...n") although the column has room; others as long are not.  Looks
+    like a text width measurement problem in the generic data view on wxQt, not column width.
   - Drawing Sheet Editor: the Properties panel is too narrow.
-  - Calculator: the dot in "Ω⋅m" is an empty box (U+22C5 is not in the UI font).
   - Project manager launchers: only the icon launches, not the text beside it.
+  - The drill dialog has no background; panels cover the canvas on the Fold; the soft keyboard
+    covers the focused field (on the emulator it also opens for grid cell editors with a
+    hardware keyboard attached).
+  - Plot Schematic: the Color theme choice is empty on a fresh install (emulator).
 - **Open:**
   - BACK on the 3D viewer sends the app to the background.
   - `RunAction` of an action that needs a parameter crashes without one (API only).
