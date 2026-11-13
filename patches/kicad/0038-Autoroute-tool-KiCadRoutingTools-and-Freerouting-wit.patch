@@ -1,7 +1,7 @@
 From 48e79b39c5c069f682bbf5f3e68afd37618a3a1a Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Tue, 10 Nov 2026 20:44:03 +0530
-Subject: [PATCH] Autoroute tool: KiCadRoutingTools and Freerouting, with
+Subject: [PATCH 38/40] Autoroute tool: KiCadRoutingTools and Freerouting, with
  fan-out, planes and optimize
 
 Route > Autoroute... is now a tool with a router choice (KiCadRoutingTools,

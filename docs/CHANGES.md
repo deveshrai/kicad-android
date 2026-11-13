@@ -22,7 +22,7 @@ This document explains the changes by area.  Each patch has a full commit messag
 
 KiCad's whole UI is written against wxWidgets, and wx has no Android port.  Its Qt port (wxQt)
 does run on Qt for Android, but it is the least-used wx port, so most of the work was fixing it
-(`patches/wxwidgets`, 22 patches):
+(`patches/wxwidgets`, 32 patches):
 
 - **Build:**
   - cross-compiling from macOS (0003, 0005)
@@ -33,14 +33,17 @@ does run on Qt for Android, but it is the least-used wx port, so most of the wor
   - mouse buttons stuck down after touch (0009)
   - Return/Enter in char events (0015)
   - Escape routed through `wxDialog::Close()` (0016)
+  - `wxEVT_CHAR_HOOK`, which wxQt never sent (0032), and the window id in key events (0031)
   - touch events on scrolled windows (0021)
 - **Windows and dialogs:**
   - an in-window menu bar (0008)
   - dialogs that keep working while their parent is disabled (0012)
   - status bar layout (0010)
   - combo box sizing (0013)
+  - no size grip in dialogs (0028)
+  - room for the icons in trees (0030)
 - **Android integration:**
-  - the system document picker, with files returned as paths (0011)
+  - the system document picker, with files returned as paths (0011, 0023)
   - opening files in other apps through a FileProvider (0018)
   - the default browser (0020)
   - hiding the soft keyboard when focus leaves a text field (0014)
@@ -48,8 +51,12 @@ does run on Qt for Android, but it is the least-used wx port, so most of the wor
   - drawing an invalid bitmap (0007)
   - moving focus in a scroll area (0017)
   - painting when `QPainter::begin()` failed (0022)
+  - null pointers in `DoGetPosition()` (0024)
+  - tree item data freed twice (0026), and deleted tree items in selection events (0027)
 - **Fonts:** Android sizes fonts in pixels, so wx reported a 2 pt size and editors were unreadable
   (0019).
+- **Text:** narrow strings are UTF-8 on Android (0029).
+- **Files:** `wxFileName::Mkdir()` starts below the deepest existing directory (0025).
 
 ## 2. Platform layer: `kiplatform`
 
@@ -117,6 +124,10 @@ plugins straight from the APK (0027).
   - a three-finger tap zooms to fit
 - **Text handles:** Android's text selection handles are hidden when focus leaves the text field
   (qtbase 0003).
+- **Message boxes:** Escape and the BACK key act as the box's Cancel button (a replacement
+  `QtMessageDialogHelper` class in `android/qt-patches`).
+- **Menus:** showing a window no longer delivers queued input events in the middle of the call,
+  which crashed submenus (qtbase 0004).
 
 ## 7. KiCad fixes found along the way
 

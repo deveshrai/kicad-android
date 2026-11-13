@@ -1,0 +1,74 @@
+From ab44b20471a0f749938683a0894fa2ec1d20cb83 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 12 Nov 2026 21:46:02 +0530
+Subject: [PATCH] qt: don't use deleted tree items in selection change events
+
+wxTreeCtrl deletes items with the QTreeWidget's signals blocked, so the
+item cached for the next wxEVT_TREE_SEL_CHANGED event could be one that
+had been deleted, and the deferred event then read its data (a crash).
+
+Forget an item when it is deleted and take the item from the current
+selection in that case.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/treectrl.cpp | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/src/qt/treectrl.cpp b/src/qt/treectrl.cpp
+index 28e42e3..39f9862 100644
+--- a/src/qt/treectrl.cpp
++++ b/src/qt/treectrl.cpp
+@@ -531,6 +531,18 @@ protected:
+         return changeEvent.IsAllowed();
+     }
+ 
++    // An item is about to be deleted: don't keep pointers to it.
++    //
++    // Items are deleted with our signals blocked, so OnCurrentItemChanged()
++    // doesn't get the chance to update them.
++    void ForgetItem(QTreeWidgetItem *item)
++    {
++        if ( wxQtConvertTreeItem(m_currentItem) == item )
++            m_currentItem.Unset();
++        if ( wxQtConvertTreeItem(m_previousItem) == item )
++            m_previousItem.Unset();
++    }
++
+     // for wxEVT_TREE_SEL_{CHANGING,CHANGED} events
+     wxTreeItemId m_currentItem;
+     wxTreeItemId m_previousItem;
+@@ -564,6 +576,14 @@ private:
+         // the new selection in the wx event handler.
+         GetHandler()->CallAfter([this]()
+             {
++                // The item the event was for may have been deleted since.
++                if ( !m_currentItem.IsOk() )
++                {
++                    const QList<QTreeWidgetItem*> selected = selectedItems();
++                    m_currentItem = wxQtConvertTreeItem(
++                        selected.isEmpty() ? currentItem() : selected.first());
++                }
++
+                 EmitSelectChangeEvent(wxEVT_TREE_SEL_CHANGED);
+             });
+     }
+@@ -1339,6 +1359,7 @@ void wxTreeCtrl::Delete(const wxTreeItemId& item)
+ 
+     SendDeleteEvent(item);
+ 
++    GetQTreeWidget()->ForgetItem(qTreeItem);
+     delete qTreeItem;
+ }
+ 
+@@ -1356,6 +1377,7 @@ void wxTreeCtrl::DeleteChildren(const wxTreeItemId& item)
+ 
+         SendDeleteEvent(wxQtConvertTreeItem(child));
+ 
++        GetQTreeWidget()->ForgetItem(child);
+         delete child;
+     }
+ }
+-- 
+2.54.0 (Apple Git-157)
+

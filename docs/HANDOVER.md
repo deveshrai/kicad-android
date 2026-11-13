@@ -203,6 +203,98 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Crash fixes: submenus and tree selection (10.99am, 2026-11-12)
+The user reported a crash on 10.99al; the tablet's crash buffer (`adb logcat -b crash -d`) held
+two different ones, each seen more than once.
+
+- **Submenu crash (11-10 22:56 and 23:27, schematic editor context menu, mouse or pen hover):**
+  - **Stack:** null read in QMenuSloppyState::setSubMenuPopup, from
+    QMenu::internalDelayedPopup() (the submenu hover timer).
+  - **Cause:** QAndroidPlatformWindow::setVisible() ended with QPlatformWindow::setVisible(),
+    which flushes *all* window system events.  A pointer move queued at that moment was delivered
+    inside QWidget::show() of the submenu.  The parent menu handled it (pointer on a separator or
+    off the items, sloppy state off), closed the submenu and cleared activeMenu, which
+    internalDelayedPopup() used next without a check.
+  - **Fix:** qtbase patch 0004: send the expose event and flush with
+    QEventLoop::ExcludeUserInputEvents.  Input events stay queued for the event loop, so no
+    window show or hide re-enters widget code with input any more.
+  - **Check:** not reproduced on demand (about 60 timed hovers with a virtual mouse on 10.99al,
+    the window is a few ms wide); on 10.99am the same sweeps open and close the submenus normally.
+  - **Virtual mouse on a device without root:** `adb shell uinput -` takes JSON commands
+    (register / delay / inject).  Pointer acceleration depends on speed, so keep one step size
+    and rate (2 units every 4 ms is about 2 px per unit on the tablet).
+- **Tree crash (11-09 15:02, 11-11 09:07 and 13:14):**
+  - **Stack:** wxTreeCtrl::GetItemData from the wxTreeEvent constructor, from
+    wxQTreeWidget::EmitSelectChangeEvent in the deferred (CallAfter) wxEVT_TREE_SEL_CHANGED.
+    This is not the 10.99ai crash, although the top frame is the same.
+  - **Cause:** wxQt caches the item for the next selection event (m_currentItem) and deletes
+    items with the QTreeWidget's signals blocked, so the cache is not updated.  After
+    DeleteAllItems() it points at a deleted item until the current item changes again; a
+    selection change without a new current item (clearing the selection, selecting in a
+    wxTR_MULTIPLE tree, or an event that was already queued) then read freed memory.
+  - **Fix:** wx patch 0027: forget an item when it is deleted, and take the event's item from
+    the selection when the cached one is gone.
+  - **Check:** by reading the code against the three traces; which KiCad tree the user was in is
+    not known (candidates: project tree, DRC rule editor, toolbar customization).
+- **Installing on the tablet:** the app there is the release ID.  `build/KiCad-debug.apk` is
+  `org.kicad.kicad` and installs as a second app; build the release APK (see "Publishing a
+  release") and install that.
+
+## Fixes from the crash hunt (10.99am, 2026-11-13)
+After the two crash fixes the app was swept on the tablet for more (every board editor action
+through the API, then by hand).  No further crash that a user can reach; the findings, with
+causes, are in `build/findings-am.md`.  KiCad patch 0040, wx patches 0028 to 0032.
+
+- **Keys (wxQt):**
+  - **wxEVT_CHAR_HOOK** was never sent (wx 0032).  It is what closes a dialog on Escape while a
+    grid has the focus.  Qt offers an unaccepted key press to each parent widget with the same
+    event object, so `QtHandleKeyEvent` sends the hook for the first of them only (it compares
+    the event pointer, timestamp and key).
+  - **Key events carry the window id** (wx 0031).  wxPropertyGrid binds its editors' key
+    handlers by id; without it Escape did not cancel an edit in the Properties panel.
+- **Message boxes (Escape and BACK):**
+  - A wxMessageDialog is a QMessageBox, which Qt shows as an Android AlertDialog from
+    `QtMessageDialogHelper.java`, not cancelable once it has buttons.
+  - `android/qt-patches/org/qtproject/qt/android/QtMessageDialogHelper.java` replaces the class:
+    cancelable when there is an escape button (Cancel; else the only button; else No), and
+    cancelling reports that button's id.  `scripts/build-kicad-apk.sh` compiles it against
+    android.jar and Qt6Android.jar and zips it over the stock classes (the file also holds
+    `ButtonStruct` and `QtNativeDialogHelper`).
+  - `scripts/build-qtforandroid.sh` only rebuilds the platform plugin (.so), not the jar, so
+    Java fixes go in `android/qt-patches`, not `patches/qtbase`.
+- **Narrow strings are UTF-8 (wx 0029):** wx's Android stand-ins for mbstowcs/wcstombs copied one
+  byte per character, so wxConvLibc read source literals as Latin-1 ("kΩ" showed as "kâ¦").
+- **Tree icons (wx 0030):** wxQt's tree never called `setIconSize()`, so the images covered the
+  start of the item text (Project Files tree).
+- **No size grip in dialogs (wx 0028).**
+- **Launchers:** `COMMON_CONTROL::Execute` starts the Gerber Viewer, Calculator Tools and the
+  Drawing Sheet Editor in-process on Android (there is no executable to run).
+  - The calculator skips its `SetSizeHints/SetSize/Centre` so it stays maximized: a second
+    `Maximize()` is a no-op in wxQt once the Qt window state says "maximized".
+  - `GERBVIEW_FRAME` handles `wxID_CLOSE` (the File menu has Close, not Quit, in-process).
+- **Frames shown modally (`KIWAY_PLAYER::ShowModal()`):**
+  - It maximizes the frame *before* showing it.  Qt's Android window applies the maximized
+    geometry in `setVisible(true)` only, so `Maximize()` on a visible frame changes the state
+    and not the size (the same reason the calculator must not be resized after maximizing).
+  - The footprint chooser loads no window state, so it opened at its fitted size over the menu
+    bar.  On Android it skips its saved-rect `SetSize()` and focuses its filter box with
+    `CallAfter` in `Show()` (the first-paint focus did not take).
+  - After the loop it gives the focus to the caller's canvas.  `SetFocus()` on a frame focuses
+    the frame's own widget in wxQt, hotkeys come from the canvas, and with touch nothing hovers
+    over the canvas to take the focus back: keys were dead until the canvas was tapped.
+  - Tapping outside a modal frame also took its key focus away; moot now that it fills the window.
+- **3D viewer see-through after Home and back:** `OglMakeFrameOpaque()` before `SwapBuffers()`.
+- **MCP:** `kicad_open_editor` rejects editor names other than `pcb` and `schematic`.
+- **Checked on the tablet (2026-11-13):** all of the above; Escape and BACK at "Save Changes?"
+  cancel it; the schematic editor prompts to save after a real edit.
+- **Not fixed:**
+  - API-only crashes: `RunAction` of an action that needs a parameter (the `dd*` drag-and-drop
+    actions, `pcb_control.cpp:192`) without one.
+  - BACK on the 3D viewer sends the app to the background.
+  - A freeze seen once after BACK and relaunch with dialogs open; not reproduced.
+- **Driving the UI from adb:** give a dialog 3 to 5 s before sending keys, and take a
+  screenshot per step.  Two "bugs" in this round were keys sent too early.
+
 ## Autoroute tool docked, fixes and manual (10.99al, 2026-11-10)
 KiCad patch 0039; user manual in `docs/AUTOROUTE.md`, with screenshots in `docs/media/autoroute`.
 - **Panel and hosts:**

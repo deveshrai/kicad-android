@@ -1,7 +1,7 @@
 From 5485176b0be7baf4d8aac7f7b9675d90f9a96fca Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 5 Nov 2026 02:45:14 +0530
-Subject: [PATCH 27/29] 3D viewer on Android: keep gl4es loaded, load plugins
+Subject: [PATCH 27/40] 3D viewer on Android: keep gl4es loaded, load plugins
  from the APK
 
 Android has no desktop GL.  The APK ships gl4es as libGL.so, which provides

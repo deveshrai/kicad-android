@@ -1,0 +1,73 @@
+From 914bcb723fd69d1af61b40036fd4cde11d2488c7 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 10:15:35 +0530
+Subject: [PATCH 30/32] qt: leave room for the images of a wxTreeCtrl at the
+ size they are drawn
+
+The tree view scaled the place holder icon of the items down to the
+style's small icon size, while drawRow() draws the images of the image
+list at their own size: the images covered the start of the text and
+overflowed the row.
+
+Set the view's icon size to the size of the images, and use their size
+in logical pixels, both for that and for placing them in drawRow().
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/treectrl.cpp | 25 ++++++++++++++++++++++---
+ 1 file changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/src/qt/treectrl.cpp b/src/qt/treectrl.cpp
+index 39f9862..ec6209e 100644
+--- a/src/qt/treectrl.cpp
++++ b/src/qt/treectrl.cpp
+@@ -332,6 +332,12 @@ public:
+     {
+         m_placeHolderImage = QPixmap(size);
+         m_placeHolderImage.fill(Qt::transparent);
++
++        // Without this the view scales the place holder down to the style's small
++        // icon size, and the images drawn in drawRow() are larger than the room
++        // left for them: they cover the start of the text and overflow the row.
++        setIconSize(size);
++
+         ReplaceIcons(invisibleRootItem());
+     }
+ 
+@@ -364,9 +370,10 @@ protected:
+             const wxImageList *imageList = GetHandler()->GetImageList();
+             const wxBitmap bitmap = imageList->GetBitmap(imageIndex);
+             const QRect rect = visualRect(index);
+-            const int dy = (rect.height() / 2) - (bitmap.GetHeight() / 2);
++            const QSize size = bitmap.GetHandle()->deviceIndependentSize().toSize();
++            const int dy = (rect.height() / 2) - (size.height() / 2);
+             const int dx = layoutDirection() == Qt::RightToLeft
+-                         ? rect.width() - bitmap.GetWidth() : 0;
++                         ? rect.width() - size.width() : 0;
+             painter->drawPixmap(rect.topLeft() + QPoint(dx,dy), *bitmap.GetHandle());
+         }
+     }
+@@ -852,7 +859,19 @@ void wxTreeCtrl::DoUpdateIconsSize(wxImageList *imageList)
+ {
+     int width, height;
+     imageList->GetSize(0, width, height);
+-    GetQTreeWidget()->ResizeIcons(QSize(width, height));
++
++    QSize size(width, height);
++
++    if ( imageList->GetImageCount() > 0 )
++    {
++        // The room to leave is the size the images are drawn at, in logical pixels
++        const wxBitmap bitmap = imageList->GetBitmap(0);
++
++        if ( bitmap.IsOk() )
++            size = bitmap.GetHandle()->deviceIndependentSize().toSize();
++    }
++
++    GetQTreeWidget()->ResizeIcons(size);
+     GetQTreeWidget()->update();
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

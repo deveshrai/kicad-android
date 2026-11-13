@@ -1,0 +1,32 @@
+From 82f33c39796ebd740eda1e76e85fcd968949a76b Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 03:29:44 +0530
+Subject: [PATCH 28/32] qt: no size grip in dialogs on Android
+
+Android windows have no borders to drag and the grip can't resize a dialog there
+either, so it only shows as a stray mark in resizable dialogs.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/dialog.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qt/dialog.cpp b/src/qt/dialog.cpp
+index 2301c57..713f361 100644
+--- a/src/qt/dialog.cpp
++++ b/src/qt/dialog.cpp
+@@ -78,7 +78,11 @@ bool wxDialog::Create( wxWindow *parent, wxWindowID id,
+     m_qtWindow->setWindowFlag(Qt::WindowContextHelpButtonHint,
+                               HasExtraStyle(wxDIALOG_EX_CONTEXTHELP));
+ 
++#ifndef __ANDROID__
++    // Android windows have no borders to drag, and the grip can't resize them either: it
++    // only shows up as a stray mark in the dialog.
+     GetDialogHandle()->setSizeGripEnabled((style & wxRESIZE_BORDER) != 0);
++#endif
+ 
+     return wxTopLevelWindow::Create( parent, id, title, pos, size, style, name );
+ }
+-- 
+2.54.0 (Apple Git-157)
+

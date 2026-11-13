@@ -1,0 +1,33 @@
+From 2857e0e8e1095539ad6475a40898a2ddc27bb354 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 10:15:35 +0530
+Subject: [PATCH 31/32] qt: set the window id in key events
+
+The other ports do.  Handlers bound with the id of the window got no key
+events at all without it: the editors of wxPropertyGrid, for one, so that
+Escape didn't cancel an edit there.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/window.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 34a151b..46a4eec 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1733,6 +1733,11 @@ bool wxWindowQt::QtHandleWheelEvent ( QWidget *WXUNUSED( handler ), QWheelEvent
+ void wxWindowQt::QtFillKeyEvent( wxKeyEvent& e, const QKeyEvent *event ) const
+ {
+     e.SetEventObject(const_cast<wxWindowQt*>(this));
++
++    // As in the other ports: handlers bound with the window's id (the editors
++    // of wxPropertyGrid, for one) get no key events at all without it.
++    e.SetId(GetId());
++
+     // TODO: m_x, m_y
+     e.m_keyCode = wxQtConvertKeyCode( event->key(), event->modifiers() );
+ 
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,44 @@
+From 43c6402c3b2d64220d6db82a6c815acdd6a05afd Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Thu, 12 Nov 2026 21:46:11 +0530
+Subject: [PATCH] android: don't deliver user input events from
+ QPlatformWindow::setVisible()
+
+QAndroidPlatformWindow::setVisible() ended with the default
+implementation, which flushes all the window system events.  Pointer
+events that were queued got delivered in the middle of QWidget::show()
+or hide().  With a mouse or a hovering pen over a menu this crashed
+QMenu::internalDelayedPopup(): a move handled while the submenu was
+being shown closed it again and cleared the pointer the function used
+next.
+
+Send the expose event and flush everything but the user input events,
+which stay queued for the event loop.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/plugins/platforms/android/qandroidplatformwindow.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/plugins/platforms/android/qandroidplatformwindow.cpp b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+index 819b80a0..1e7ee812 100644
+--- a/src/plugins/platforms/android/qandroidplatformwindow.cpp
++++ b/src/plugins/platforms/android/qandroidplatformwindow.cpp
+@@ -182,7 +182,13 @@ void QAndroidPlatformWindow::setVisible(bool visible)
+     if (geometry().isEmpty() || screen()->availableGeometry().isEmpty())
+         return;
+ 
+-    QPlatformWindow::setVisible(visible);
++    // As QPlatformWindow::setVisible(), but leave the user input events in the
++    // queue for the event loop: delivering them from here, in the middle of
++    // QWidget::show() or hide(), re-enters widget code that doesn't expect it.
++    // QMenu::internalDelayedPopup(), for one, crashes when a mouse move closes
++    // the submenu it is in the middle of showing.
++    QWindowSystemInterface::handleExposeEvent(window(), QRect(QPoint(), geometry().size()));
++    QWindowSystemInterface::flushWindowSystemEvents(QEventLoop::ExcludeUserInputEvents);
+ }
+ 
+ void QAndroidPlatformWindow::setWindowState(Qt::WindowStates state)
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,319 @@
+From 55c7d7799e435f7fd189d5b5c2926bd88116b2b1 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 10:31:11 +0530
+Subject: [PATCH 40/40] Android: fixes from a crash hunt on the tablet
+
+Launchers: the Gerber Viewer, the calculator tools and the drawing sheet
+editor are started in-process from COMMON_CONTROL::Execute(), as there is
+no executable to run on Android ("Command could not be found").  The
+calculator frame keeps the maximized state that LoadWindowState() gave it,
+and the Gerber viewer handles wxID_CLOSE, which is what its File menu has
+when it runs in the project manager's process.
+
+Frames shown with KIWAY_PLAYER::ShowModal() are maximized like every other
+frame; the footprint chooser, which loads no window state, opened at its
+fitted size in the top left corner, over the menu bar.  Its filter box now
+has the focus when it opens, and the caller's canvas gets the focus back
+when a modal frame closes: with touch there is no pointer to hover over
+the canvas, and the hotkeys were dead until it was tapped.
+
+3D viewer: make the frame opaque before swapping buffers.  After the app
+had been in the background the board body was see-through and showed the
+window behind it.
+
+MCP: kicad_open_editor rejects editor names other than "pcb" and
+"schematic" instead of opening the board editor for them.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ 3d-viewer/3d_canvas/eda_3d_canvas.cpp         |  4 ++
+ .../3d_model_viewer/eda_3d_model_viewer.cpp   |  5 +++
+ 3d-viewer/common_ogl/ogl_utils.cpp            | 21 ++++++++++
+ 3d-viewer/common_ogl/ogl_utils.h              | 10 +++++
+ common/kiway_player.cpp                       | 25 ++++++++++++
+ common/tool/common_control.cpp                | 38 +++++++++++++++++++
+ gerbview/events_called_functions.cpp          |  4 ++
+ kicad/kicad.cpp                               |  9 ++++-
+ pcb_calculator/pcb_calculator_frame.cpp       |  4 ++
+ pcbnew/footprint_chooser_frame.cpp            | 15 ++++++++
+ 10 files changed, 134 insertions(+), 1 deletion(-)
+
+diff --git a/3d-viewer/3d_canvas/eda_3d_canvas.cpp b/3d-viewer/3d_canvas/eda_3d_canvas.cpp
+index 905f0067..068d0fa2 100644
+--- a/3d-viewer/3d_canvas/eda_3d_canvas.cpp
++++ b/3d-viewer/3d_canvas/eda_3d_canvas.cpp
+@@ -622,6 +622,10 @@ void EDA_3D_CANVAS::DoRePaint()
+         render3dmousePivot( scale );
+     }
+ 
++#ifdef __ANDROID__
++    OglMakeFrameOpaque();
++#endif
++
+     // "Swaps the double-buffer of this window, making the back-buffer the
+     //  front-buffer and vice versa, so that the output of the previous OpenGL
+     //  commands is displayed on the window."
+diff --git a/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp b/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp
+index 20aaa111..ce3b9a66 100644
+--- a/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp
++++ b/3d-viewer/3d_model_viewer/eda_3d_model_viewer.cpp
+@@ -42,6 +42,7 @@
+ #include "3d_rendering/opengl/3d_model.h"
+ #include "3d_rendering/orphaned_gl_objects.h"
+ #include "3d_rendering/opengl/opengl_utils.h"
++#include "common_ogl/ogl_utils.h"
+ #include "3d_cache/3d_cache.h"
+ #include "eda_3d_model_viewer.h"
+ 
+@@ -403,6 +404,10 @@ void EDA_3D_MODEL_VIEWER::OnPaint( wxPaintEvent& event )
+     DrawRoundArrow( SFVEC3F( 0.0f, 0.0f, 0.0f ), SFVEC3F( 0.0f, 0.0f, RANGE_SCALE_3D / 2.65f ),
+                     0.275f );
+ 
++#ifdef __ANDROID__
++    OglMakeFrameOpaque();
++#endif
++
+     // "Swaps the double-buffer of this window, making the back-buffer the
+     //  front-buffer and vice versa, so that the output of the previous OpenGL
+     //  commands is displayed on the window."
+diff --git a/3d-viewer/common_ogl/ogl_utils.cpp b/3d-viewer/common_ogl/ogl_utils.cpp
+index be4a2add..474f8295 100644
+--- a/3d-viewer/common_ogl/ogl_utils.cpp
++++ b/3d-viewer/common_ogl/ogl_utils.cpp
+@@ -221,3 +221,24 @@ void OglResetTextureState()
+ 
+     glTexEnvfv( GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, static_cast<const float*>( &zero.x ) );
+ }
++
++
++void OglMakeFrameOpaque()
++{
++    GLboolean scissor = glIsEnabled( GL_SCISSOR_TEST );
++    GLfloat   clearColor[4];
++
++    glGetFloatv( GL_COLOR_CLEAR_VALUE, clearColor );
++
++    if( scissor )
++        glDisable( GL_SCISSOR_TEST );
++
++    glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE );
++    glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
++    glClear( GL_COLOR_BUFFER_BIT );
++    glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
++    glClearColor( clearColor[0], clearColor[1], clearColor[2], clearColor[3] );
++
++    if( scissor )
++        glEnable( GL_SCISSOR_TEST );
++}
+diff --git a/3d-viewer/common_ogl/ogl_utils.h b/3d-viewer/common_ogl/ogl_utils.h
+index a30e7a31..0a235e5c 100644
+--- a/3d-viewer/common_ogl/ogl_utils.h
++++ b/3d-viewer/common_ogl/ogl_utils.h
+@@ -75,4 +75,14 @@ void OglDrawBackground( const SFVEC4F& aTopColor, const SFVEC4F& aBotColor );
+  */
+ void OglResetTextureState();
+ 
++/**
++ * Set the alpha of the finished frame to 1.
++ *
++ * Blending the translucent board layers leaves alpha below 1 in the color buffer.  That does
++ * not matter where the window system ignores the alpha of a GL canvas, but on Android the
++ * window's surface is composited with what is behind it, and the window behind showed through
++ * the board.
++ */
++void OglMakeFrameOpaque();
++
+ #endif // OGL_UTILS_H_
+diff --git a/common/kiway_player.cpp b/common/kiway_player.cpp
+index ff7cbb9a..19086b66 100644
+--- a/common/kiway_player.cpp
++++ b/common/kiway_player.cpp
+@@ -20,6 +20,10 @@
+ 
+ 
+ #include <kiway_player.h>
++#ifdef __ANDROID__
++#include <eda_draw_frame.h>
++#include <class_draw_panel_gal.h>
++#endif
+ #include <kiway_mail.h>
+ #include <kiway.h>
+ #include <id.h>
+@@ -110,7 +114,17 @@ bool KIWAY_PLAYER::ShowModal( wxString* aResult, wxWindow* aResultantFocusWindow
+ 
+     m_modal_resultant_parent = aResultantFocusWindow;
+ 
++#ifdef __ANDROID__
++    // Frames fill the activity's window on Android (see EDA_BASE_FRAME::LoadWindowState()).  One
++    // that loads no window state, like the footprint chooser, would open at its fitted size in
++    // the top left corner, over the menu bar.  This has to come before the frame is shown: Qt
++    // gives a maximized window its geometry when it becomes visible, and not after
++    if( !IsMaximized() )
++        Maximize();
++#endif
++
+     Show( true );
++
+     Raise();    // Needed on some Window managers to always display the frame
+ 
+     SetFocus();
+@@ -143,6 +157,17 @@ bool KIWAY_PLAYER::ShowModal( wxString* aResult, wxWindow* aResultantFocusWindow
+         // the events settle down, set the focus
+         wxSafeYield();
+         aResultantFocusWindow->SetFocus();
++
++#ifdef __ANDROID__
++        // That gives the keyboard focus to the frame itself, and hotkeys come from the canvas.
++        // On desktop the canvas takes the focus back as soon as the pointer moves over it; with
++        // touch there is no pointer, and the hotkeys were dead until the canvas was tapped
++        if( EDA_DRAW_FRAME* drawFrame = dynamic_cast<EDA_DRAW_FRAME*>( aResultantFocusWindow ) )
++        {
++            if( drawFrame->GetCanvas() )
++                drawFrame->GetCanvas()->SetFocus();
++        }
++#endif
+     }
+ 
+     return m_modal_ret_val;
+diff --git a/common/tool/common_control.cpp b/common/tool/common_control.cpp
+index c12d77ef..ff263b0f 100644
+--- a/common/tool/common_control.cpp
++++ b/common/tool/common_control.cpp
+@@ -221,6 +221,44 @@ public:
+ 
+ int COMMON_CONTROL::Execute( const wxString& aExecutible, const wxString& aParam )
+ {
++#ifdef __ANDROID__
++    // The Android app has no separate programs to run: the other tools are frames of this
++    // process, opened through the kiway like the editors.
++    FRAME_T playerType = FRAME_T_COUNT;
++
++    if( aExecutible == GERBVIEW_EXE )
++        playerType = FRAME_GERBER;
++    else if( aExecutible == PCB_CALCULATOR_EXE )
++        playerType = FRAME_CALC;
++    else if( aExecutible == PL_EDITOR_EXE )
++        playerType = FRAME_PL_EDITOR;
++
++    if( playerType != FRAME_T_COUNT )
++    {
++        KIWAY_PLAYER* player = m_frame->Kiway().Player( playerType, true );
++
++        wxCHECK_MSG( player != nullptr, 0, wxT( "Cannot open/create the frame" ) );
++
++        if( !player->IsShown() )
++            player->Show( true );
++
++        // A file to open, or (the Gerber viewer) the folder to start in
++        if( !aParam.IsEmpty() )
++            player->OpenProjectFiles( { aParam } );
++
++        showFrame( player );
++        return 0;
++    }
++
++    if( aExecutible == EESCHEMA_EXE || aExecutible == PCBNEW_EXE )
++    {
++        // These open a file of another project in a second copy of the editor.
++        DisplayInfoMessage( m_frame, _( "This file is not part of the open project.  Open its "
++                                        "project to edit it." ) );
++        return 0;
++    }
++#endif
++
+     TERMINATE_HANDLER* callback = new TERMINATE_HANDLER( aExecutible );
+ 
+     bool isKicadBinary = false;
+diff --git a/gerbview/events_called_functions.cpp b/gerbview/events_called_functions.cpp
+index b4a0278d..817ca2a4 100644
+--- a/gerbview/events_called_functions.cpp
++++ b/gerbview/events_called_functions.cpp
+@@ -57,6 +57,10 @@ BEGIN_EVENT_TABLE( GERBVIEW_FRAME, EDA_DRAW_FRAME )
+ 
+     EVT_MENU( wxID_EXIT, GERBVIEW_FRAME::OnQuit )
+ 
++    // "Close" replaces "Quit" in the File menu when the viewer runs inside the project manager's
++    // process, as it does on Android
++    EVT_MENU( wxID_CLOSE, GERBVIEW_FRAME::OnQuit )
++
+     EVT_COMBOBOX( ID_TOOLBARH_GERBVIEW_SELECT_ACTIVE_LAYER, GERBVIEW_FRAME::OnSelectActiveLayer )
+ 
+     EVT_SELECT_DCODE( ID_TOOLBARH_GERBER_SELECT_ACTIVE_DCODE, GERBVIEW_FRAME::OnSelectActiveDCode )
+diff --git a/kicad/kicad.cpp b/kicad/kicad.cpp
+index a2e75865..aa4981bb 100644
+--- a/kicad/kicad.cpp
++++ b/kicad/kicad.cpp
+@@ -495,7 +495,14 @@ bool PGM_KICAD::OnPgmInit()
+                     "kicad_open_editor",
+                     [managerFrame]( const nlohmann::json& aArgs ) -> MCP_RESULT
+                     {
+-                        bool sch = aArgs.value( "editor", std::string() ) == "schematic";
++                        std::string editor = aArgs.value( "editor", std::string() );
++                        bool        sch = editor == "schematic";
++
++                        if( !sch && editor != "pcb" )
++                        {
++                            return MCP_RESULT::Error( "editor must be \"pcb\" or \"schematic\", not \""
++                                                      + editor + "\"" );
++                        }
+ 
+                         if( managerFrame->Prj().IsNullProject() )
+                             return MCP_RESULT::Error( "no project is open in KiCad" );
+diff --git a/pcb_calculator/pcb_calculator_frame.cpp b/pcb_calculator/pcb_calculator_frame.cpp
+index 81753e0b..915254ce 100644
+--- a/pcb_calculator/pcb_calculator_frame.cpp
++++ b/pcb_calculator/pcb_calculator_frame.cpp
+@@ -117,6 +117,9 @@ PCB_CALCULATOR_FRAME::PCB_CALCULATOR_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
+     ReCreateMenuBar();
+     setupUIConditions();
+ 
++#ifndef __ANDROID__
++    // On Android LoadWindowState() maximized the frame to fill the activity's window, like every
++    // other frame: resizing it here would leave it at its fitted size, in a corner of the screen
+     GetSizer()->SetSizeHints( this );
+ 
+     // Set previous size and position
+@@ -124,6 +127,7 @@ PCB_CALCULATOR_FRAME::PCB_CALCULATOR_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
+ 
+     if( m_framePos == wxDefaultPosition )
+         Centre();
++#endif
+ 
+     // Expand treebook to show all options:
+     for( size_t pageId = 0; pageId < m_treebook->GetPageCount(); pageId++ )
+diff --git a/pcbnew/footprint_chooser_frame.cpp b/pcbnew/footprint_chooser_frame.cpp
+index bed9d0ea..0815e215 100644
+--- a/pcbnew/footprint_chooser_frame.cpp
++++ b/pcbnew/footprint_chooser_frame.cpp
+@@ -697,6 +697,10 @@ bool FOOTPRINT_CHOOSER_FRAME::Show( bool show )
+ #endif
+         ret = PCB_BASE_FRAME::Show( show );
+ 
++#ifndef __ANDROID__
++        // (not on Android: the frame fills the activity's window there, see
++        // KIWAY_PLAYER::ShowModal())
++
+         // returns a zeroed-out default wxRect if none existed before.
+         wxRect savedDialogRect = s_dialogRect;
+ 
+@@ -713,6 +717,17 @@ bool FOOTPRINT_CHOOSER_FRAME::Show( bool show )
+         // shown on another display)
+         if( wxDisplay::GetFromWindow( this ) == wxNOT_FOUND )
+             Centre();
++#else
++        // On Android the filter box did not have the focus when the chooser opened (keys typed
++        // went nowhere), whatever OnPaint() does on the first paint.  Give it once the frame is
++        // up and events have settled
++        CallAfter(
++                [this]()
++                {
++                    if( IsShown() )
++                        KIPLATFORM::UI::ForceFocus( m_chooserPanel->GetFocusTarget() );
++                } );
++#endif
+     }
+     else
+     {
+-- 
+2.54.0 (Apple Git-157)
+

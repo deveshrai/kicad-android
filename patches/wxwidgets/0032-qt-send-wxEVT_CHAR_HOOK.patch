@@ -1,0 +1,65 @@
+From 920cbc18d5769e6acef8bad59e2c9e4da6985bc2 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 10:15:35 +0530
+Subject: [PATCH 32/32] qt: send wxEVT_CHAR_HOOK
+
+wxQt never sent it.  It is what closes a dialog on Escape while the focus
+is in a control that takes the key itself, a wxGrid for one, and
+applications use it to see keys before the focused control does.
+
+Send it before wxEVT_KEY_DOWN, and don't do anything else with the key if
+a handler took it.  Qt offers a key press that no widget accepted to each
+parent widget in turn, with the same event object, and the hook event
+propagates to the parents itself: send it for the first window that gets
+the key press only.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/qt/window.cpp | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/src/qt/window.cpp b/src/qt/window.cpp
+index 46a4eec..f8c5bd5 100644
+--- a/src/qt/window.cpp
++++ b/src/qt/window.cpp
+@@ -1791,6 +1791,37 @@ bool wxWindowQt::QtHandleKeyEvent ( QWidget *WXUNUSED( handler ), QKeyEvent *eve
+     wxKeyEvent e( event->type() == QEvent::KeyPress ? wxEVT_KEY_DOWN : wxEVT_KEY_UP );
+     QtFillKeyEvent( e, event );
+ 
++    if ( event->type() == QEvent::KeyPress )
++    {
++        // wxEVT_CHAR_HOOK goes to the window getting the key first and propagates
++        // to its parents from there, before anything else is done with the key.
++        //
++        // Qt offers a key press nobody accepted to each parent widget in turn,
++        // with the same event object, and each of them ends up here: send the
++        // hook event for the first of them only.
++        static const QKeyEvent* s_hookEvent = nullptr;
++        static quint64 s_hookTimestamp = 0;
++        static int s_hookKey = 0;
++
++        if ( s_hookEvent != event
++                || s_hookTimestamp != event->timestamp()
++                || s_hookKey != event->key() )
++        {
++            s_hookEvent = event;
++            s_hookTimestamp = event->timestamp();
++            s_hookKey = event->key();
++
++            wxKeyEvent eventCharHook( wxEVT_CHAR_HOOK, e );
++
++            if ( ProcessWindowEvent( eventCharHook )
++                    && !eventCharHook.IsNextEventAllowed() )
++            {
++                // Don't do anything at all with this event any more.
++                return true;
++            }
++        }
++    }
++
+     handled = ProcessWindowEvent( e );
+ 
+     // On key presses, send the EVT_CHAR event
+-- 
+2.54.0 (Apple Git-157)
+

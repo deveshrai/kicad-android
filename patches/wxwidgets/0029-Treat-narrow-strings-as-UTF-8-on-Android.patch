@@ -1,0 +1,181 @@
+From 52079c7b2ca9761ade5167f15e2597d4cf8c9641 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 10:15:35 +0530
+Subject: [PATCH 29/32] Treat narrow strings as UTF-8 on Android
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Android's C library only has the "C" and "C.UTF-8" locales, and the
+replacements for mbstowcs() and wcstombs() that wx uses there copied the
+string one byte or wchar_t at a time.  Any non-ASCII text that went
+through wxConvLibc came out as garbage: "kΩ" in a narrow string literal
+showed as "kâ¦".
+
+Make wxConvLibc a strict UTF-8 conversion on Android, report the locale
+as UTF-8, and have android_mbstowcs() and android_wcstombs() convert
+UTF-8.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/common/strconv.cpp |  4 +++
+ src/common/wxcrt.cpp   | 78 +++++++++++++++++++++++++++++-------------
+ 2 files changed, 59 insertions(+), 23 deletions(-)
+
+diff --git a/src/common/strconv.cpp b/src/common/strconv.cpp
+index 2d06f12..e6269dd 100644
+--- a/src/common/strconv.cpp
++++ b/src/common/strconv.cpp
+@@ -3410,6 +3410,10 @@ wxWhateverWorksConv::FromWChar(char *dst, size_t dstLen,
+     WX_DEFINE_GLOBAL_CONV2(wxMBConv, wxMBConv_win32, wxConvLibc, wxEMPTY_PARAMETER_VALUE);
+ #elif 0 // defined(__WXOSX__)
+     WX_DEFINE_GLOBAL_CONV2(wxMBConv, wxMBConv_cf, wxConvLibc,  (wxFONTENCODING_UTF8));
++#elif defined(__ANDROID__)
++    // Narrow strings are always UTF-8 on Android, whatever setlocale() says: its
++    // C library only has the "C" and "C.UTF-8" locales.
++    WX_DEFINE_GLOBAL_CONV2(wxMBConv, wxMBConvStrictUTF8, wxConvLibc, wxEMPTY_PARAMETER_VALUE);
+ #else
+     WX_DEFINE_GLOBAL_CONV2(wxMBConv, wxMBConvLibc, wxConvLibc, wxEMPTY_PARAMETER_VALUE);
+ #endif
+diff --git a/src/common/wxcrt.cpp b/src/common/wxcrt.cpp
+index 3095baa..3ab45f1 100644
+--- a/src/common/wxcrt.cpp
++++ b/src/common/wxcrt.cpp
+@@ -1042,9 +1042,14 @@ char *strdup(const char *s)
+ // ============================================================================
+ 
+ #if !wxUSE_UTF8_LOCALE_ONLY
++#ifdef __ANDROID__
++bool wxLocaleIsUtf8 = true; // always, see wxIsLocaleUtf8()
++#else
+ bool wxLocaleIsUtf8 = false; // the safer setting if not known
+ #endif
++#endif
+ 
++#ifndef __ANDROID__
+ static bool wxIsCharsetUtf8(const char* charset)
+ {
+     if ( strcmp(charset, "UTF-8") == 0 ||
+@@ -1057,6 +1062,7 @@ static bool wxIsCharsetUtf8(const char* charset)
+ 
+     return false;
+ }
++#endif // !__ANDROID__
+ 
+ static bool wxIsLocaleUtf8()
+ {
+@@ -1064,6 +1070,11 @@ static bool wxIsLocaleUtf8()
+     //     because a) it may be unavailable in some builds and b) has slightly
+     //     different semantics (default locale instead of current)
+ 
++#ifdef __ANDROID__
++    // Android's C library has only the "C" and "C.UTF-8" locales and its
++    // multibyte functions use UTF-8 in both.
++    return true;
++#else // !__ANDROID__
+     const char* charset;
+ #if defined(HAVE_LANGINFO_H) && defined(CODESET)
+     // GNU libc provides current character set this way (this conforms to
+@@ -1094,6 +1105,7 @@ static bool wxIsLocaleUtf8()
+ 
+     // by default assume that we don't use UTF-8
+     return false;
++#endif // __ANDROID__/!__ANDROID__
+ }
+ 
+ void wxUpdateLocaleIsUtf8()
+@@ -1247,48 +1259,68 @@ WXDLLEXPORT double android_wcstod(const wchar_t *nptr, wchar_t **endptr)
+ 
+ #ifdef wxNEED_WX_MBSTOWCS
+ 
++// These used to copy the string one byte or wchar_t at a time, which turned
++// any non-ASCII text into garbage (UTF-8 read as Latin-1 one way, characters cut
++// down to their low byte the other way).  Narrow strings are UTF-8 on Android.
++
+ WXDLLEXPORT size_t android_mbstowcs(wchar_t * out, const char * in, size_t outlen)
+ {
+-    if (!out)
+-    {
+-        size_t outsize = 0;
+-        while(*in++)
+-            outsize++;
+-        return outsize;
+-    }
++    // The length returned includes the terminating NUL
++    const size_t len = wxConvUTF8.ToWChar(nullptr, 0, in);
++
++    if ( len == wxCONV_FAILED )
++        return (size_t)-1;
+ 
+-    const char* origin = in;
++    if ( !out )
++        return len - 1;
+ 
+-    while (outlen-- && *in)
++    if ( len <= outlen )
+     {
+-        *out++ = (wchar_t) *in++;
++        wxConvUTF8.ToWChar(out, outlen, in);
++        return len - 1;
+     }
+ 
+-    *out = '\0';
++    wxWCharBuffer buf(len);
++    wxConvUTF8.ToWChar(buf.data(), len, in);
++    wmemcpy(out, buf.data(), outlen);
+ 
+-    return in - origin;
++    return outlen;
+ }
+ 
+ WXDLLEXPORT size_t android_wcstombs(char * out, const wchar_t * in, size_t outlen)
+ {
+-    if (!out)
++    // The length returned includes the terminating NUL
++    const size_t len = wxConvUTF8.FromWChar(nullptr, 0, in);
++
++    if ( len == wxCONV_FAILED )
++        return (size_t)-1;
++
++    if ( !out )
++        return len - 1;
++
++    if ( len <= outlen )
+     {
+-        size_t outsize = 0;
+-        while(*in++)
+-            outsize++;
+-        return outsize;
++        wxConvUTF8.FromWChar(out, outlen, in);
++        return len - 1;
+     }
+ 
+-    const wchar_t* origin = in;
++    // Like wcstombs(), stop before a character that doesn't fit entirely
++    size_t written = 0;
+ 
+-    while (outlen-- && *in)
++    for ( ; *in; ++in )
+     {
+-        *out++ = (char) *in++;
+-    }
++        const wchar_t one[2] = { *in, L'\0' };
++        char mb[8];
++        const size_t n = wxConvUTF8.FromWChar(mb, sizeof(mb), one);
+ 
+-    *out = '\0';
++        if ( n == wxCONV_FAILED || written + n - 1 > outlen )
++            break;
++
++        memcpy(out + written, mb, n - 1);
++        written += n - 1;
++    }
+ 
+-    return in - origin;
++    return written;
+ }
+ 
+ #endif // wxNEED_WX_MBSTOWCS
+-- 
+2.54.0 (Apple Git-157)
+

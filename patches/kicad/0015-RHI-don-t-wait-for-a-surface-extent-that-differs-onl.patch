@@ -1,7 +1,7 @@
 From fc6ace9c2a54b1ba8e696485692b5badc81743f1 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 15:38:07 +0530
-Subject: [PATCH 15/29] RHI: don't wait for a surface extent that differs only
+Subject: [PATCH 15/40] RHI: don't wait for a surface extent that differs only
  by rounding
 
 At fractional scales (1.75 on many Android tablets) the requested size

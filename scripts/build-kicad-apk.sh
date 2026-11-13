@@ -159,14 +159,18 @@ grep -q '<profileable android:shell="true"/>' "$OUT/AndroidManifest.xml"
 
 PATCH_CLASSES="$KA_ROOT/build/qt-patches-classes"
 rm -rf "$PATCH_CLASSES" && mkdir -p "$PATCH_CLASSES"
+# QtThread: big main-loop stack.  QtMessageDialogHelper: Escape and BACK in message boxes
 "$JAVA_HOME/bin/javac" --release 8 -nowarn -d "$PATCH_CLASSES" \
+    -cp "$ANDROID_SDK_ROOT/platforms/android-35/android.jar:$QT_ANDROID_PATH/jar/Qt6Android.jar" \
     "$KA_ROOT"/android/qt-patches/org/qtproject/qt/android/*.java 2>/dev/null
 # QtWindow: GL/Vulkan window surfaces as TextureViews (android/qt-patches/bytecode)
 ( cd "$PATCH_CLASSES" && unzip -q -o "$QT_ANDROID_PATH/jar/Qt6Android.jar" org/qtproject/qt/android/QtWindow.class \
   && python3 "$KA_ROOT/android/qt-patches/bytecode/patch_qtwindow.py" \
        org/qtproject/qt/android/QtWindow.class org/qtproject/qt/android/QtWindow.class )
 ( cd "$PATCH_CLASSES" && zip -q -d "$OUT/libs/Qt6Android.jar" 'org/qtproject/qt/android/QtThread$*' || true
-  zip -q "$OUT/libs/Qt6Android.jar" org/qtproject/qt/android/QtThread*.class org/qtproject/qt/android/QtWindow.class )
+  zip -q "$OUT/libs/Qt6Android.jar" org/qtproject/qt/android/QtThread*.class org/qtproject/qt/android/QtWindow.class \
+      org/qtproject/qt/android/QtMessageDialogHelper*.class org/qtproject/qt/android/ButtonStruct.class \
+      org/qtproject/qt/android/QtNativeDialogHelper.class )
 # FileProvider paths (wx patch 18 opens files in other apps through it): androiddeployqt drops app
 # resources that Qt's own java dir also has, so build from a copy of that dir with ours swapped in
 QT_JAVA="$KA_ROOT/build/qt-android-java"
