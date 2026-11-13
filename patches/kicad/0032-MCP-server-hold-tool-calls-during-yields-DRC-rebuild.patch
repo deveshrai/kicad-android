@@ -1,7 +1,7 @@
 From c13b319e2ccc5ee895771729a878136aea1bf822 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 7 Nov 2026 07:10:08 +0530
-Subject: [PATCH 32/43] MCP server: hold tool calls during yields; DRC rebuilds
+Subject: [PATCH 32/44] MCP server: hold tool calls during yields; DRC rebuilds
  its rules
 
 A zone fill or DRC keeps its progress dialog alive by yielding to the event loop, and wxQt's

@@ -1,7 +1,7 @@
 From 2e6fcdfd4c98cabc40150982212061d5829130dd Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 13 Nov 2026 15:20:04 +0530
-Subject: [PATCH 41/43] Android: dialogs fit between the system bars; wizard
+Subject: [PATCH 41/44] Android: dialogs fit between the system bars; wizard
  caption; Ohm-metre dot
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

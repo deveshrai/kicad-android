@@ -1,0 +1,1750 @@
+From 1f7ed6caa09d50a896ad73e9021a5a99bc399354 Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Fri, 13 Nov 2026 21:14:04 +0530
+Subject: [PATCH 44/44] Setup wizard: Library Files page on Android, and
+ Preferences > Run Setup Wizard
+
+Android: the app bundles the symbol and footprint libraries and the
+templates but not the 3D models (3.2 GB).  A Library Files page, before
+the library tables page, downloads the 3D models from KiCad's library
+repositories on GitLab, updates the bundled libraries to the newest
+release of their series (from GitLab's tag list), or installs libraries
+from zip/tar/tar.gz archives.  Archives are taken apart by content
+(*.kicad_symdir, *.pretty, *.3dshapes, Projects/, the stock tables, ...),
+so the GitLab archives and zips of a desktop KiCad's folders both work.
+Downloads unpack into a staging folder; library folders replace the
+installed ones only when complete, template files are merged.  The page
+is shown once at first start.
+
+Preferences > Run Setup Wizard runs the wizard again at any time, with
+the pages that can be run again (Library Files, Updates & Privacy, the
+latter starting from the current settings); cancelling changes nothing.
+
+Android: libcurl uses OpenSSL, which has no CA bundle there; the system
+certificates are passed as an in-memory bundle (their file names use
+OpenSSL's old hash, so they don't work as a CAPATH).
+
+The library tables page wraps its text to the page width on Android,
+where it was cut off.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/CMakeLists.txt                         |    1 +
+ common/kicad_curl/kicad_curl_easy.cpp         |   60 +
+ common/startwizard/startwizard.cpp            |   43 +-
+ .../startwizard_provider_libraries.cpp        |    5 +
+ .../startwizard_provider_library_files.cpp    | 1203 +++++++++++++++++
+ .../startwizard_provider_library_files.h      |   77 ++
+ .../startwizard_provider_privacy.cpp          |   13 +
+ .../startwizard_provider_privacy.h            |    2 +
+ include/startwizard/startwizard.h             |   13 +-
+ include/startwizard/startwizard_provider.h    |    4 +
+ kicad/menubar.cpp                             |    1 +
+ kicad/tools/kicad_manager_actions.cpp         |    8 +
+ kicad/tools/kicad_manager_actions.h           |    1 +
+ kicad/tools/kicad_manager_control.cpp         |   10 +
+ kicad/tools/kicad_manager_control.h           |    1 +
+ 15 files changed, 1431 insertions(+), 11 deletions(-)
+ create mode 100644 common/startwizard/startwizard_provider_library_files.cpp
+ create mode 100644 common/startwizard/startwizard_provider_library_files.h
+
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index 5f89ad15..ab10f0ed 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -396,6 +396,7 @@ set( KICOMMON_SRCS
+ 
+     startwizard/startwizard.cpp
+     startwizard/startwizard_provider_libraries.cpp
++    startwizard/startwizard_provider_library_files.cpp
+     startwizard/startwizard_provider_privacy.cpp
+     startwizard/startwizard_provider_settings.cpp
+     )
+diff --git a/common/kicad_curl/kicad_curl_easy.cpp b/common/kicad_curl/kicad_curl_easy.cpp
+index fc7c7d4d..5cb81f4f 100644
+--- a/common/kicad_curl/kicad_curl_easy.cpp
++++ b/common/kicad_curl/kicad_curl_easy.cpp
+@@ -28,9 +28,13 @@
+ #include <cstdarg>
+ #include <cstddef>
+ #include <exception>
++#include <fstream>
++#include <iterator>
+ #include <sstream>
+ #include <shared_mutex>
+ #include <wx/app.h>
++#include <wx/dir.h>
++#include <wx/filefn.h>
+ 
+ #include <build_version.h>
+ #include <ki_exception.h>   // THROW_IO_ERROR
+@@ -116,6 +120,44 @@ static int progressinfo( void* aProgress, double aDLtotal, double aDLnow, double
+ #endif
+ 
+ 
++#ifdef __ANDROID__
++/// The system's trusted CA certificates (since Android 14 the updatable copy in the Conscrypt
++/// APEX), concatenated once.  The files have text before their PEM block, which OpenSSL skips.
++static const std::string& androidCaBundle()
++{
++    static const std::string bundle = []()
++    {
++        std::string all;
++
++        for( const wxString& dir : { wxString( wxT( "/apex/com.android.conscrypt/cacerts" ) ),
++                                     wxString( wxT( "/system/etc/security/cacerts" ) ) } )
++        {
++            wxDir certs( dir );
++            wxString name;
++
++            if( !certs.IsOpened() )
++                continue;
++
++            for( bool more = certs.GetFirst( &name, wxEmptyString, wxDIR_FILES ); more;
++                 more = certs.GetNext( &name ) )
++            {
++                std::ifstream in( ( dir + wxT( "/" ) + name ).fn_str(), std::ios::binary );
++                all.append( std::istreambuf_iterator<char>( in ), std::istreambuf_iterator<char>() );
++                all.push_back( '\n' );
++            }
++
++            if( !all.empty() )
++                break;
++        }
++
++        return all;
++    }();
++
++    return bundle;
++}
++#endif
++
++
+ KICAD_CURL_EASY::KICAD_CURL_EASY() :
+         m_headers( nullptr ),
+         m_curlSharedLock( KICAD_CURL::Mutex() )
+@@ -165,6 +207,24 @@ KICAD_CURL_EASY::KICAD_CURL_EASY() :
+     curl_easy_setopt( m_CURL, CURLOPT_SSL_OPTIONS, sslOpts );
+ #endif
+ 
++#ifdef __ANDROID__
++    // libcurl is built with OpenSSL, which has no CA bundle on Android.  The system's trusted
++    // certificates are one PEM file each, named by the old (MD5) subject hash, which OpenSSL 3
++    // can't look up as a CAPATH; hand them to curl as one in-memory bundle instead.
++    {
++        const std::string& bundle = androidCaBundle();
++
++        if( !bundle.empty() )
++        {
++            curl_blob blob;
++            blob.data = const_cast<char*>( bundle.data() );
++            blob.len = bundle.size();
++            blob.flags = CURL_BLOB_NOCOPY;
++            curl_easy_setopt( m_CURL, CURLOPT_CAINFO_BLOB, &blob );
++        }
++    }
++#endif
++
+     if( wxGetEnv( wxT( "KICAD_CURL_VERBOSE" ), nullptr ) )
+     {
+         // note: curl verbose will end up in stderr
+diff --git a/common/startwizard/startwizard.cpp b/common/startwizard/startwizard.cpp
+index 4385ff06..0ae64895 100644
+--- a/common/startwizard/startwizard.cpp
++++ b/common/startwizard/startwizard.cpp
+@@ -31,6 +31,7 @@
+ #include <startwizard/startwizard.h>
+ #include <startwizard/startwizard_provider.h>
+ #include <startwizard/startwizard_provider_libraries.h>
++#include <startwizard/startwizard_provider_library_files.h>
+ #include <startwizard/startwizard_provider_privacy.h>
+ #include <startwizard/startwizard_provider_settings.h>
+ #include <ui_events.h>
+@@ -89,7 +90,7 @@ private:
+ class STARTWIZARD_WELCOME_PAGE : public wxWizardPageSimple
+ {
+ public:
+-    STARTWIZARD_WELCOME_PAGE( wxWizard* aParent ) : wxWizardPageSimple( aParent )
++    STARTWIZARD_WELCOME_PAGE( wxWizard* aParent, bool aRerun = false ) : wxWizardPageSimple( aParent )
+     {
+         m_mainSizer = new wxBoxSizer( wxVERTICAL );
+ 
+@@ -104,7 +105,9 @@ public:
+         m_mainSizer->Add( pageDivider, 0, wxEXPAND | wxALL, 5 );
+ 
+         m_welcomeText = new wxStaticText( this, -1,
+-            _( "KiCad is starting for the first time, or some of its configuration files are missing.\n\n"
++            aRerun ? _( "This wizard goes through the parts of KiCad's setup that can be changed again.  "
++                        "Nothing changes until you press Finish." )
++                   : _( "KiCad is starting for the first time, or some of its configuration files are missing.\n\n"
+                "Let's take a moment to configure some basic settings.  You can always modify these "
+                "settings later by opening the Preferences dialog." ) );
+         m_mainSizer->Add( m_welcomeText, 0, wxEXPAND | wxALL, 5 );
+@@ -157,11 +160,16 @@ STARTWIZARD_PROVIDER* STARTWIZARD::GetProvider( const wxString& aName )
+ }
+ 
+ 
+-void STARTWIZARD::CheckAndRun( wxWindow* aParent )
++void STARTWIZARD::CheckAndRun( wxWindow* aParent, bool aRerun )
+ {
+     m_providers.clear();
++    m_rerun = aRerun;
+ 
+     m_providers.push_back( std::make_unique<STARTWIZARD_PROVIDER_SETTINGS>() );
++#ifdef __ANDROID__
++    // Before the library tables page: the stock tables only exist once the files are there
++    m_providers.push_back( std::make_unique<STARTWIZARD_PROVIDER_LIBRARY_FILES>() );
++#endif
+     m_providers.push_back( std::make_unique<STARTWIZARD_PROVIDER_LIBRARIES>() );
+     m_providers.push_back( std::make_unique<STARTWIZARD_PROVIDER_PRIVACY>() );
+     //providers.push_back( std::make_unique<STARTWIZARD_PROVIDER_LOOK_AND_FEEL>() );
+@@ -169,14 +177,23 @@ void STARTWIZARD::CheckAndRun( wxWindow* aParent )
+     if( m_providers.size() == 0 )
+         return;
+ 
+-    bool wizardRequired = std::ranges::any_of( std::as_const( m_providers ),
+-                                               []( const std::unique_ptr<STARTWIZARD_PROVIDER>& aProvider ) -> bool
+-                                               {
+-                                                   return aProvider->NeedsUserInput();
+-                                               } );
++    const auto shown =
++            [aRerun]( const std::unique_ptr<STARTWIZARD_PROVIDER>& aProvider ) -> bool
++            {
++                return aProvider->NeedsUserInput() || ( aRerun && aProvider->OfferOnRerun() );
++            };
++
++    bool wizardRequired = std::ranges::any_of( std::as_const( m_providers ), shown );
+ 
+     if( !wizardRequired )
++    {
++        if( aRerun )
++            wxMessageBox( _( "KiCad is set up; there is nothing for the setup wizard to change." ),
++                          _( "KiCad Setup" ), wxOK | wxICON_INFORMATION, aParent );
++
++        m_rerun = false;
+         return;
++    }
+ 
+     Pgm().HideSplash();
+ 
+@@ -187,13 +204,13 @@ void STARTWIZARD::CheckAndRun( wxWindow* aParent )
+     m_wizard = new wxWizard( aParent, wxID_ANY, _( "KiCad Setup" ) );
+     m_wizard->SetWindowStyleFlag( m_wizard->GetWindowStyleFlag() | wxRESIZE_BORDER );
+ 
+-    STARTWIZARD_WELCOME_PAGE* firstPage = new STARTWIZARD_WELCOME_PAGE( m_wizard );
++    STARTWIZARD_WELCOME_PAGE* firstPage = new STARTWIZARD_WELCOME_PAGE( m_wizard, aRerun );
+     wxWizardPageSimple* lastPage = nullptr;
+     wxSize minPageSize;
+ 
+     for( std::unique_ptr<STARTWIZARD_PROVIDER>& provider : m_providers )
+     {
+-        if( !provider->NeedsUserInput() )
++        if( !shown( provider ) )
+             continue;
+ 
+         provider->SetWasShown( true );
+@@ -247,6 +264,10 @@ void STARTWIZARD::CheckAndRun( wxWindow* aParent )
+     m_wizard->Bind( wxEVT_WIZARD_CANCEL,
+             [&]( wxWizardEvent& aEvt )
+             {
++                // Run again from the menu: cancelling changes nothing, so needs no confirmation
++                if( m_rerun )
++                    return;
++
+                 if( IsOK( aParent, _( "Are you sure?  If you cancel KiCad setup, default settings "
+                                       "will be chosen for you." ) ) )
+                 {
+@@ -291,4 +312,6 @@ void STARTWIZARD::CheckAndRun( wxWindow* aParent )
+         wxCommandEvent e( EDA_LANG_CHANGED );
+         frame->GetEventHandler()->ProcessEvent( e );
+     }
++
++    m_rerun = false;
+ }
+diff --git a/common/startwizard/startwizard_provider_libraries.cpp b/common/startwizard/startwizard_provider_libraries.cpp
+index 984ab16e..d90336bd 100644
+--- a/common/startwizard/startwizard_provider_libraries.cpp
++++ b/common/startwizard/startwizard_provider_libraries.cpp
+@@ -193,6 +193,11 @@ public:
+ #elif defined( __WXMSW__ )
+         m_stIntro->Wrap( GetClientSize().x );
+         m_stWarning->Wrap( GetClientSize().x - m_bmpWarning->GetSize().x - FromDIP( 10 ) );
++#elif defined( __ANDROID__ )
++        // The panel is wider than the page it scrolls in, so its client width cut the wrapped
++        // lines off; wrap to the page width that the panel's maximum size sets
++        m_stIntro->Wrap( FromDIP( 600 ) );
++        m_stWarning->Wrap( FromDIP( 600 ) - m_bmpWarning->GetSize().x - FromDIP( 18 ) );
+ #else
+         m_stIntro->Wrap( GetClientSize().x - FromDIP( 10 ) );
+         m_stWarning->Wrap( GetClientSize().x - m_bmpWarning->GetSize().x - FromDIP( 18 ) );
+diff --git a/common/startwizard/startwizard_provider_library_files.cpp b/common/startwizard/startwizard_provider_library_files.cpp
+new file mode 100644
+index 00000000..61ee534d
+--- /dev/null
++++ b/common/startwizard/startwizard_provider_library_files.cpp
+@@ -0,0 +1,1203 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <startwizard/startwizard_provider_library_files.h>
++#include <startwizard/startwizard.h>
++
++#include <algorithm>
++#include <atomic>
++#include <fstream>
++#include <map>
++#include <mutex>
++#include <set>
++#include <thread>
++
++#include <regex>
++#include <tuple>
++
++#include <wx/button.h>
++#include <wx/dir.h>
++#include <wx/ffile.h>
++#include <wx/checkbox.h>
++#include <wx/filedlg.h>
++#include <wx/filename.h>
++#include <wx/msgdlg.h>
++#include <wx/panel.h>
++#include <wx/progdlg.h>
++#include <wx/radiobut.h>
++#include <wx/sizer.h>
++#include <wx/stattext.h>
++#include <wx/tarstrm.h>
++#include <wx/tokenzr.h>
++#include <wx/utils.h>
++#include <wx/wfstream.h>
++#include <wx/zipstrm.h>
++#include <wx/zstream.h>
++
++#include <curl/curl.h>
++#include <kicad_curl/kicad_curl_easy.h>
++#include <libraries/library_manager.h>
++#include <libraries/library_table.h>
++#include <paths.h>
++#include <pgm_base.h>
++
++
++namespace
++{
++
++// The release the APK bundles, when the extraction stamp can't be read.  Keep in step with the
++// default of scripts/fetch-kicad-libs.sh.
++const wxString BUNDLED_RELEASE = wxS( "10.0.8" );
++
++// Written when the page has been through once, so it is shown at first start only
++const wxString PAGE_SHOWN_MARKER = wxS( ".library-files-page-shown" );
++
++// The release last downloaded, which then overrides the bundled one
++const wxString RELEASE_FILE = wxS( ".libraries-release" );
++
++// Written by KIPLATFORM::ENV::Init() when it extracts the bundled libraries (their release)
++const wxString BUNDLED_STAMP = wxS( ".libs-extracted" );
++
++
++struct REPO_INFO
++{
++    const char* name;
++    double      downloadMB;    // the GitLab archive of the 10.0 releases
++    double      installedMB;
++};
++
++
++const REPO_INFO REPO_SYMBOLS    = { "kicad-symbols",    12,  272 };
++const REPO_INFO REPO_FOOTPRINTS = { "kicad-footprints", 12,  179 };
++const REPO_INFO REPO_TEMPLATES  = { "kicad-templates",   3,    6 };
++const REPO_INFO REPO_3D         = { "kicad-packages3D", 663, 3231 };
++
++
++wxString formatMB( double aMB )
++{
++    if( aMB >= 1000 )
++        return wxString::Format( _( "%.1f GB" ), aMB / 1024 );
++
++    return wxString::Format( _( "%.0f MB" ), aMB );
++}
++
++
++wxString archiveUrl( const REPO_INFO& aRepo, const wxString& aRelease )
++{
++    const wxString repo = wxString::FromUTF8( aRepo.name );
++
++    return wxString::Format( wxS( "https://gitlab.com/kicad/libraries/%s/-/archive/%s/%s-%s.tar.gz" ),
++                             repo, aRelease, repo, aRelease );
++}
++
++
++wxString stockRoot()
++{
++    wxFileName root;
++    root.AssignDir( PATHS::GetStockEDALibraryPath() );
++    return root.GetPath();
++}
++
++
++/// Free space where the libraries go, in MB, or a negative number when unknown
++double freeSpaceMB()
++{
++    wxLongLong total;
++    wxLongLong free;
++
++    if( !wxGetDiskSpace( stockRoot(), &total, &free ) )
++        return -1;
++
++    return free.ToDouble() / ( 1024.0 * 1024.0 );
++}
++
++
++/**
++ * Where an archive entry goes under the stock library directory, or an empty string to leave
++ * it out.  Archives are taken apart by their content, so the GitLab archives of KiCad's library
++ * repositories, release tarballs, and zips of a desktop KiCad's symbols, footprints, 3dmodels
++ * and template folders all work:
++ *   *.kicad_symdir/ and *.kicad_sym  -> symbols/
++ *   *.pretty/                        -> footprints/
++ *   *.3dshapes/                      -> 3dmodels/
++ *   *.kicad_blocks/                  -> blocks/
++ *   Projects/<name>/ and template/<name>/, *.kicad_wks, the stock library tables -> template/
++ *
++ * @param aCategory receives the top directory the entry goes to
++ */
++wxString mapEntry( const wxString& aName, wxString& aCategory )
++{
++    wxArrayString parts = wxStringTokenize( aName, wxS( "/\\" ), wxTOKEN_STRTOK );
++
++    if( parts.IsEmpty() )
++        return wxEmptyString;
++
++    for( const wxString& part : parts )
++    {
++        if( part == wxS( ".." ) || part.StartsWith( wxS( "." ) ) )
++            return wxEmptyString;   // no escaping the target, and no .git, .github, ...
++    }
++
++    const auto join =
++            [&]( size_t aFrom )
++            {
++                wxString rel;
++
++                for( size_t i = aFrom; i < parts.size(); ++i )
++                    rel << ( rel.IsEmpty() ? wxString() : wxString( wxS( "/" ) ) ) << parts[i];
++
++                return rel;
++            };
++
++    int libIndex = -1;
++    int templateIndex = -1;
++
++    for( size_t i = 0; i + 1 < parts.size(); ++i )
++    {
++        const wxString& part = parts[i];
++
++        if( libIndex < 0
++            && ( part.EndsWith( wxS( ".pretty" ) ) || part.EndsWith( wxS( ".3dshapes" ) )
++                 || part.EndsWith( wxS( ".kicad_symdir" ) ) || part.EndsWith( wxS( ".kicad_blocks" ) ) ) )
++        {
++            libIndex = static_cast<int>( i );
++        }
++
++        if( templateIndex < 0 && ( part == wxS( "Projects" ) || part == wxS( "template" ) ) )
++            templateIndex = static_cast<int>( i );
++    }
++
++    // A project template can hold a footprint library of its own: it stays with the template
++    if( templateIndex >= 0 && ( libIndex < 0 || templateIndex < libIndex )
++        && templateIndex + 2 < static_cast<int>( parts.size() ) )
++    {
++        aCategory = wxS( "template" );
++        return wxS( "template/" ) + join( templateIndex + 1 );
++    }
++
++    if( libIndex >= 0 )
++    {
++        const wxString& lib = parts[libIndex];
++
++        if( lib.EndsWith( wxS( ".pretty" ) ) )
++            aCategory = wxS( "footprints" );
++        else if( lib.EndsWith( wxS( ".3dshapes" ) ) )
++            aCategory = wxS( "3dmodels" );
++        else if( lib.EndsWith( wxS( ".kicad_symdir" ) ) )
++            aCategory = wxS( "symbols" );
++        else
++            aCategory = wxS( "blocks" );
++
++        return aCategory + wxS( "/" ) + join( libIndex );
++    }
++
++    const wxString& file = parts.Last();
++
++    if( file.EndsWith( wxS( ".kicad_sym" ) ) )
++    {
++        aCategory = wxS( "symbols" );
++        return wxS( "symbols/" ) + file;
++    }
++
++    if( file.EndsWith( wxS( ".kicad_wks" ) ) )
++    {
++        aCategory = wxS( "template" );
++        return wxS( "template/" ) + file;
++    }
++
++    // The stock tables go where LIBRARY_MANAGER::StockTablePath() looks; their content is
++    // checked when they are written (see isStockTable())
++    if( file == wxS( "sym-lib-table" ) || file == wxS( "fp-lib-table" )
++        || file == wxS( "design-block-lib-table" ) )
++    {
++        aCategory = wxS( "tables" );
++        return wxS( "template/" ) + file;
++    }
++
++    // A desktop template folder's base project
++    if( templateIndex >= 0 && file == wxS( "kicad.kicad_pro" ) )
++    {
++        aCategory = wxS( "template" );
++        return wxS( "template/" ) + file;
++    }
++
++    return wxEmptyString;
++}
++
++
++/// A library table is taken as the stock one only if it points into the stock libraries: a
++/// project's own sym-lib-table in the archive must not replace it
++bool isStockTable( const wxString& aFile, const std::string& aContent )
++{
++    if( aFile == wxS( "sym-lib-table" ) )
++        return aContent.find( "_SYMBOL_DIR}" ) != std::string::npos;
++
++    if( aFile == wxS( "fp-lib-table" ) )
++        return aContent.find( "_FOOTPRINT_DIR}" ) != std::string::npos;
++
++    return aContent.find( "_DESIGN_BLOCK_DIR}" ) != std::string::npos;
++}
++
++
++/// Progress and results shared between the worker thread and the progress dialog
++struct INSTALL_STATE
++{
++    std::atomic<bool>   cancel{ false };
++    std::atomic<bool>   done{ false };
++    std::atomic<double> fraction{ 0.0 };
++
++    std::mutex                              mutex;
++    wxString                                status;
++    wxString                                errors;
++    std::map<wxString, std::set<wxString>>  libraries;   // category -> library names
++    size_t                                  files = 0;
++
++    void SetStatus( const wxString& aStatus )
++    {
++        std::lock_guard<std::mutex> lock( mutex );
++        status = aStatus;
++    }
++
++    wxString Status()
++    {
++        std::lock_guard<std::mutex> lock( mutex );
++        return status;
++    }
++
++    void AddError( const wxString& aError )
++    {
++        std::lock_guard<std::mutex> lock( mutex );
++        errors << aError << wxS( "\n" );
++    }
++};
++
++
++/// Counts what an input stream has read, for the progress of an archive's extraction
++class COUNTING_STREAM : public wxFilterInputStream
++{
++public:
++    explicit COUNTING_STREAM( wxInputStream& aStream ) :
++            wxFilterInputStream( aStream )
++    {}
++
++    wxFileOffset Count() const { return m_count; }
++
++protected:
++    size_t OnSysRead( void* aBuffer, size_t aSize ) override
++    {
++        m_parent_i_stream->Read( aBuffer, aSize );
++        size_t read = m_parent_i_stream->LastRead();
++        m_count += read;
++        m_lasterror = m_parent_i_stream->GetLastError();
++        return read;
++    }
++
++private:
++    wxFileOffset m_count = 0;
++};
++
++
++/**
++ * Extract the library archive @a aPath into @a aRoot.  Zip, tar and gzipped tar archives are
++ * told apart by their first bytes.  Progress goes from @a aStart to @a aStart + @a aSpan.
++ */
++bool extractArchive( const wxString& aPath, const wxString& aRoot, double aStart, double aSpan,
++                     INSTALL_STATE& aState )
++{
++    wxFFileInputStream file( aPath );
++
++    if( !file.IsOk() )
++    {
++        aState.AddError( wxString::Format( _( "Could not open '%s'." ), aPath ) );
++        return false;
++    }
++
++    const double size = std::max<double>( 1.0, static_cast<double>( file.GetLength() ) );
++    unsigned char magic[4] = {};
++    file.Read( magic, sizeof( magic ) );
++    file.SeekI( 0 );
++
++    COUNTING_STREAM                       counted( file );
++    std::unique_ptr<wxInputStream>        gunzip;
++    std::unique_ptr<wxArchiveInputStream> archive;
++
++    if( magic[0] == 'P' && magic[1] == 'K' )
++    {
++        archive = std::make_unique<wxZipInputStream>( counted );
++    }
++    else if( magic[0] == 0x1f && magic[1] == 0x8b )
++    {
++        gunzip = std::make_unique<wxZlibInputStream>( counted, wxZLIB_GZIP );
++        archive = std::make_unique<wxTarInputStream>( *gunzip );
++    }
++    else
++    {
++        archive = std::make_unique<wxTarInputStream>( counted );
++    }
++
++    const wxString name = wxFileName( aPath ).GetFullName();
++    size_t         written = 0;
++    bool           ok = true;
++
++    while( std::unique_ptr<wxArchiveEntry> entry{ archive->GetNextEntry() } )
++    {
++        if( aState.cancel )
++            return false;
++
++        aState.fraction = aStart + aSpan * std::min( 1.0, counted.Count() / size );
++
++        if( entry->IsDir() )
++            continue;
++
++        if( wxTarEntry* tar = dynamic_cast<wxTarEntry*>( entry.get() ) )
++        {
++            if( tar->GetTypeFlag() != wxTAR_REGTYPE && tar->GetTypeFlag() != '\0' )
++                continue;   // links, devices, ...
++        }
++
++        wxString category;
++        wxString rel = mapEntry( entry->GetName( wxPATH_UNIX ), category );
++
++        if( rel.IsEmpty() )
++            continue;
++
++        wxFileName dest( aRoot + wxS( "/" ) + rel );
++
++        if( !wxFileName::Mkdir( dest.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL )
++            && !wxFileName::DirExists( dest.GetPath() ) )
++        {
++            aState.AddError( wxString::Format( _( "Could not create '%s'." ), dest.GetPath() ) );
++            return false;
++        }
++
++        if( category == wxS( "tables" ) )
++        {
++            std::string content;
++            char        buf[16384];
++
++            while( archive->Read( buf, sizeof( buf ) ).LastRead() > 0 )
++                content.append( buf, archive->LastRead() );
++
++            if( !isStockTable( dest.GetFullName(), content ) )
++                continue;
++
++            std::ofstream out( dest.GetFullPath().fn_str(), std::ios::binary | std::ios::trunc );
++            out << content;
++            ok &= out.good();
++        }
++        else
++        {
++            wxFFileOutputStream out( dest.GetFullPath() );
++
++            if( !out.IsOk() )
++            {
++                aState.AddError( wxString::Format( _( "Could not write '%s'." ), dest.GetFullPath() ) );
++                return false;
++            }
++
++            out.Write( *archive );
++            ok &= out.Close();
++
++            wxArrayString relParts = wxStringTokenize( rel, wxS( "/" ) );
++
++            if( relParts.size() >= 2 )
++                aState.libraries[category].insert( relParts[1] );
++        }
++
++        if( ( ++written % 200 ) == 0 )
++            aState.SetStatus( wxString::Format( _( "Installing from %s: %zu files" ), name, written ) );
++    }
++
++    {
++        std::lock_guard<std::mutex> lock( aState.mutex );
++        aState.files += written;
++    }
++
++    if( !ok )
++        aState.AddError( wxString::Format( _( "Some files from '%s' could not be written." ), name ) );
++
++    if( written == 0 )
++        aState.AddError( wxString::Format( _( "'%s' holds no KiCad libraries." ), name ) );
++
++    return ok && written > 0;
++}
++
++
++bool downloadFile( const wxString& aUrl, const wxString& aDest, double aApproxBytes,
++                   double aStart, double aSpan, INSTALL_STATE& aState )
++{
++    std::ofstream out( aDest.fn_str(), std::ios::binary | std::ios::trunc );
++
++    if( !out.good() )
++    {
++        aState.AddError( wxString::Format( _( "Could not write '%s'." ), aDest ) );
++        return false;
++    }
++
++    const wxString name = wxFileName( aUrl ).GetFullName();
++
++    KICAD_CURL_EASY curl;
++    curl.SetURL( aUrl.ToStdString() );
++    curl.SetFollowRedirects( true );
++    curl.SetOutputStream( &out );
++    curl.SetTransferCallback(
++            [&]( size_t aTotal, size_t aNow, size_t, size_t ) -> int
++            {
++                // GitLab makes the archives on the fly and often sends no length
++                const double total = aTotal > 0 ? static_cast<double>( aTotal ) : aApproxBytes;
++
++                aState.fraction = aStart + aSpan * std::min( 1.0, aNow / std::max( 1.0, total ) );
++                aState.SetStatus( wxString::Format( _( "Downloading %s: %s of about %s" ), name,
++                                                    formatMB( aNow / 1048576.0 ),
++                                                    formatMB( total / 1048576.0 ) ) );
++                return aState.cancel ? 1 : 0;
++            },
++            250000 );
++
++    const int code = curl.Perform();
++    out.close();
++
++    if( aState.cancel )
++        return false;
++
++    if( code != CURLE_OK )
++    {
++        aState.AddError( wxString::Format( _( "Could not download %s: %s" ), aUrl,
++                                           curl.GetErrorText( code ) ) );
++        return false;
++    }
++
++    if( int status = curl.GetResponseStatusCode(); status != 200 )
++    {
++        aState.AddError( wxString::Format( _( "Could not download %s (HTTP %d)." ), aUrl, status ) );
++        return false;
++    }
++
++    return true;
++}
++
++
++/**
++ * Make the user's global symbol and footprint tables refer to the stock libraries, now that
++ * they are there.  Only for tables that exist: at first start the library tables page creates
++ * them after this page, with the stock libraries in them.
++ */
++void addStockLibrariesToGlobalTables()
++{
++    bool changed = false;
++
++    for( LIBRARY_TABLE_TYPE type : { LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_TYPE::FOOTPRINT } )
++    {
++        const wxString tablePath = LIBRARY_MANAGER::DefaultGlobalTablePath( type );
++        const wxString stockPath = LIBRARY_MANAGER::StockTablePath( type );
++
++        if( !LIBRARY_MANAGER::IsTableValid( tablePath ) || !LIBRARY_MANAGER::IsTableValid( stockPath ) )
++            continue;
++
++        LIBRARY_TABLE table( wxFileName( tablePath ), LIBRARY_TABLE_SCOPE::GLOBAL );
++
++        if( !table.IsOk() )
++            continue;
++
++        const wxString stockUri = LIBRARY_MANAGER::StockTableReferenceURI( type );
++        std::set<wxString> nicknames;
++        bool               present = false;
++
++        for( const LIBRARY_TABLE_ROW& row : table.Rows() )
++        {
++            nicknames.insert( row.Nickname() );
++
++            if( row.Type() == LIBRARY_TABLE_ROW::TABLE_TYPE_NAME
++                && ( row.URI() == stockUri || row.URI() == stockPath
++                     || row.URI() == LIBRARY_MANAGER::StockTableTokenizedURI( type ) ) )
++            {
++                present = true;
++            }
++        }
++
++        if( present )
++            continue;
++
++        wxString nickname = wxS( "KiCad" );
++
++        for( int i = 2; nicknames.count( nickname ); ++i )
++            nickname = wxString::Format( wxS( "KiCad_%d" ), i );
++
++        LIBRARY_TABLE_ROW& chained = table.InsertRow();
++        chained.SetType( LIBRARY_TABLE_ROW::TABLE_TYPE_NAME );
++        chained.SetNickname( nickname );
++        chained.SetDescription( _( "KiCad Default Libraries" ) );
++        chained.SetURI( stockUri );
++
++        table.Save();
++        changed = true;
++    }
++
++    if( changed )
++        Pgm().GetLibraryManager().LoadGlobalTables();
++}
++
++
++/// The newest release tag of KiCad's libraries in the series of @a aCurrent (10.0.x for 10.0.8),
++/// from GitLab's tag list, or an empty string
++wxString latestRelease( const wxString& aCurrent, INSTALL_STATE& aState )
++{
++    const wxString major = aCurrent.BeforeFirst( '.' );
++
++    if( major.IsEmpty() || !major.IsNumber() )
++        return wxEmptyString;
++
++    KICAD_CURL_EASY curl;
++    curl.SetURL( wxString::Format( wxS( "https://gitlab.com/api/v4/projects/kicad%%2Flibraries%%2F"
++                                        "kicad-symbols/repository/tags?per_page=100&search=%%5E%s." ),
++                                   major ).ToStdString() );
++    curl.SetFollowRedirects( true );
++
++    const int code = curl.Perform();
++
++    if( code != CURLE_OK || curl.GetResponseStatusCode() != 200 )
++    {
++        aState.AddError( wxString::Format( _( "Could not get the list of library releases: %s" ),
++                                           code != CURLE_OK ? wxString( curl.GetErrorText( code ) )
++                                                            : wxString::Format( wxS( "HTTP %d" ),
++                                                                                curl.GetResponseStatusCode() ) ) );
++        return wxEmptyString;
++    }
++
++    const std::regex tag( R"re("name"\s*:\s*"(\d+)\.(\d+)\.(\d+)")re" );
++    const std::string& json = curl.GetBuffer();
++    std::tuple<long, long, long> best{ -1, -1, -1 };
++    wxString bestName;
++
++    for( std::sregex_iterator it( json.begin(), json.end(), tag ), end; it != end; ++it )
++    {
++        std::tuple<long, long, long> version{ std::stol( ( *it )[1] ), std::stol( ( *it )[2] ),
++                                              std::stol( ( *it )[3] ) };
++
++        if( std::to_string( std::get<0>( version ) ) == major.ToStdString() && version > best )
++        {
++            best = version;
++            bestName = wxString::Format( wxS( "%ld.%ld.%ld" ), std::get<0>( version ),
++                                         std::get<1>( version ), std::get<2>( version ) );
++        }
++    }
++
++    return bestName;
++}
++
++
++/**
++ * Move what was unpacked into @a aStaging into @a aRoot.  Library directories (symbols,
++ * footprints, 3dmodels, blocks) replace the installed ones whole, so libraries removed upstream
++ * go too; template files are merged, as template/ also holds the app's own base project.
++ */
++bool commitStaging( const wxString& aStaging, const wxString& aRoot, INSTALL_STATE& aState )
++{
++    bool ok = true;
++
++    for( const wxString& dir : { wxString( wxS( "symbols" ) ), wxString( wxS( "footprints" ) ),
++                                 wxString( wxS( "3dmodels" ) ), wxString( wxS( "blocks" ) ) } )
++    {
++        const wxString from = aStaging + wxS( "/" ) + dir;
++        const wxString to = aRoot + wxS( "/" ) + dir;
++        const wxString old = aRoot + wxS( "/." ) + dir + wxS( ".old" );
++
++        if( !wxFileName::DirExists( from ) )
++            continue;
++
++        if( wxFileName::DirExists( old ) )
++            wxFileName::Rmdir( old, wxPATH_RMDIR_RECURSIVE );
++
++        if( wxFileName::DirExists( to ) && !wxRenameFile( to, old ) )
++        {
++            aState.AddError( wxString::Format( _( "Could not replace '%s'." ), to ) );
++            ok = false;
++            continue;
++        }
++
++        if( !wxRenameFile( from, to ) )
++        {
++            aState.AddError( wxString::Format( _( "Could not install '%s'." ), to ) );
++            wxRenameFile( old, to );   // put the old libraries back
++            ok = false;
++            continue;
++        }
++
++        wxFileName::Rmdir( old, wxPATH_RMDIR_RECURSIVE );
++    }
++
++    // Merge template/
++    const wxString templates = aStaging + wxS( "/template" );
++
++    if( wxFileName::DirExists( templates ) )
++    {
++        wxArrayString files;
++        wxDir::GetAllFiles( templates, &files, wxEmptyString, wxDIR_FILES | wxDIR_DIRS | wxDIR_HIDDEN );
++
++        for( const wxString& file : files )
++        {
++            wxString   rel = file.Mid( aStaging.length() );
++            wxFileName dest( aRoot + rel );
++
++            wxFileName::Mkdir( dest.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++
++            if( !wxRenameFile( file, dest.GetFullPath(), true ) )
++                ok = false;
++        }
++    }
++
++    wxFileName::Rmdir( aStaging, wxPATH_RMDIR_RECURSIVE );
++    return ok;
++}
++
++
++class PANEL_STARTWIZARD_LIBRARY_FILES : public wxPanel
++{
++public:
++    PANEL_STARTWIZARD_LIBRARY_FILES( const std::shared_ptr<STARTWIZARD_PROVIDER_LIBRARY_FILES_MODEL>& aModel,
++                                     wxWindow* aParent ) :
++            wxPanel( aParent ),
++            m_model( aModel )
++    {
++        const int   wrap = FromDIP( 600 );
++        const int   indent = FromDIP( 28 );
++        wxBoxSizer* sizer = new wxBoxSizer( wxVERTICAL );
++
++        const wxString release = STARTWIZARD_PROVIDER_LIBRARY_FILES::InstalledRelease();
++        wxString       intro;
++
++        if( STARTWIZARD_PROVIDER_LIBRARY_FILES::StockLibrariesInstalled() )
++        {
++            intro = wxString::Format( _( "KiCad's symbol and footprint libraries (release %s) and "
++                                         "the project templates are installed.  The 3D models are "
++                                         "not part of the app: they are a large download." ),
++                                      release );
++        }
++        else
++        {
++            intro = _( "KiCad's symbol and footprint libraries are not installed.  Install them "
++                       "from archive files, or update to download the newest release." );
++        }
++
++        wxStaticText* introText = new wxStaticText( this, wxID_ANY, intro );
++        introText->Wrap( wrap );
++        sizer->Add( introText, 0, wxEXPAND | wxBOTTOM, FromDIP( 10 ) );
++
++        const bool have3d = STARTWIZARD_PROVIDER_LIBRARY_FILES::Models3dInstalled();
++        m_cb3d = new wxCheckBox( this, wxID_ANY,
++                                 wxString::Format( have3d ? _( "Download the 3D models again (%s download, %s installed)" )
++                                                          : _( "Download the 3D models (%s download, %s installed)" ),
++                                                   formatMB( REPO_3D.downloadMB ),
++                                                   formatMB( REPO_3D.installedMB ) ) );
++        sizer->Add( m_cb3d, 0, wxTOP, FromDIP( 4 ) );
++
++        m_stSpace = new wxStaticText( this, wxID_ANY, wxEmptyString );
++        sizer->AddSpacer( FromDIP( 4 ) );
++        sizer->Add( m_stSpace, 0, wxLEFT, indent );
++
++        m_cbUpdate = new wxCheckBox( this, wxID_ANY,
++                                     wxString::Format( _( "Update the symbol and footprint libraries and "
++                                                          "the templates to the newest %s.x release "
++                                                          "(about %s download)" ),
++                                                       release.BeforeLast( '.' ),
++                                                       formatMB( REPO_SYMBOLS.downloadMB
++                                                                 + REPO_FOOTPRINTS.downloadMB
++                                                                 + REPO_TEMPLATES.downloadMB ) ) );
++        sizer->Add( m_cbUpdate, 0, wxTOP, FromDIP( 14 ) );
++
++        wxStaticText* sourceHint = new wxStaticText(
++                this, wxID_ANY,
++                _( "Downloads come from KiCad's library repositories on GitLab "
++                   "(gitlab.com/kicad/libraries)." ) );
++        sourceHint->Wrap( wrap - indent );
++        sizer->AddSpacer( FromDIP( 4 ) );
++        sizer->Add( sourceHint, 0, wxLEFT, indent );
++
++        m_cbArchives = new wxCheckBox( this, wxID_ANY, _( "Install libraries from archive files" ) );
++        sizer->Add( m_cbArchives, 0, wxTOP, FromDIP( 14 ) );
++
++        wxStaticText* archiveHint = new wxStaticText(
++                this, wxID_ANY,
++                _( "Zip or tar.gz archives of KiCad's library repositories, or of the symbols, "
++                   "footprints, 3dmodels and template folders of a desktop KiCad.  Their libraries "
++                   "are added to the installed ones." ) );
++        archiveHint->Wrap( wrap - indent );
++        sizer->AddSpacer( FromDIP( 4 ) );
++        sizer->Add( archiveHint, 0, wxLEFT, indent );
++
++        wxBoxSizer* chooseSizer = new wxBoxSizer( wxHORIZONTAL );
++        m_btnChoose = new wxButton( this, wxID_ANY, _( "Choose Files..." ) );
++        m_stArchives = new wxStaticText( this, wxID_ANY, _( "No files chosen" ) );
++        chooseSizer->Add( m_btnChoose, 0, wxALIGN_CENTER_VERTICAL );
++        chooseSizer->Add( m_stArchives, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP( 8 ) );
++        sizer->AddSpacer( FromDIP( 6 ) );
++        sizer->Add( chooseSizer, 0, wxEXPAND | wxLEFT, indent );
++
++        wxStaticText* laterHint = new wxStaticText(
++                this, wxID_ANY,
++                _( "With nothing ticked the libraries stay as they are.  This page is also under "
++                   "Preferences > Run Setup Wizard." ) );
++        laterHint->Wrap( wrap );
++        sizer->Add( laterHint, 0, wxTOP, FromDIP( 18 ) );
++
++        SetSizer( sizer );
++
++        for( wxCheckBox* cb : { m_cb3d, m_cbUpdate, m_cbArchives } )
++            cb->Bind( wxEVT_CHECKBOX, [this]( wxCommandEvent& ) { updateEnabled(); } );
++
++        m_btnChoose->Bind( wxEVT_BUTTON, &PANEL_STARTWIZARD_LIBRARY_FILES::onChoose, this );
++
++        GetSizer()->Fit( this );
++        SetSize( GetBestSize() );
++    }
++
++    bool TransferDataToWindow() override
++    {
++        m_cb3d->SetValue( m_model->download3dModels );
++        m_cbUpdate->SetValue( m_model->updateLibraries );
++        m_cbArchives->SetValue( m_model->installArchives );
++        updateArchivesLabel();
++        updateEnabled();
++        return true;
++    }
++
++    bool TransferDataFromWindow() override
++    {
++        m_model->download3dModels = m_cb3d->GetValue();
++        m_model->updateLibraries = m_cbUpdate->GetValue();
++        m_model->installArchives = m_cbArchives->GetValue();
++
++        if( m_model->installArchives && m_model->archives.IsEmpty() )
++        {
++            wxMessageBox( _( "Choose the archive files to install, or untick \"Install libraries "
++                             "from archive files\"." ),
++                          _( "Libraries" ), wxOK | wxICON_INFORMATION, this );
++            return false;
++        }
++
++        return true;
++    }
++
++private:
++    void onChoose( wxCommandEvent& )
++    {
++        wxFileDialog dlg( this, _( "Choose Library Archives" ), wxEmptyString, wxEmptyString,
++                          _( "Library archives (*.zip;*.tar.gz;*.tgz;*.tar)|*.zip;*.tar.gz;*.tgz;*.tar|"
++                             "All files (*.*)|*.*" ),
++                          wxFD_OPEN | wxFD_FILE_MUST_EXIST | wxFD_MULTIPLE );
++
++        if( dlg.ShowModal() != wxID_OK )
++            return;
++
++        dlg.GetPaths( m_model->archives );
++        m_cbArchives->SetValue( !m_model->archives.IsEmpty() );
++        updateArchivesLabel();
++        updateEnabled();
++    }
++
++    void updateArchivesLabel()
++    {
++        wxString label;
++
++        for( const wxString& path : m_model->archives )
++            label << ( label.IsEmpty() ? wxString() : wxString( wxS( ", " ) ) ) << wxFileName( path ).GetFullName();
++
++        m_stArchives->SetLabel( label.IsEmpty() ? _( "No files chosen" ) : label );
++        Layout();
++    }
++
++    void updateEnabled()
++    {
++        m_btnChoose->Enable( m_cbArchives->GetValue() );
++
++        double needed = 0;
++
++        if( m_cb3d->GetValue() )
++            needed += REPO_3D.downloadMB + REPO_3D.installedMB;
++
++        if( m_cbUpdate->GetValue() )
++        {
++            for( const REPO_INFO* repo : { &REPO_SYMBOLS, &REPO_FOOTPRINTS, &REPO_TEMPLATES } )
++                needed += repo->downloadMB + repo->installedMB;
++        }
++
++        const double free = freeSpaceMB();
++        wxString     text;
++
++        if( needed > 0 )
++            text = wxString::Format( _( "Needs about %s while installing" ), formatMB( needed ) );
++
++        if( free >= 0 )
++            text << ( text.IsEmpty() ? wxString() : wxString( wxS( "; " ) ) )
++                 << wxString::Format( _( "%s free" ), formatMB( free ) );
++
++        m_stSpace->SetLabel( text );
++        Layout();
++    }
++
++    std::shared_ptr<STARTWIZARD_PROVIDER_LIBRARY_FILES_MODEL> m_model;
++
++    wxCheckBox*   m_cb3d;
++    wxCheckBox*   m_cbUpdate;
++    wxCheckBox*   m_cbArchives;
++    wxStaticText* m_stSpace;
++    wxButton*     m_btnChoose;
++    wxStaticText* m_stArchives;
++};
++
++
++wxString readText( const wxString& aPath )
++{
++    wxString text;
++
++    if( wxFileName::FileExists( aPath ) )
++        wxFFile( aPath ).ReadAll( &text );
++
++    return text.Trim().Trim( false );
++}
++
++} // namespace
++
++
++STARTWIZARD_PROVIDER_LIBRARY_FILES::STARTWIZARD_PROVIDER_LIBRARY_FILES() :
++        STARTWIZARD_PROVIDER( _( "Library Files" ) )
++{
++}
++
++
++wxString STARTWIZARD_PROVIDER_LIBRARY_FILES::InstalledRelease()
++{
++    wxString release = readText( stockRoot() + wxS( "/" ) + RELEASE_FILE );
++
++    if( release.IsEmpty() )
++        release = readText( stockRoot() + wxS( "/" ) + BUNDLED_STAMP );
++
++    return release.IsEmpty() ? BUNDLED_RELEASE : release;
++}
++
++
++bool STARTWIZARD_PROVIDER_LIBRARY_FILES::Models3dInstalled()
++{
++    wxDir dir( stockRoot() + wxS( "/3dmodels" ) );
++    return dir.IsOpened() && dir.HasSubDirs();
++}
++
++
++bool STARTWIZARD_PROVIDER_LIBRARY_FILES::StockLibrariesInstalled()
++{
++    return wxFileName::FileExists( LIBRARY_MANAGER::StockTablePath( LIBRARY_TABLE_TYPE::SYMBOL ) )
++           || wxFileName::FileExists( LIBRARY_MANAGER::StockTablePath( LIBRARY_TABLE_TYPE::FOOTPRINT ) );
++}
++
++
++bool STARTWIZARD_PROVIDER_LIBRARY_FILES::NeedsUserInput() const
++{
++    return !wxFileName::FileExists( stockRoot() + wxS( "/" ) + PAGE_SHOWN_MARKER );
++}
++
++
++wxPanel* STARTWIZARD_PROVIDER_LIBRARY_FILES::GetWizardPanel( wxWindow* aParent, STARTWIZARD* aWizard )
++{
++    m_model = std::make_shared<STARTWIZARD_PROVIDER_LIBRARY_FILES_MODEL>();
++
++    // Dialogs after the wizard has closed go to the frame it was shown over
++    if( wxWindow* wizard = wxGetTopLevelParent( aParent ) )
++        m_parent = wizard->GetParent();
++
++    return new PANEL_STARTWIZARD_LIBRARY_FILES( m_model, aParent );
++}
++
++
++void STARTWIZARD_PROVIDER_LIBRARY_FILES::ApplyDefaults()
++{
++    // Nothing is downloaded without asking; the page is offered at first start only
++    PATHS::EnsurePathExists( stockRoot() );
++    wxFFileOutputStream( stockRoot() + wxS( "/" ) + PAGE_SHOWN_MARKER ).Close();
++}
++
++
++void STARTWIZARD_PROVIDER_LIBRARY_FILES::Finish()
++{
++    ApplyDefaults();
++
++    if( !m_model || ( !m_model->download3dModels && !m_model->updateLibraries && !m_model->installArchives ) )
++        return;
++
++    const wxString root = stockRoot();
++    const wxString staging = root + wxS( "/.staging" );
++
++    if( m_model->download3dModels || m_model->updateLibraries )
++    {
++        double needed = 0;
++
++        if( m_model->download3dModels )
++            needed += REPO_3D.downloadMB + REPO_3D.installedMB;
++
++        if( m_model->updateLibraries )
++        {
++            for( const REPO_INFO* repo : { &REPO_SYMBOLS, &REPO_FOOTPRINTS, &REPO_TEMPLATES } )
++                needed += repo->downloadMB + repo->installedMB;
++        }
++
++        if( double free = freeSpaceMB(); free >= 0 && free < needed )
++        {
++            if( wxMessageBox( wxString::Format( _( "Installing needs about %s, but only %s is free.  "
++                                                   "Try anyway?" ),
++                                                formatMB( needed ), formatMB( free ) ),
++                              _( "Libraries" ), wxYES_NO | wxICON_WARNING, m_parent ) != wxYES )
++            {
++                return;
++            }
++        }
++    }
++
++    wxFileName cache;
++    cache.AssignDir( PATHS::GetUserCachePath() );
++    cache.AppendDir( wxS( "library-downloads" ) );
++    PATHS::EnsurePathExists( cache.GetPath() );
++
++    const STARTWIZARD_PROVIDER_LIBRARY_FILES_MODEL model = *m_model;
++    const wxString                                 installed = InstalledRelease();
++
++    INSTALL_STATE state;
++    wxString      newRelease;
++    bool          alreadyNewest = false;
++    state.SetStatus( _( "Starting..." ) );
++
++    std::thread worker(
++            [&]()
++            {
++                // Progress: downloads by their size, archives by theirs, in one scale
++                struct DOWNLOAD
++                {
++                    const REPO_INFO* repo;
++                    double           weight;
++                };
++
++                std::vector<DOWNLOAD> downloads;
++                double                total = 0;
++                wxString              release = installed;
++
++                if( model.updateLibraries )
++                {
++                    state.SetStatus( _( "Looking for the newest library release..." ) );
++                    newRelease = latestRelease( installed, state );
++
++                    if( newRelease == installed )
++                    {
++                        alreadyNewest = true;
++                        newRelease.Clear();
++                    }
++                    else if( !newRelease.IsEmpty() )
++                    {
++                        release = newRelease;
++
++                        for( const REPO_INFO* repo : { &REPO_SYMBOLS, &REPO_FOOTPRINTS, &REPO_TEMPLATES } )
++                            downloads.push_back( { repo, repo->downloadMB } );
++                    }
++                }
++
++                if( model.download3dModels )
++                    downloads.push_back( { &REPO_3D, REPO_3D.downloadMB } );
++
++                for( const DOWNLOAD& download : downloads )
++                    total += download.weight;
++
++                double archiveBytes = 0;
++
++                if( model.installArchives )
++                {
++                    for( const wxString& archive : model.archives )
++                        archiveBytes += wxFileName::GetSize( archive ).ToDouble();
++                }
++
++                // Archives count as much as their size in MB
++                total += archiveBytes / 1048576.0;
++                total = std::max( total, 1.0 );
++
++                double done = 0;
++                bool   librariesOk = true;   // symbols, footprints and templates, all or none
++                bool   models3dOk = true;
++
++                if( wxFileName::DirExists( staging ) )
++                    wxFileName::Rmdir( staging, wxPATH_RMDIR_RECURSIVE );
++
++                for( const DOWNLOAD& download : downloads )
++                {
++                    if( state.cancel )
++                        break;
++
++                    const double   span = download.weight / total;
++                    const wxString url = archiveUrl( *download.repo, release );
++                    const wxString file = cache.GetPathWithSep() + wxFileName( url ).GetFullName();
++
++                    bool ok = downloadFile( url, file, download.repo->downloadMB * 1048576.0, done,
++                                            span / 2, state );
++
++                    if( ok )
++                        ok = extractArchive( file, staging, done + span / 2, span / 2, state );
++
++                    wxRemoveFile( file );
++
++                    if( download.repo == &REPO_3D )
++                        models3dOk &= ok;
++                    else
++                        librariesOk &= ok;
++
++                    done += span;
++                    state.fraction = done;
++                }
++
++                // Only a complete set replaces the installed libraries
++                if( !downloads.empty() && !state.cancel )
++                {
++                    if( !librariesOk )
++                    {
++                        newRelease.Clear();
++
++                        for( const wxChar* dir : { wxS( "symbols" ), wxS( "footprints" ), wxS( "template" ),
++                                                   wxS( "blocks" ) } )
++                        {
++                            wxFileName::Rmdir( staging + wxS( "/" ) + dir, wxPATH_RMDIR_RECURSIVE );
++                        }
++                    }
++
++                    if( !models3dOk )
++                        wxFileName::Rmdir( staging + wxS( "/3dmodels" ), wxPATH_RMDIR_RECURSIVE );
++
++                    state.SetStatus( _( "Installing..." ) );
++
++                    if( wxFileName::DirExists( staging ) && !commitStaging( staging, root, state ) )
++                        newRelease.Clear();
++                }
++
++                if( wxFileName::DirExists( staging ) )
++                    wxFileName::Rmdir( staging, wxPATH_RMDIR_RECURSIVE );
++
++                if( model.installArchives )
++                {
++                    for( const wxString& archive : model.archives )
++                    {
++                        if( state.cancel )
++                            break;
++
++                        const double span = wxFileName::GetSize( archive ).ToDouble() / 1048576.0 / total;
++
++                        state.SetStatus( wxString::Format( _( "Installing from %s" ),
++                                                           wxFileName( archive ).GetFullName() ) );
++                        extractArchive( archive, root, done, span, state );
++                        done += span;
++                        state.fraction = done;
++                    }
++                }
++
++                state.done = true;
++            } );
++
++    {
++        wxProgressDialog progress( _( "Installing Libraries" ), state.Status(), 1000, m_parent,
++                                   wxPD_APP_MODAL | wxPD_CAN_ABORT | wxPD_AUTO_HIDE | wxPD_ELAPSED_TIME );
++
++        while( !state.done )
++        {
++            if( !progress.Update( static_cast<int>( std::min( 0.999, state.fraction.load() ) * 1000 ),
++                                  state.Status() ) )
++            {
++                state.cancel = true;
++            }
++
++            wxMilliSleep( 100 );
++        }
++    }
++
++    worker.join();
++
++    if( !newRelease.IsEmpty() && !state.cancel )
++    {
++        wxFFileOutputStream out( root + wxS( "/" ) + RELEASE_FILE );
++        out.Write( newRelease.utf8_str().data(), newRelease.utf8_str().length() );
++    }
++
++    // At first start the global tables don't exist yet: the library tables page, after this
++    // one, creates them
++    if( StockLibrariesInstalled() )
++    {
++        // Must not stop the wizard's later pages from finishing
++        try
++        {
++            addStockLibrariesToGlobalTables();
++        }
++        catch( ... )
++        {
++        }
++    }
++
++    if( state.cancel )
++    {
++        wxMessageBox( _( "Installing the libraries was cancelled.  The installed libraries are "
++                         "unchanged, apart from any archive installed before the cancel." ),
++                      _( "Libraries" ), wxOK | wxICON_INFORMATION, m_parent );
++        return;
++    }
++
++    wxString summary;
++
++    if( alreadyNewest )
++    {
++        summary << wxString::Format( _( "The symbol and footprint libraries are the newest release "
++                                        "(%s) already." ),
++                                     installed )
++                << wxS( "\n" );
++    }
++    else if( !newRelease.IsEmpty() )
++    {
++        summary << wxString::Format( _( "The libraries were updated from %s to %s." ), installed, newRelease )
++                << wxS( "\n" );
++    }
++
++    const std::pair<const char*, wxString> categories[] = {
++        { "symbols", _( "symbol libraries" ) },
++        { "footprints", _( "footprint libraries" ) },
++        { "3dmodels", _( "3D model libraries" ) },
++        { "template", _( "project templates" ) },
++        { "blocks", _( "design block libraries" ) },
++    };
++
++    for( const auto& [key, label] : categories )
++    {
++        auto it = state.libraries.find( wxString::FromUTF8( key ) );
++
++        if( it != state.libraries.end() && !it->second.empty() )
++            summary << wxString::Format( _( "Installed %zu %s." ), it->second.size(), label ) << wxS( "\n" );
++    }
++
++    if( !state.libraries.empty() )
++        summary << wxS( "\n" ) << _( "Editors that are open use them after you close and reopen them." );
++
++    if( !state.errors.IsEmpty() )
++    {
++        wxMessageBox( summary + ( summary.IsEmpty() ? wxString() : wxString( wxS( "\n\n" ) ) )
++                              + _( "Problems:" ) + wxS( "\n" ) + state.errors,
++                      _( "Libraries" ), wxOK | wxICON_WARNING, m_parent );
++    }
++    else if( !summary.IsEmpty() )
++    {
++        wxMessageBox( summary, _( "Libraries" ), wxOK | wxICON_INFORMATION, m_parent );
++    }
++}
+diff --git a/common/startwizard/startwizard_provider_library_files.h b/common/startwizard/startwizard_provider_library_files.h
+new file mode 100644
+index 00000000..9e15c6d6
+--- /dev/null
++++ b/common/startwizard/startwizard_provider_library_files.h
+@@ -0,0 +1,77 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef STARTWIZARD_PROVIDER_LIBRARY_FILES_H
++#define STARTWIZARD_PROVIDER_LIBRARY_FILES_H
++
++#include <memory>
++#include <vector>
++
++#include <wx/arrstr.h>
++#include <startwizard/startwizard_provider.h>
++
++
++struct STARTWIZARD_PROVIDER_LIBRARY_FILES_MODEL
++{
++    bool          download3dModels = false;   ///< The 3D models, which the app does not carry
++    bool          updateLibraries = false;    ///< Symbols, footprints and templates, newest release
++    bool          installArchives = false;
++    wxArrayString archives;
++};
++
++
++/**
++ * Library files on Android.  The app carries the symbol and footprint libraries and the templates
++ * (scripts/build-kicad-apk.sh) but not the 3D models (several GB).  This page downloads the 3D
++ * models from KiCad's library repositories on GitLab, updates the bundled libraries to the newest
++ * release there, or installs libraries from archive files.  Shown once at first start, and
++ * whenever the wizard is run from the menu.
++ */
++class STARTWIZARD_PROVIDER_LIBRARY_FILES : public STARTWIZARD_PROVIDER
++{
++public:
++    STARTWIZARD_PROVIDER_LIBRARY_FILES();
++
++    wxString Name() const override { return wxT( "library_files" ); }
++
++    bool NeedsUserInput() const override;
++
++    bool OfferOnRerun() const override { return true; }
++
++    wxPanel* GetWizardPanel( wxWindow* aParent, STARTWIZARD* aWizard ) override;
++
++    void Finish() override;
++
++    void ApplyDefaults() override;
++
++    /// The release of the installed libraries: the bundled one, or the one last downloaded
++    static wxString InstalledRelease();
++
++    /// True when the stock 3D model libraries are installed
++    static bool Models3dInstalled();
++
++    /// True when the stock symbol or footprint library table is present
++    static bool StockLibrariesInstalled();
++
++private:
++    std::shared_ptr<STARTWIZARD_PROVIDER_LIBRARY_FILES_MODEL> m_model;
++    wxWindow*                                                  m_parent = nullptr;
++};
++
++#endif // STARTWIZARD_PROVIDER_LIBRARY_FILES_H
+diff --git a/common/startwizard/startwizard_provider_privacy.cpp b/common/startwizard/startwizard_provider_privacy.cpp
+index eb770877..5d6b5a0f 100644
+--- a/common/startwizard/startwizard_provider_privacy.cpp
++++ b/common/startwizard/startwizard_provider_privacy.cpp
+@@ -19,6 +19,7 @@
+  */
+ 
+ #include <app_monitor.h>
++#include <startwizard/startwizard.h>
+ #include <pgm_base.h>
+ #include <settings/common_settings.h>
+ #include <settings/kicad_settings.h>
+@@ -92,6 +93,18 @@ bool STARTWIZARD_PROVIDER_PRIVACY::NeedsUserInput() const
+ wxPanel* STARTWIZARD_PROVIDER_PRIVACY::GetWizardPanel( wxWindow* aParent, STARTWIZARD* aWizard )
+ {
+     m_model = std::make_shared<STARTWIZARD_PROVIDER_PRIVACY_MODEL>();
++
++    // Run again from the menu: start from the current choices, not the first-start defaults
++    if( aWizard && aWizard->IsRerun() && !NeedsUserInput() )
++    {
++        KICAD_SETTINGS* settings = Pgm().GetSettingsManager().GetAppSettings<KICAD_SETTINGS>( "kicad" );
++
++        m_model->m_autoUpdateKiCad = settings->m_KiCadUpdateCheck;
++        m_model->m_autoUpdatePCM = settings->m_PcmUpdateCheck;
++        m_model->m_enableApi = Pgm().GetCommonSettings()->m_Api.enable_server;
++        m_model->m_enableSentry = APP_MONITOR::SENTRY::Instance()->IsOptedIn();
++    }
++
+     return new PANEL_STARTWIZARD_PRIVACY( m_model, aParent );
+ }
+ 
+diff --git a/common/startwizard/startwizard_provider_privacy.h b/common/startwizard/startwizard_provider_privacy.h
+index 732ffc2f..e201683e 100644
+--- a/common/startwizard/startwizard_provider_privacy.h
++++ b/common/startwizard/startwizard_provider_privacy.h
+@@ -43,6 +43,8 @@ public:
+ 
+     bool NeedsUserInput() const override;
+ 
++    bool OfferOnRerun() const override { return true; }
++
+     wxPanel* GetWizardPanel( wxWindow* aParent, STARTWIZARD* aWizard ) override;
+ 
+     void Finish() override;
+diff --git a/include/startwizard/startwizard.h b/include/startwizard/startwizard.h
+index 8ca89617..db374552 100644
+--- a/include/startwizard/startwizard.h
++++ b/include/startwizard/startwizard.h
+@@ -37,12 +37,23 @@ public:
+     STARTWIZARD( const STARTWIZARD& ) = delete;
+     STARTWIZARD& operator=( const STARTWIZARD& ) = delete;
+ 
+-    void CheckAndRun( wxWindow* parent );
++    /**
++     * Run the wizard if any page needs the user's input (first start, or settings missing).
++     *
++     * @param aRerun run it at the user's request (Preferences > Run Setup Wizard): also show the
++     *               pages that can usefully be run again, and say so when there are none
++     */
++    void CheckAndRun( wxWindow* parent, bool aRerun = false );
++
++    /// True while CheckAndRun( ..., true ) is running, for providers that fill their page from
++    /// the current settings in that case
++    bool IsRerun() const { return m_rerun; }
+ 
+     STARTWIZARD_PROVIDER* GetProvider( const wxString& aName );
+ 
+ private:
+     wxWizard* m_wizard;
++    bool      m_rerun = false;
+     std::vector<std::unique_ptr<STARTWIZARD_PROVIDER>> m_providers;
+ };
+ 
+diff --git a/include/startwizard/startwizard_provider.h b/include/startwizard/startwizard_provider.h
+index 008a46d1..6e87c1e3 100644
+--- a/include/startwizard/startwizard_provider.h
++++ b/include/startwizard/startwizard_provider.h
+@@ -42,6 +42,10 @@ public:
+ 
+     virtual bool NeedsUserInput() const { return false; }
+ 
++    /// Whether the page is offered again when the user runs the wizard from the menu, after it
++    /// has done its first-start job
++    virtual bool OfferOnRerun() const { return false; }
++
+     virtual wxPanel* GetWizardPanel( wxWindow* aParent, STARTWIZARD* aWizard ) { return nullptr; }
+ 
+     const wxString& GetPageName() const { return m_pageName; }
+diff --git a/kicad/menubar.cpp b/kicad/menubar.cpp
+index 7ab92083..bd8f9031 100644
+--- a/kicad/menubar.cpp
++++ b/kicad/menubar.cpp
+@@ -274,6 +274,7 @@ void KICAD_MANAGER_FRAME::doReCreateMenuBar()
+     prefsMenu->Add( ACTIONS::showFootprintLibTable );
+     prefsMenu->Add( ACTIONS::showDesignBlockLibTable );
+     prefsMenu->Add( ACTIONS::openPreferences );
++    prefsMenu->Add( KICAD_MANAGER_ACTIONS::runSetupWizard );
+ 
+     prefsMenu->AppendSeparator();
+     AddMenuLanguageList( prefsMenu, controlTool );
+diff --git a/kicad/tools/kicad_manager_actions.cpp b/kicad/tools/kicad_manager_actions.cpp
+index 1b9e1558..e2d969b8 100644
+--- a/kicad/tools/kicad_manager_actions.cpp
++++ b/kicad/tools/kicad_manager_actions.cpp
+@@ -174,6 +174,14 @@ TOOL_ACTION KICAD_MANAGER_ACTIONS::showPluginManager( TOOL_ACTION_ARGS()
+         .Tooltip( _( "Run Plugin and Content Manager" ) )
+         .Icon( BITMAPS::icon_pcm_24 ) );
+ 
++TOOL_ACTION KICAD_MANAGER_ACTIONS::runSetupWizard( TOOL_ACTION_ARGS()
++        .Name( "kicad.Control.runSetupWizard" )
++        .Scope( AS_GLOBAL )
++        .FriendlyName( _( "Run Setup Wizard..." ) )
++        .Tooltip( _( "Run the setup wizard that KiCad shows at first start: library files, "
++                     "updates and privacy" ) )
++        .Icon( BITMAPS::preference ) );
++
+ TOOL_ACTION KICAD_MANAGER_ACTIONS::openTextEditor( TOOL_ACTION_ARGS()
+         .Name( "kicad.Control.openTextEditor" )
+         .Scope( AS_GLOBAL )
+diff --git a/kicad/tools/kicad_manager_actions.h b/kicad/tools/kicad_manager_actions.h
+index 51e6f40f..4d11ea1d 100644
+--- a/kicad/tools/kicad_manager_actions.h
++++ b/kicad/tools/kicad_manager_actions.h
+@@ -47,6 +47,7 @@ public:
+     static TOOL_ACTION editDrawingSheet;
+     static TOOL_ACTION openTextEditor;
+     static TOOL_ACTION showPluginManager;
++    static TOOL_ACTION runSetupWizard;
+ 
+     static TOOL_ACTION editOtherSch;
+     static TOOL_ACTION editOtherPCB;
+diff --git a/kicad/tools/kicad_manager_control.cpp b/kicad/tools/kicad_manager_control.cpp
+index 28c6c15a..8a2bafd9 100644
+--- a/kicad/tools/kicad_manager_control.cpp
++++ b/kicad/tools/kicad_manager_control.cpp
+@@ -55,6 +55,7 @@
+ #include <tool/common_control.h>
+ #include <tools/kicad_manager_actions.h>
+ #include <tools/kicad_manager_control.h>
++#include <startwizard/startwizard.h>
+ #include <dialogs/panel_design_block_lib_table.h>
+ #include <dialogs/dialog_downgrade_report.h>
+ #include <dialogs/dialog_export_older_version.h>
+@@ -1258,6 +1259,14 @@ int KICAD_MANAGER_CONTROL::Execute( const TOOL_EVENT& aEvent )
+ }
+ 
+ 
++int KICAD_MANAGER_CONTROL::RunSetupWizard( const TOOL_EVENT& aEvent )
++{
++    STARTWIZARD wizard;
++    wizard.CheckAndRun( m_frame, true );
++    return 0;
++}
++
++
+ int KICAD_MANAGER_CONTROL::ShowPluginManager( const TOOL_EVENT& aEvent )
+ {
+     if( KIPLATFORM::POLICY::GetPolicyBool( POLICY_KEY_PCM ) == KIPLATFORM::POLICY::PBOOL::DISABLED )
+@@ -1356,4 +1365,5 @@ void KICAD_MANAGER_CONTROL::setTransitions()
+     Go( &KICAD_MANAGER_CONTROL::Execute,            KICAD_MANAGER_ACTIONS::editOtherPCB.MakeEvent() );
+ 
+     Go( &KICAD_MANAGER_CONTROL::ShowPluginManager,  KICAD_MANAGER_ACTIONS::showPluginManager.MakeEvent() );
++    Go( &KICAD_MANAGER_CONTROL::RunSetupWizard,     KICAD_MANAGER_ACTIONS::runSetupWizard.MakeEvent() );
+ }
+diff --git a/kicad/tools/kicad_manager_control.h b/kicad/tools/kicad_manager_control.h
+index ac492cde..844e4107 100644
+--- a/kicad/tools/kicad_manager_control.h
++++ b/kicad/tools/kicad_manager_control.h
+@@ -75,6 +75,7 @@ public:
+ 
+     int ShowDesignBlockLibTable( const TOOL_EVENT& aEvent );
+     int ShowPluginManager( const TOOL_EVENT& aEvent );
++    int RunSetupWizard( const TOOL_EVENT& aEvent );
+ 
+     /// Set up handlers for various events.
+     void setTransitions() override;
+-- 
+2.54.0 (Apple Git-157)
+

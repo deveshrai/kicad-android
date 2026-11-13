@@ -55,7 +55,9 @@ find "$OUT/assets/kicad-data/kicad" -type f -exec mv {} {}.kad \;
 date +%s > "$OUT/assets/kicad-data/VERSION"
 
 # Official symbol/footprint/template libraries, as their own asset tree with a fixed version so
-# app updates do not re-extract them (KICAD_BUNDLE_LIBS=0 to leave them out)
+# app updates do not re-extract them (KICAD_BUNDLE_LIBS=0 to leave them out).  The 3D models are
+# not bundled; the setup wizard's Library Files page downloads them, and can update these
+# libraries to a newer release (common/startwizard/startwizard_provider_library_files.cpp).
 if [ "${KICAD_BUNDLE_LIBS:-1}" != 0 ]; then
     LIBS_SRC="$("$KA_ROOT/scripts/fetch-kicad-libs.sh" | tail -1)"
     mkdir -p "$OUT/assets/kicad-libs"

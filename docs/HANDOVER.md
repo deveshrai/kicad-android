@@ -203,6 +203,44 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Library Files page and Run Setup Wizard (10.99aq, 2026-11-13)
+The user's request: 3D models as an option, and an update option for the bundled libraries (they
+first asked to drop the bundled libraries, then kept them once that saved only 65 MB of 437).
+KiCad patch 0044.  Checked on the emulator (fresh data) and on the tablet (page shown).
+- **Bundling:** unchanged; `KICAD_BUNDLE_LIBS=0` still leaves the libraries out.  The 3D models are
+  not bundled.
+- **`STARTWIZARD_PROVIDER_LIBRARY_FILES`** (`common/startwizard/`, Android only, before the
+  library tables page):
+  - Shown once: `NeedsUserInput()` until `<stock>/.library-files-page-shown` exists (written by
+    Finish/ApplyDefaults); `OfferOnRerun()` true.
+  - Options: download the 3D models; update to the newest release of the installed series (GitLab
+    tags API on kicad-symbols, `^10.` -> highest x.y.z; same release as installed = "already
+    newest", no download); install archives.
+  - Release shown: `<stock>/.libraries-release` (after an update), else the bundled stamp
+    `.libs-extracted`, else 10.0.8.
+  - Downloads: `KICAD_CURL_EASY` to `<user cache>/library-downloads`, then unpacked into
+    `<stock>/.staging`; `commitStaging()` swaps symbols/, footprints/, 3dmodels/, blocks/ whole
+    (old one renamed, restored on failure) and merges template/.  Library set and 3D models are
+    committed independently.  Archives the user picks are merged straight into the stock folder.
+  - `mapEntry()` sorts archive entries by content; a `sym-lib-table`/`fp-lib-table` is taken only
+    if it points at `${KICAD*_SYMBOL_DIR}`/`_FOOTPRINT_DIR}` (not a project's own table).
+    Zip, tar and tar.gz by magic bytes (wxZipInputStream, wxZlibInputStream + wxTarInputStream).
+  - Progress: worker thread, wxProgressDialog polled from the main thread, Cancel honoured.
+  - Afterwards: a chained "KiCad" row is added to existing global tables that lack one.  It must
+    not throw: an earlier `LoadGlobalTables()` call before the tables existed stopped the later
+    pages' Finish, so the global tables were never created and the wizard came back.
+  - Measured: 3D 663 MB download, 3231 MB installed, about 1 minute on the emulator's network;
+    10.0.8 is the newest 10.0 release (2026-11-13).
+- **Preferences > Run Setup Wizard** (`KICAD_MANAGER_ACTIONS::runSetupWizard`):
+  `STARTWIZARD::CheckAndRun( frame, true )` shows pages that need input or `OfferOnRerun()`
+  (Library Files; Updates & Privacy, filled from the current settings); Cancel changes nothing;
+  the welcome text says so.
+- **HTTPS on Android:** OpenSSL can't use `/system/etc/security/cacerts` as CAPATH (files are named
+  by the old MD5 subject hash), so `KICAD_CURL_EASY` passes the concatenated system certificates
+  as `CURLOPT_CAINFO_BLOB`.  This also fixes every other curl use (PCM, update checks).
+- **Library tables page:** its intro wrapped to the panel's width, which is wider than the page,
+  so lines were cut off; on Android it wraps at 600 DIP.  Not re-checked on a fresh install.
+
 ## P11: raytracing, STEP export, dialogs above the taskbar (10.99ap, 2026-11-13)
 KiCad patch 0043, wx patch 0034, qtbase patch 0006.  Checked on the tablet.
 - **Raytracing crashed** (SIGSEGV in gl4es `glDrawPixels`, `raster.c:596`): the raytracer

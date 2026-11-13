@@ -1,7 +1,7 @@
 From e79f283857a2f618d73863e864551fe910d0bdde Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Mon, 9 Nov 2026 13:31:52 +0530
-Subject: [PATCH 35/43] Android: give each GL context its own gl4es instance
+Subject: [PATCH 35/44] Android: give each GL context its own gl4es instance
 
 gl4es (desktop GL over GLES) keeps its GL state in globals and, with contexts made outside
 it (wxQt's QOpenGLWidget), cannot tell them apart.  The 3D viewer opened a second time got a

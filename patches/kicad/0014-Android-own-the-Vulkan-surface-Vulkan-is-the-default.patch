@@ -1,7 +1,7 @@
 From 33bbbda04b4229c029b3e47ff2549c2b69250abe Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sun, 1 Nov 2026 15:30:20 +0530
-Subject: [PATCH 14/43] Android: own the Vulkan surface; Vulkan is the default
+Subject: [PATCH 14/44] Android: own the Vulkan surface; Vulkan is the default
  canvas again
 
 Qt destroyed its VkSurfaceKHR from the Android UI thread whenever a

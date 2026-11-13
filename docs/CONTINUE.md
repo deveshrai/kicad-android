@@ -8,7 +8,7 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 - **Builds:**
   - Kill the emulator before any build (`adb -e emu kill`).
   - Boot it yourself afterwards with `scripts/emulator.sh`.
-  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99ap; next: aq).
+  - Bump the build letter with `scripts/bump-build.sh` (current: 10.99aq; next: ar).
 - **Devices:** ask the user to save before any `adb install` on a physical device.
   - The Fold: `RZGL62ZE1AZ`, screenshots with `scripts/fold-shot.sh`.
   - The tablet: `R5GL8486SDD`.
@@ -74,8 +74,8 @@ You are picking up the KiCad-on-Android port in this repository.  Read `docs/HAN
 7. **Later:**
    - touch gestures in the 3D viewer
    - long-press as right click
-   - downloading 3D models on demand (now more pressing: Configure Paths is broken, and the
-     ESP32-S3 board needed its models copied in by hand plus a project text variable)
+   - 3D models are downloadable since 10.99aq (setup wizard > Library Files); Configure Paths is
+     still broken
 
 Start by giving the user a short status summary and asking which item to take, unless they have
 already said.

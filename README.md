@@ -247,15 +247,17 @@ A keyboard and mouse are recommended: a Googlebook's own, a Bluetooth or USB key
 Samsung DeX.
 
 <details>
-<summary><b>3D models</b> (not bundled, the full set is several GB)</summary>
+<summary><b>Libraries and 3D models</b></summary>
+
+The symbol and footprint libraries and the project templates come with the app.  The 3D models
+don't (663 MB to download, 3.2 GB installed): the setup wizard's **Library Files** page, shown once
+at first start and any time from **Preferences > Run Setup Wizard**, offers to:
+- download the 3D models from [KiCad's library repositories](https://gitlab.com/kicad/libraries);
+- update the symbol and footprint libraries and templates to the newest release there;
+- install libraries from zip or tar.gz archives: KiCad's repository archives, or the symbols,
+  footprints, 3dmodels and template folders of a desktop KiCad.
 
 Parts imported with **Import Library Package** bring their own 3D models.
-
-For KiCad's own footprints:
-1. Download the `.3dshapes` folders you need from [kicad-packages3D](https://gitlab.com/kicad/libraries/kicad-packages3D) into the project, for example `<project>/3dmodels`.
-2. Set a project text variable named `KICAD10_3DMODEL_DIR` to `${KIPRJMOD}/3dmodels`. Use the schematic editor's **File > Schematic Setup > Project > Text Variables**, or the MCP server's `SetTextVariables`.
-
-Preferences > Configure Paths can't be edited on Android yet.
 
 </details>
 
