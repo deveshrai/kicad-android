@@ -1,8 +1,8 @@
 From 6f907fcc9458ff161406a0d91044c5bd9f231df8 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Sat, 14 Nov 2026 01:57:32 +0530
-Subject: [PATCH] android: clipboard URIs as strings; a 3 dp dialog border to
- resize by
+Subject: [PATCH 7/8] android: clipboard URIs as strings; a 3 dp dialog border
+ to resize by
 
 QAndroidPlatformClipboard passed a URL to QtClipboardManager.setClipboardUri()
 as a QByteArray, which goes to Java as byte[], so the call failed with

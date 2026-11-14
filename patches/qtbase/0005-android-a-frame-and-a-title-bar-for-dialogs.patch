@@ -1,7 +1,7 @@
 From e52f580fe97fb3262696fc8b03487a86a4eab2f4 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 13 Nov 2026 15:20:04 +0530
-Subject: [PATCH] android: a frame and a title bar for dialogs
+Subject: [PATCH 5/8] android: a frame and a title bar for dialogs
 
 There is no window manager for the windows inside an Android activity,
 so a dialog was drawn as a bare rectangle: no frame, no title, and no

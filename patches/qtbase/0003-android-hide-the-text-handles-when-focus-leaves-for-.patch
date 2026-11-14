@@ -1,7 +1,7 @@
 From 686e27b6f300d5da9e8b7c20a16de56f461741a3 Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 5 Nov 2026 20:31:00 +0530
-Subject: [PATCH 3/3] android: hide the text handles when focus leaves for no
+Subject: [PATCH 3/8] android: hide the text handles when focus leaves for no
  focus object
 
 updateSelectionHandles() returned early, leaving the cursor/selection

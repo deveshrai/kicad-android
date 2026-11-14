@@ -1,0 +1,58 @@
+From 6ebb43fa736c3eb695ac2ea4f6ca6189cc4f246e Mon Sep 17 00:00:00 2001
+From: Devesh Rai <devesh.rai@gmail.com>
+Date: Sat, 14 Nov 2026 12:48:17 +0530
+Subject: [PATCH 8/8] android: let the document picker take files by the type
+ Android gives them
+
+Document providers type a file by Android's MimeTypeMap, which differs from
+Qt's MIME database: a .dxf is image/vnd.dxf to Qt but application/octet-stream
+to Android, so the picker greyed out the file the filter asked for. Add the
+type Android reports for each filter extension, or application/octet-stream
+when Android does not know the extension.
+
+Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../qandroidplatformfiledialoghelper.cpp      | 24 ++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/plugins/platforms/android/qandroidplatformfiledialoghelper.cpp b/src/plugins/platforms/android/qandroidplatformfiledialoghelper.cpp
+index 4a14ca99..232233e3 100644
+--- a/src/plugins/platforms/android/qandroidplatformfiledialoghelper.cpp
++++ b/src/plugins/platforms/android/qandroidplatformfiledialoghelper.cpp
+@@ -152,10 +152,32 @@ void QAndroidPlatformFileDialogHelper::setMimeTypes()
+         QMimeDatabase db;
+         for (auto filter : nameFilters) {
+             if (!filter.isEmpty()) {
+-                for (const QString &filter : nameFilterExtensions(filter))
++                for (const QString &filter : nameFilterExtensions(filter)) {
+                     mimeTypes.append(db.mimeTypeForFile(filter, QMimeDatabase::MatchExtension).name());
++
++                    // Document providers type a file by Android's own table, which differs from
++                    // Qt's (a .dxf is image/vnd.dxf to Qt, application/octet-stream to Android), so
++                    // the picker would grey the file out.  Allow the type Android gives it too.
++                    const qsizetype dot = filter.lastIndexOf(u'.');
++                    const QString ext = dot >= 0 ? filter.mid(dot + 1).toLower() : QString();
++                    if (ext.isEmpty() || ext.contains(u'*') || ext.contains(u'?'))
++                        continue;
++
++                    const QJniObject map = QJniObject::callStaticObjectMethod(
++                            "android/webkit/MimeTypeMap", "getSingleton",
++                            "()Landroid/webkit/MimeTypeMap;");
++                    const QJniObject androidType = map.isValid()
++                            ? map.callObjectMethod("getMimeTypeFromExtension",
++                                                   "(Ljava/lang/String;)Ljava/lang/String;",
++                                                   QJniObject::fromString(ext).object<jstring>())
++                            : QJniObject();
++                    mimeTypes.append(androidType.isValid() ? androidType.toString()
++                                                           : "application/octet-stream"_L1);
++                }
+             }
+         }
++
++        mimeTypes.removeDuplicates();
+     }
+ 
+     const QString initialType = mimeTypes.size() == 1 ? mimeTypes.at(0) : "*/*"_L1;
+-- 
+2.54.0 (Apple Git-157)
+

@@ -203,6 +203,25 @@ Another Claude Code session working on the user's RP2350A schematic over MCP wro
   - The footprint properties 3D preview gets its own instance the same way; untested.
 - **Memory note:** with the ESP32-S3 board and the 3D viewer, the app's PSS is about 4.6 GB: 2.7 GB "Unknown" (mimalloc arenas), 1.25 GB GL mtrack and 0.39 GB EGL. It stays flat across viewer opens. Worth a look in the UI/perf sweep.
 
+## Files greyed out in the document picker (10.99at, 2026-11-14)
+qtbase 0008.  The user exported a board outline from SolidCraft as `Sketch1.dxf` (SD card,
+`/storage/6437-3135/Documents/Projects/...`) and could not import it with Import Graphics.
+- Qt's `QAndroidPlatformFileDialogHelper::setMimeTypes()` turns each filter extension into a type
+  from Qt's MIME database (`*.dxf` -> `image/vnd.dxf`) and passes them as `EXTRA_MIME_TYPES`.
+  Android's providers type files by `MimeTypeMap`, which doesn't know `.dxf`, so MediaStore and
+  the external storage provider report `application/octet-stream` and the picker greyed it out.
+  (`adb shell content query --uri content://media/external/file --projection _data:mime_type`
+  shows the type Android gives a file.)
+- Each filter extension now also adds the type `MimeTypeMap.getMimeTypeFromExtension()` gives it,
+  or `application/octet-stream` when it gives none.  Files with KiCad's own extensions were
+  already `octet-stream` on both sides, so those always worked; the same mismatch could hit other
+  import formats (Gerber, STEP, SVG variants).  Side effect: a filter that lets octet-stream in
+  also shows other untyped files (lock files, for example) as selectable.
+- Checked on the emulator with the user's DXF: before, the file was `octet-stream` there too;
+  after, the picker took it, the dialog read it as 95 x 60 mm, and the import placed a group of
+  12 items (8 lines, 4 arcs).  The SD card path mapping (wx 0023, `/storage/<uuid>/...`) was
+  already in place.
+
 ## Grid dots at a fractional display scale (10.99as, 2026-11-14)
 KiCad 0046.  The user saw uneven grid dots on the tablet (gaps, doubled dots, moiré zoomed out).
 - The tablet runs at density 280 (scale 1.75), so `GAL::m_gridLineWidth` = 1.75 * 1 + 0.25 = 2

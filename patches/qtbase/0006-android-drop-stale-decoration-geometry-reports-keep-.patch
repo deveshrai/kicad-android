@@ -1,7 +1,7 @@
 From 9e37ac5f39bc50dd036750fca5fc2fdb5f03c03b Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Fri, 13 Nov 2026 20:06:31 +0530
-Subject: [PATCH] android: drop stale decoration geometry reports; keep the
+Subject: [PATCH 6/8] android: drop stale decoration geometry reports; keep the
  minimum size
 
 QtWindow reports a geometry back to Qt after it moves a decorated window

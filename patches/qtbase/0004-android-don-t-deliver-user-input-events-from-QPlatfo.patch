@@ -1,7 +1,7 @@
 From 43c6402c3b2d64220d6db82a6c815acdd6a05afd Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 12 Nov 2026 21:46:11 +0530
-Subject: [PATCH] android: don't deliver user input events from
+Subject: [PATCH 4/8] android: don't deliver user input events from
  QPlatformWindow::setVisible()
 
 QAndroidPlatformWindow::setVisible() ended with the default

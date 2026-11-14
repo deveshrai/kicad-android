@@ -47,7 +47,9 @@ does run on Qt for Android, but it is the least-used wx port, so most of the wor
     reports them as the window's frame margins (qtbase 0005), and the replacement `QtWindow`
     class in `android/qt-patches` draws them
 - **Android integration:**
-  - the system document picker, with files returned as paths (0011, 0023)
+  - the system document picker, with files returned as paths (0011, 0023); it also accepts
+    the type Android gives each extension, so a file Android can't type, such as a .dxf, isn't
+    greyed out (qtbase 0008)
   - opening files in other apps through a FileProvider (0018)
   - the default browser (0020)
   - hiding the soft keyboard when focus leaves a text field (0014)

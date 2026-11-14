@@ -1,7 +1,7 @@
 From 56f52079e2536120d67cbafe2b21ad1bb7d8517d Mon Sep 17 00:00:00 2001
 From: Devesh Rai <devesh.rai@gmail.com>
 Date: Thu, 5 Nov 2026 00:49:50 +0530
-Subject: [PATCH 2/3] android: backing store that hands its pixels to the
+Subject: [PATCH 2/8] android: backing store that hands its pixels to the
  compositor as a graphics buffer
 
 With the stock QRhiBackingStore the compositor uploads from a shared copy of the
